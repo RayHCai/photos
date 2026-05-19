@@ -39,7 +39,7 @@ export function SearchResults({
                         className="relative aspect-square cursor-pointer overflow-hidden bg-stone-100 group"
                         onClick={() => onItemClick(item.id)}
                     >
-                        {item.thumbnailUrl ? (
+                        {item.thumbnailKey ? (
                             <img
                                 src={thumbnailUrl(item.id)}
                                 alt=""
