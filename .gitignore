@@ -3,16 +3,24 @@ dist/
 build/
 .next/
 .env
+.env.local
 *.log
 .DS_Store
 Thumbs.db
 coverage/
 .turbo/
 
+# TypeScript build info
+*.tsbuildinfo
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
 # Terraform
 .terraform/
 *.tfstate
 *.tfstate.backup
 *.tfplan
-
-venv/

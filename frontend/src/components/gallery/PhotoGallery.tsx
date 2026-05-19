@@ -70,7 +70,8 @@ export function PhotoGallery({
             if (!selection.isSelecting) selection.startSelecting();
             if (e.shiftKey) {
                 selection.addRange(id, orderedIds);
-            } else {
+            }
+            else {
                 selection.toggle(id);
             }
         },

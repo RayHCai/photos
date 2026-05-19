@@ -58,7 +58,8 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
             setAddedTo(collectionId);
             toast.success(`Added to ${collectionName}`);
             setTimeout(() => onClose(), 600);
-        } catch {
+        }
+        catch {
             toast.error('Failed to add items');
         }
     };
@@ -71,7 +72,8 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
             toast.success(`Created "${newName.trim()}" with ${mediaItemIds.length} item${mediaItemIds.length !== 1 ? 's' : ''}`);
             onClose();
             router.push(`/collections/${collection.id}`);
-        } catch {
+        }
+        catch {
             toast.error('Failed to create collection');
         }
     };

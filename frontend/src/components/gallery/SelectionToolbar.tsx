@@ -43,7 +43,8 @@ export function SelectionToolbar({
         try {
             await onDelete(Array.from(selection.selectedIds));
             selection.clearSelection();
-        } finally {
+        }
+        finally {
             setIsDeleting(false);
             setDeleteOpen(false);
         }
