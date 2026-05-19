@@ -24,6 +24,16 @@ router.get(
 router.get('/:id', mediaController.getById);
 
 router.post(
+    '/upload/check-duplicates',
+    validate({
+        body: z.object({
+            fileNames: z.array(z.string().min(1)).min(1),
+        }),
+    }),
+    mediaController.checkDuplicates
+);
+
+router.post(
     '/upload/presign',
     validate({
         body: z.object({

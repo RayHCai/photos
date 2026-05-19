@@ -279,6 +279,14 @@ export async function getOriginalUrl(id: string) {
     return s3Service.getPresignedDownloadUrl(item.originalKey);
 }
 
+export async function checkDuplicateFileNames(fileNames: string[]) {
+    const existing = await prisma.mediaItem.findMany({
+        where: { fileName: { in: fileNames } },
+        select: { id: true, fileName: true, thumbnailKey: true },
+    });
+    return existing;
+}
+
 export async function retryAllFailed() {
     const failedItems = await prisma.mediaItem.findMany({
         where: { processingStatus: 'FAILED' },

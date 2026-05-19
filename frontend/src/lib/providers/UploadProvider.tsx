@@ -8,7 +8,7 @@ import {
     type ReactNode,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { uploadFile } from '../api/upload';
+import { uploadFile, checkDuplicates } from '../api/upload';
 import { addItems } from '../api/collections';
 
 export interface UploadItem {
@@ -19,9 +19,17 @@ export interface UploadItem {
     error?: string;
 }
 
+export interface PendingDuplicate {
+    file: File;
+    collectionId?: string;
+    existingId: string;
+    existingThumbnailKey: string | null;
+}
+
 interface UploadState {
     items: UploadItem[];
     isOpen: boolean;
+    pendingDuplicates: PendingDuplicate[];
 }
 
 type UploadAction =
@@ -32,7 +40,9 @@ type UploadAction =
     | { type: 'SET_FAILED'; id: string; error: string }
     | { type: 'REMOVE'; id: string }
     | { type: 'CLEAR_COMPLETED' }
-    | { type: 'TOGGLE_PANEL' };
+    | { type: 'TOGGLE_PANEL' }
+    | { type: 'SET_PENDING_DUPLICATES'; duplicates: PendingDuplicate[] }
+    | { type: 'CLEAR_PENDING_DUPLICATES' };
 
 function uploadReducer(state: UploadState, action: UploadAction): UploadState {
     switch (action.type) {
@@ -94,15 +104,41 @@ function uploadReducer(state: UploadState, action: UploadAction): UploadState {
         };
     case 'TOGGLE_PANEL':
         return { ...state, isOpen: !state.isOpen };
+    case 'SET_PENDING_DUPLICATES':
+        return { ...state, pendingDuplicates: action.duplicates };
+    case 'CLEAR_PENDING_DUPLICATES':
+        return { ...state, pendingDuplicates: [] };
     default:
         return state;
     }
 }
 
-interface UploadContextValue {
+function getNextFileName(originalName: string, existingNames: string[]): string {
+    const dotIdx = originalName.lastIndexOf('.');
+    const stem = dotIdx > 0 ? originalName.slice(0, dotIdx) : originalName;
+    const ext = dotIdx > 0 ? originalName.slice(dotIdx) : '';
+
+    const escaped = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const extEscaped = ext.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`^${escaped} \\((\\d+)\\)${extEscaped}$`);
+
+    let maxN = 0;
+    for (const name of existingNames) {
+        const match = name.match(pattern);
+        if (match) {
+            maxN = Math.max(maxN, parseInt(match[1], 10));
+        }
+    }
+
+    return `${stem} (${maxN + 1})${ext}`;
+}
+
+export interface UploadContextValue {
     items: UploadItem[];
     isOpen: boolean;
+    pendingDuplicates: PendingDuplicate[];
     addFiles: (files: FileList | File[], options?: { collectionId?: string }) => void;
+    resolveDuplicates: (decisions: Map<string, 'skip' | 'keep_both'>) => void;
     removeItem: (id: string) => void;
     clearCompleted: () => void;
     togglePanel: () => void;
@@ -114,11 +150,14 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     const [state, dispatch] = useReducer(uploadReducer, {
         items: [],
         isOpen: false,
+        pendingDuplicates: [],
     });
 
     const queryClient = useQueryClient();
     const processingRef = useRef(false);
-    const queueRef = useRef<Array<{ id: string; file: File; collectionId?: string }>>([]);
+    const queueRef = useRef<Array<{ id: string; file: File; collectionId?: string; fileName?: string }>>([]);
+    const heldFilesRef = useRef<Array<{ file: File; collectionId?: string }>>([]);
+    const duplicateNamesRef = useRef<string[]>([]);
 
     const processQueue = useCallback(async () => {
         if (processingRef.current) return;
@@ -129,9 +168,13 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             dispatch({ type: 'SET_UPLOADING', id: item.id });
 
             try {
-                const mediaItemId = await uploadFile(item.file, (progress) => {
-                    dispatch({ type: 'SET_PROGRESS', id: item.id, progress });
-                });
+                const mediaItemId = await uploadFile(
+                    item.file,
+                    (progress) => {
+                        dispatch({ type: 'SET_PROGRESS', id: item.id, progress });
+                    },
+                    item.fileName
+                );
                 if (item.collectionId) {
                     await addItems(item.collectionId, [mediaItemId]);
                     queryClient.invalidateQueries({ queryKey: ['collections', item.collectionId] });
@@ -151,20 +194,20 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         processingRef.current = false;
     }, [queryClient]);
 
-    const addFiles = useCallback(
-        (files: FileList | File[], options?: { collectionId?: string }) => {
-            const fileArray = Array.from(files);
-            const entries = fileArray.map((file) => ({
+    const enqueueFiles = useCallback(
+        (files: Array<{ file: File; collectionId?: string; fileName?: string }>) => {
+            const entries = files.map((f) => ({
                 id: crypto.randomUUID(),
-                file,
-                collectionId: options?.collectionId,
+                file: f.file,
+                collectionId: f.collectionId,
+                fileName: f.fileName,
             }));
 
             dispatch({
                 type: 'ADD_FILES',
                 files: entries.map((e) => ({
                     id: e.id,
-                    fileName: e.file.name,
+                    fileName: e.fileName || e.file.name,
                 })),
             });
 
@@ -172,6 +215,95 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             processQueue();
         },
         [processQueue]
+    );
+
+    const addFiles = useCallback(
+        async (files: FileList | File[], options?: { collectionId?: string }) => {
+            const fileArray = Array.from(files);
+            if (fileArray.length === 0) return;
+
+            const fileNames = fileArray.map((f) => f.name);
+
+            try {
+                const duplicates = await checkDuplicates(fileNames);
+
+                if (duplicates.length === 0) {
+                    enqueueFiles(
+                        fileArray.map((file) => ({
+                            file,
+                            collectionId: options?.collectionId,
+                        }))
+                    );
+                    return;
+                }
+
+                const duplicateNameSet = new Set(duplicates.map((d) => d.fileName));
+                const nonDuplicateFiles = fileArray.filter((f) => !duplicateNameSet.has(f.name));
+
+                heldFilesRef.current = nonDuplicateFiles.map((file) => ({
+                    file,
+                    collectionId: options?.collectionId,
+                }));
+
+                duplicateNamesRef.current = duplicates.map((d) => d.fileName);
+
+                const pendingDups: PendingDuplicate[] = [];
+                for (const file of fileArray) {
+                    const existing = duplicates.find((d) => d.fileName === file.name);
+                    if (existing) {
+                        pendingDups.push({
+                            file,
+                            collectionId: options?.collectionId,
+                            existingId: existing.id,
+                            existingThumbnailKey: existing.thumbnailKey,
+                        });
+                    }
+                }
+
+                dispatch({ type: 'SET_PENDING_DUPLICATES', duplicates: pendingDups });
+            }
+            catch {
+                // If duplicate check fails, upload anyway
+                enqueueFiles(
+                    fileArray.map((file) => ({
+                        file,
+                        collectionId: options?.collectionId,
+                    }))
+                );
+            }
+        },
+        [enqueueFiles]
+    );
+
+    const resolveDuplicates = useCallback(
+        (decisions: Map<string, 'skip' | 'keep_both'>) => {
+            const filesToQueue: Array<{ file: File; collectionId?: string; fileName?: string }> = [];
+
+            for (const dup of state.pendingDuplicates) {
+                const decision = decisions.get(dup.file.name);
+                if (decision === 'keep_both') {
+                    const renamedName = getNextFileName(dup.file.name, duplicateNamesRef.current);
+                    filesToQueue.push({
+                        file: dup.file,
+                        collectionId: dup.collectionId,
+                        fileName: renamedName,
+                    });
+                }
+            }
+
+            for (const held of heldFilesRef.current) {
+                filesToQueue.push(held);
+            }
+
+            heldFilesRef.current = [];
+            duplicateNamesRef.current = [];
+            dispatch({ type: 'CLEAR_PENDING_DUPLICATES' });
+
+            if (filesToQueue.length > 0) {
+                enqueueFiles(filesToQueue);
+            }
+        },
+        [state.pendingDuplicates, enqueueFiles]
     );
 
     const removeItem = useCallback((id: string) => {
@@ -191,7 +323,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             value={{
                 items: state.items,
                 isOpen: state.isOpen,
+                pendingDuplicates: state.pendingDuplicates,
                 addFiles,
+                resolveDuplicates,
                 removeItem,
                 clearCompleted,
                 togglePanel,
