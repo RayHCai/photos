@@ -8,9 +8,12 @@ import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { CollectionItemPicker } from '@/components/collections/CollectionItemPicker';
 import { CollectionSettingsModal } from '@/components/collections/CollectionSettingsModal';
+import { useFileUpload } from '@/lib/hooks/useFileUpload';
 import { CenteredSpinner } from '@/components/ui/CenteredSpinner';
 import { Button } from '@/components/ui/Button';
-import { Settings } from 'lucide-react';
+import { IconButton } from '@/components/ui/IconButton';
+import { FileDropZone } from '@/components/upload/UploadDropzone';
+import { Plus, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function CollectionDetailPage() {
@@ -22,6 +25,7 @@ export default function CollectionDetailPage() {
     const selection = useMediaSelection();
     const addItems = useAddCollectionItems();
     const removeItems = useRemoveCollectionItems();
+    const { openFilePicker } = useFileUpload();
 
     const handleRemoveItems = useCallback(async (ids: string[]) => {
         await new Promise<void>((resolve, reject) => {
@@ -61,7 +65,7 @@ export default function CollectionDetailPage() {
     }
 
     return (
-        <div className="h-screen flex flex-col">
+        <FileDropZone className="h-screen flex flex-col">
             {/* Toolbar */}
             <div className="relative flex items-center justify-between px-[30px] pt-3 pb-9">
                 <div className="flex-1" />
@@ -82,13 +86,20 @@ export default function CollectionDetailPage() {
                         deleteLoading={removeItems.isPending}
                     />
                     {!selection.isSelecting && (
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSettingsOpen(true)}
-                        >
-                            <Settings className="w-4 h-4" />
-                        </Button>
+                        <>
+                            <IconButton
+                                icon={Plus}
+                                onClick={() => openFilePicker(id)}
+                                title="Upload photos"
+                            />
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSettingsOpen(true)}
+                            >
+                                <Settings className="w-4 h-4" />
+                            </Button>
+                        </>
                     )}
                 </div>
             </div>
@@ -120,10 +131,9 @@ export default function CollectionDetailPage() {
             <CollectionSettingsModal
                 collectionId={id}
                 collectionName={collection.name}
-                collectionDescription={collection.description}
                 open={settingsOpen}
                 onClose={() => setSettingsOpen(false)}
             />
-        </div>
+        </FileDropZone>
     );
 }

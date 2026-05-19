@@ -12,7 +12,6 @@ export interface ShareLink {
 export interface SharedCollection {
     id: string;
     name: string;
-    description: string | null;
     items: Array<{
         id: string;
         sortOrder: number;

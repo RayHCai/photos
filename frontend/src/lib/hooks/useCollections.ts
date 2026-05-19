@@ -31,7 +31,7 @@ export function useCreateCollection() {
 export function useUpdateCollection() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string } }) =>
+        mutationFn: ({ id, data }: { id: string; data: { name?: string } }) =>
             collectionsApi.updateCollection(id, data),
         onSuccess: (_data, vars) => {
             queryClient.invalidateQueries({ queryKey: ['collections'] });

@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { uploadFile } from '../api/upload';
+import { addItems } from '../api/collections';
 
 export interface UploadItem {
     id: string;
@@ -101,7 +102,7 @@ function uploadReducer(state: UploadState, action: UploadAction): UploadState {
 interface UploadContextValue {
     items: UploadItem[];
     isOpen: boolean;
-    addFiles: (files: FileList | File[]) => void;
+    addFiles: (files: FileList | File[], options?: { collectionId?: string }) => void;
     removeItem: (id: string) => void;
     clearCompleted: () => void;
     togglePanel: () => void;
@@ -117,7 +118,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
     const queryClient = useQueryClient();
     const processingRef = useRef(false);
-    const queueRef = useRef<Array<{ id: string; file: File }>>([]);
+    const queueRef = useRef<Array<{ id: string; file: File; collectionId?: string }>>([]);
 
     const processQueue = useCallback(async () => {
         if (processingRef.current) return;
@@ -128,9 +129,13 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             dispatch({ type: 'SET_UPLOADING', id: item.id });
 
             try {
-                await uploadFile(item.file, (progress) => {
+                const mediaItemId = await uploadFile(item.file, (progress) => {
                     dispatch({ type: 'SET_PROGRESS', id: item.id, progress });
                 });
+                if (item.collectionId) {
+                    await addItems(item.collectionId, [mediaItemId]);
+                    queryClient.invalidateQueries({ queryKey: ['collections', item.collectionId] });
+                }
                 dispatch({ type: 'SET_COMPLETED', id: item.id });
                 queryClient.invalidateQueries({ queryKey: ['media'] });
             }
@@ -147,11 +152,12 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     }, [queryClient]);
 
     const addFiles = useCallback(
-        (files: FileList | File[]) => {
+        (files: FileList | File[], options?: { collectionId?: string }) => {
             const fileArray = Array.from(files);
             const entries = fileArray.map((file) => ({
                 id: crypto.randomUUID(),
                 file,
+                collectionId: options?.collectionId,
             }));
 
             dispatch({

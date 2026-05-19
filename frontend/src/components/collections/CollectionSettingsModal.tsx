@@ -14,7 +14,6 @@ import { toast } from 'sonner';
 interface CollectionSettingsModalProps {
     collectionId: string;
     collectionName: string;
-    collectionDescription: string | null;
     open: boolean;
     onClose: () => void;
 }
@@ -22,7 +21,6 @@ interface CollectionSettingsModalProps {
 export function CollectionSettingsModal({
     collectionId,
     collectionName,
-    collectionDescription,
     open,
     onClose,
 }: CollectionSettingsModalProps) {
@@ -38,7 +36,6 @@ export function CollectionSettingsModal({
             <div className="space-y-6">
                 <CollectionForm
                     initialName={collectionName}
-                    initialDescription={collectionDescription || ''}
                     submitLabel="Save"
                     loading={updateCollection.isPending}
                     onSubmit={(data) => {

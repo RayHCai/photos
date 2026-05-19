@@ -11,7 +11,6 @@ export function getCollection(id: string): Promise<CollectionWithItems> {
 
 export function createCollection(data: {
     name: string;
-    description?: string;
 }): Promise<Collection> {
     return apiFetch('/collections', {
         method: 'POST',
@@ -21,7 +20,7 @@ export function createCollection(data: {
 
 export function updateCollection(
     id: string,
-    data: { name?: string; description?: string; coverKey?: string }
+    data: { name?: string; coverKey?: string }
 ): Promise<Collection> {
     return apiFetch(`/collections/${id}`, {
         method: 'PATCH',

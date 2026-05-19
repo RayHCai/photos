@@ -1,19 +1,27 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import { useCollections, useDeleteCollection } from '@/lib/hooks/useCollections';
+import { useRouter } from 'next/navigation';
+import { useCollections, useCreateCollection, useDeleteCollection } from '@/lib/hooks/useCollections';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 import { useSearchFilter } from '@/lib/hooks/useSearchFilter';
 import { CollectionCard } from '@/components/collections/CollectionCard';
+import { CollectionForm } from '@/components/collections/CollectionForm';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { PageContainer } from '@/components/layout/PageContainer';
+import { Dialog } from '@/components/ui/Dialog';
+import { IconButton } from '@/components/ui/IconButton';
 import { SearchInput } from '@/components/ui/SearchInput';
+import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function CollectionsPage() {
+    const router = useRouter();
     const { data: collections, isLoading } = useCollections();
     const [search, setSearch] = useState('');
+    const [createOpen, setCreateOpen] = useState(false);
     const selection = useMediaSelection();
+    const createCollection = useCreateCollection();
     const deleteCollection = useDeleteCollection();
 
     const filteredCollections = useSearchFilter(collections, search, useCallback((c) => c.name, []));
@@ -30,6 +38,7 @@ export default function CollectionsPage() {
     }, [deleteCollection]);
 
     return (
+        <>
         <PageContainer
             isLoading={isLoading}
             isEmpty={!filteredCollections || filteredCollections.length === 0}
@@ -47,6 +56,12 @@ export default function CollectionsPage() {
                         selection={selection}
                         onDelete={handleDeleteCollections}
                         deleteConfirmMessage={`Delete ${selection.count} selected collection${selection.count !== 1 ? 's' : ''}? This cannot be undone.`}
+                    />
+                    <IconButton
+                        icon={Plus}
+                        onClick={() => setCreateOpen(true)}
+                        title="New collection"
+                        className="flex-shrink-0"
                     />
                 </>
             }
@@ -72,5 +87,24 @@ export default function CollectionsPage() {
                 ))}
             </div>
         </PageContainer>
+
+            <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title="New Collection">
+                <CollectionForm
+                    onSubmit={(data) => {
+                        createCollection.mutate(data, {
+                            onSuccess: (collection) => {
+                                setCreateOpen(false);
+                                toast.success('Collection created');
+                                router.push(`/collections/${collection.id}`);
+                            },
+                            onError: () => {
+                                toast.error('Failed to create collection');
+                            },
+                        });
+                    }}
+                    loading={createCollection.isPending}
+                />
+            </Dialog>
+        </>
     );
 }
