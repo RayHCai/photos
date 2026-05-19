@@ -1,2 +1,0 @@
-[console_scripts]
-worker = worker.main:run

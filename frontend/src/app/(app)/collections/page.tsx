@@ -23,7 +23,8 @@ export default function CollectionsPage() {
         try {
             await Promise.all(ids.map((id) => deleteCollection.mutateAsync(id)));
             toast.success(`Deleted ${ids.length} collection${ids.length !== 1 ? 's' : ''}`);
-        } catch {
+        }
+        catch {
             toast.error('Failed to delete');
         }
     }, [deleteCollection]);
@@ -61,7 +62,8 @@ export default function CollectionsPage() {
                                 if (!selection.isSelecting) selection.startSelecting();
                                 if (e.shiftKey) {
                                     selection.addRange(c.id, collectionIds);
-                                } else {
+                                }
+                                else {
                                     selection.toggle(c.id);
                                 }
                             }}
