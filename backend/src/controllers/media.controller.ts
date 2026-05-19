@@ -97,3 +97,10 @@ export const getOriginal = asyncHandler(async (req: Request, res: Response) => {
     const url = await mediaService.getOriginalUrl(req.params.id as string);
     res.redirect(url);
 });
+
+export const checkDuplicates = asyncHandler(async (req: Request, res: Response) => {
+    const fileNames = req.body.fileNames as string[];
+    logger.info({ count: fileNames.length }, 'checking for duplicate file names');
+    const duplicates = await mediaService.checkDuplicateFileNames(fileNames);
+    res.json({ duplicates });
+});

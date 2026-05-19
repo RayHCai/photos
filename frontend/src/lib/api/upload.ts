@@ -4,6 +4,27 @@ const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
 const PART_SIZE = 10 * 1024 * 1024;
 const CONCURRENCY = 4;
 
+interface DuplicateEntry {
+    id: string;
+    fileName: string;
+    thumbnailKey: string | null;
+}
+
+interface CheckDuplicatesResponse {
+    duplicates: DuplicateEntry[];
+}
+
+export async function checkDuplicates(fileNames: string[]): Promise<DuplicateEntry[]> {
+    const { duplicates } = await apiFetch<CheckDuplicatesResponse>(
+        '/media/upload/check-duplicates',
+        {
+            method: 'POST',
+            body: JSON.stringify({ fileNames }),
+        }
+    );
+    return duplicates;
+}
+
 interface PresignResponse {
     id: string;
     presignedUrl: string;
@@ -58,14 +79,15 @@ async function runWithConcurrency(
 
 async function singleUpload(
     file: File,
-    onProgress: (pct: number) => void
+    onProgress: (pct: number) => void,
+    fileName?: string
 ): Promise<string> {
     const { id, presignedUrl } = await apiFetch<PresignResponse>(
         '/media/upload/presign',
         {
             method: 'POST',
             body: JSON.stringify({
-                fileName: file.name,
+                fileName: fileName || file.name,
                 mimeType: file.type,
                 fileSize: file.size,
             }),
@@ -84,7 +106,8 @@ async function singleUpload(
 
 async function multipartUpload(
     file: File,
-    onProgress: (pct: number) => void
+    onProgress: (pct: number) => void,
+    fileName?: string
 ): Promise<string> {
     const totalParts = Math.ceil(file.size / PART_SIZE);
 
@@ -93,7 +116,7 @@ async function multipartUpload(
         {
             method: 'POST',
             body: JSON.stringify({
-                fileName: file.name,
+                fileName: fileName || file.name,
                 mimeType: file.type,
                 fileSize: file.size,
             }),
@@ -143,10 +166,11 @@ async function multipartUpload(
 
 export async function uploadFile(
     file: File,
-    onProgress: (pct: number) => void
+    onProgress: (pct: number) => void,
+    fileName?: string
 ): Promise<string> {
     if (file.size > MULTIPART_THRESHOLD) {
-        return multipartUpload(file, onProgress);
+        return multipartUpload(file, onProgress, fileName);
     }
-    return singleUpload(file, onProgress);
+    return singleUpload(file, onProgress, fileName);
 }
