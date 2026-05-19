@@ -36,7 +36,7 @@ export function createApp() {
     app.use(express.urlencoded({ extended: false, limit: '1mb' }));
     app.use(cookieParser());
 
-    app.use(rateLimiter);
+    app.use('/api/v1', rateLimiter);
     app.use('/api/v1/auth/login', authRateLimiter);
 
     app.use('/api/v1', routes);
