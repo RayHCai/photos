@@ -25,7 +25,7 @@ export const GalleryRow = memo(function GalleryRow({
     thumbnailSrcFn,
 }: GalleryRowProps) {
     return (
-        <div className="flex justify-center gap-0.5" style={{ height: row.height }}>
+        <div className="flex justify-center gap-[5px]" style={{ height: row.height }}>
             {row.items.map((item) => {
                 const mediaItem = mediaItems.get(item.id);
                 if (!mediaItem) return null;

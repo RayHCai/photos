@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from worker import backend_client as api, s3
 from worker.clip_encoder import encode_image, encode_images
@@ -258,6 +258,7 @@ async def process_photo(
     logger.info("step_download_original", media_item_id=media_item_id, key=original_key)
     raw = await s3.download_to_bytes(original_key)
     image = Image.open(io.BytesIO(raw))
+    image = ImageOps.exif_transpose(image) or image
     logger.info("step_original_opened", media_item_id=media_item_id, size_bytes=len(raw), width=image.width, height=image.height, mode=image.mode)
 
     if start_stage == "full":
