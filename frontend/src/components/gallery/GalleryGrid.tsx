@@ -71,12 +71,12 @@ export function GalleryGrid({
                 })),
                 availableWidth,
                 220,
-                2
+                5
             );
 
             let maxRowWidth = 0;
             for (const row of layoutRows) {
-                const rowWidth = row.items.reduce((sum, item) => sum + item.scaledWidth, 0) + (row.items.length - 1) * 2;
+                const rowWidth = row.items.reduce((sum, item) => sum + item.scaledWidth, 0) + (row.items.length - 1) * 5;
                 maxRowWidth = Math.max(maxRowWidth, rowWidth);
             }
             const contentOffset = Math.max(0, (availableWidth - maxRowWidth) / 2);
@@ -91,7 +91,7 @@ export function GalleryGrid({
             for (const row of layoutRows) {
                 rows.push({
                     type: 'gallery-row',
-                    height: row.height + 2,
+                    height: row.height + 5,
                     row,
                 });
             }

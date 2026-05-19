@@ -163,10 +163,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         if (processingRef.current) return;
         processingRef.current = true;
 
-        while (queueRef.current.length > 0) {
-            const item = queueRef.current.shift()!;
-            dispatch({ type: 'SET_UPLOADING', id: item.id });
+        const FILE_CONCURRENCY = 3;
 
+        const processItem = async (item: typeof queueRef.current[0]) => {
+            dispatch({ type: 'SET_UPLOADING', id: item.id });
             try {
                 const mediaItemId = await uploadFile(
                     item.file,
@@ -189,8 +189,19 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                     error: err.message || 'Upload failed',
                 });
             }
-        }
+        };
 
+        const workers = Array.from(
+            { length: Math.min(FILE_CONCURRENCY, queueRef.current.length) },
+            async () => {
+                while (queueRef.current.length > 0) {
+                    const item = queueRef.current.shift()!;
+                    await processItem(item);
+                }
+            }
+        );
+
+        await Promise.all(workers);
         processingRef.current = false;
     }, [queryClient]);
 
