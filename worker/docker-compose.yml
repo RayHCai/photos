@@ -1,0 +1,10 @@
+services:
+  worker:
+    build: .
+    container_name: photos-worker
+    env_file: .env
+    environment:
+      BACKEND_URL: http://host.docker.internal:4000
+    ports:
+      - '8001:8001'
+

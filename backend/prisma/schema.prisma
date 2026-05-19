@@ -1,0 +1,166 @@
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+// ─── Authentication ────────────────────────────────────────
+model Session {
+    id        String   @id @default(cuid())
+    token     String   @unique
+    userAgent String?  @map("user_agent")
+    ipAddress String?  @map("ip_address")
+    expiresAt DateTime @map("expires_at")
+    createdAt DateTime @default(now()) @map("created_at")
+
+    @@index([token])
+    @@index([expiresAt])
+    @@map("sessions")
+}
+
+// ─── Core Media ────────────────────────────────────────────
+enum MediaType {
+    PHOTO
+    VIDEO
+}
+
+enum ProcessingStatus {
+    PENDING
+    PROCESSING
+    COMPLETED
+    FAILED
+}
+
+model MediaItem {
+    id               String           @id @default(cuid())
+    type             MediaType
+    originalKey      String           @unique @map("original_key")
+    thumbnailKey     String?          @map("thumbnail_key")
+    fileName         String           @map("file_name")
+    mimeType         String           @map("mime_type")
+    fileSize         BigInt           @map("file_size")
+    width            Int?
+    height           Int?
+    durationSeconds  Float?           @map("duration_seconds")
+    takenAt          DateTime?        @map("taken_at")
+    latitude         Float?
+    longitude        Float?
+    city             String?
+    country          String?
+    cameraMake       String?          @map("camera_make")
+    cameraModel      String?          @map("camera_model")
+    ftsDocument      String?          @map("fts_document")
+    processingStatus ProcessingStatus @default(PENDING) @map("processing_status")
+    processingError  String?          @map("processing_error")
+    currentTaskId    String?          @map("current_task_id")
+    createdAt        DateTime         @default(now()) @map("created_at")
+    updatedAt        DateTime         @updatedAt @map("updated_at")
+
+    // pgvector CLIP embedding - managed via raw SQL migration
+    // clip_embedding vector(512)
+
+    faces           Face[]
+    collectionItems CollectionItem[]
+
+    @@index([takenAt])
+    @@index([type])
+    @@index([processingStatus])
+    @@index([createdAt])
+    @@map("media_items")
+}
+
+// ─── Face Recognition ──────────────────────────────────────
+model Person {
+    id        String   @id @default(cuid())
+    name      String?
+    avatarKey String?  @map("avatar_key")
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    faces Face[]
+
+    @@map("persons")
+}
+
+model Face {
+    id          String   @id @default(cuid())
+    mediaItemId String   @map("media_item_id")
+    personId    String?  @map("person_id")
+    boxX        Float    @map("box_x")
+    boxY        Float    @map("box_y")
+    boxWidth    Float    @map("box_width")
+    boxHeight   Float    @map("box_height")
+    confidence  Float?
+    cropKey     String?  @map("crop_key")
+    createdAt   DateTime @default(now()) @map("created_at")
+
+    // pgvector face embedding - managed via raw SQL migration
+    // face_embedding vector(512)
+
+    mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+    person    Person?   @relation(fields: [personId], references: [id], onDelete: SetNull)
+
+    @@index([mediaItemId])
+    @@index([personId])
+    @@map("faces")
+}
+
+// ─── Collections & Sharing ─────────────────────────────────
+model Collection {
+    id          String   @id @default(cuid())
+    name        String
+    description String?
+    coverKey    String?  @map("cover_key")
+    createdAt   DateTime @default(now()) @map("created_at")
+    updatedAt   DateTime @updatedAt @map("updated_at")
+
+    items      CollectionItem[]
+    shareLinks ShareLink[]
+
+    @@map("collections")
+}
+
+model CollectionItem {
+    id           String   @id @default(cuid())
+    collectionId String   @map("collection_id")
+    mediaItemId  String   @map("media_item_id")
+    sortOrder    Int      @default(0) @map("sort_order")
+    addedAt      DateTime @default(now()) @map("added_at")
+
+    collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    mediaItem  MediaItem  @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+
+    @@unique([collectionId, mediaItemId])
+    @@index([collectionId])
+    @@map("collection_items")
+}
+
+model ShareLink {
+    id           String    @id @default(cuid())
+    collectionId String    @map("collection_id")
+    slug         String    @unique
+    isActive     Boolean   @default(true) @map("is_active")
+    expiresAt    DateTime? @map("expires_at")
+    viewCount    Int       @default(0) @map("view_count")
+    createdAt    DateTime  @default(now()) @map("created_at")
+
+    collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+    @@index([slug])
+    @@map("share_links")
+}
+
+// ─── Search Query Embedding Cache ──────────────────────────
+model QueryEmbedding {
+    id        String   @id @default(cuid())
+    queryText String   @unique @map("query_text")
+    createdAt DateTime @default(now()) @map("created_at")
+
+    // pgvector embedding - managed via raw SQL migration
+    // embedding vector(512)
+
+    @@map("query_embeddings")
+}

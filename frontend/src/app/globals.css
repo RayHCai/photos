@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Playfair+Display:wght@400;500;600&display=swap');
+
+body {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Toast overrides */
+[data-sonner-toaster] {
+    --width: 320px;
+}
+
+/* Sonner renders close button as a sibling to the toast, positioned relative to the li wrapper */
+[data-sonner-toaster] li {
+    position: relative;
+}
+
+[data-sonner-toaster] [data-close-button] {
+    position: absolute !important;
+    top: 50% !important;
+    right: 10px !important;
+    left: auto !important;
+    transform: translateY(-50%) !important;
+    background: #e7e5e4 !important;
+    border: none !important;
+    color: #78716c !important;
+    cursor: pointer;
+    padding: 3px !important;
+    width: 20px !important;
+    height: 20px !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px !important;
+    transition: background 0.15s, color 0.15s;
+}
+
+[data-sonner-toaster] [data-close-button]:hover {
+    background: #d6d3d1 !important;
+    color: #44403c !important;
+}
+
+[data-sonner-toast] [data-icon] svg {
+    color: #78716c !important;
+}
