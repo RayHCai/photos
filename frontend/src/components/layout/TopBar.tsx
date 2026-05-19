@@ -35,7 +35,7 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
                     icon={Upload}
                     size="lg"
                     iconClassName="w-5 h-5"
-                    onClick={openFilePicker}
+                    onClick={() => openFilePicker()}
                     title="Upload"
                 />
             </header>
