@@ -10,8 +10,8 @@ variable "bucket_name" {
   default     = "photos-platform"
 }
 
-variable "cors_origin" {
-  description = "Allowed CORS origin for presigned URL uploads from the frontend"
-  type        = string
-  default     = "http://localhost:3000"
+variable "cors_origins" {
+  description = "Allowed CORS origins for presigned URL uploads from the frontend"
+  type        = list(string)
+  default     = ["http://localhost:3000", "https://rays-photos.vercel.app"]
 }
