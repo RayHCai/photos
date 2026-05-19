@@ -12,6 +12,7 @@ import { batchDeleteMedia } from '@/lib/api/media';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
+import { FileDropZone } from '@/components/upload/UploadDropzone';
 import { toast } from 'sonner';
 import type { MediaListItem } from '@/lib/types/media';
 
@@ -61,7 +62,7 @@ export default function GalleryPage() {
     const isSearchActive = search.trim().length > 0;
 
     return (
-        <div className="h-screen flex flex-col">
+        <FileDropZone className="h-screen flex flex-col">
             {/* Toolbar */}
             <div className="relative flex items-center gap-2 px-[30px] pt-3 pb-9">
                 <div className="flex-1 flex justify-center">
@@ -95,6 +96,6 @@ export default function GalleryPage() {
                 isFetching={isFetchingNextPage}
                 emptyMessage={isSearchActive ? 'No results found' : undefined}
             />
-        </div>
+        </FileDropZone>
     );
 }

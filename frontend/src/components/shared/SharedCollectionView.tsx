@@ -95,11 +95,6 @@ export function SharedCollectionView({
                 <h1 className="text-xl font-serif text-stone-900">
                     {collection.name}
                 </h1>
-                {collection.description && (
-                    <p className="text-sm text-stone-500 mt-1">
-                        {collection.description}
-                    </p>
-                )}
                 <p className="text-xs text-stone-400 mt-1">
                     {collection.items.length} item
                     {collection.items.length !== 1 ? 's' : ''}

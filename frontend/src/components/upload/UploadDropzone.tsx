@@ -1,34 +1,47 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useRef, useCallback, type ReactNode } from 'react';
 import { Upload } from 'lucide-react';
 import { useUpload } from '@/lib/hooks/useUpload';
 
-export function UploadDropzone() {
+interface FileDropZoneProps {
+    children: ReactNode;
+    className?: string;
+}
+
+export function FileDropZone({ children, className = '' }: FileDropZoneProps) {
     const [dragging, setDragging] = useState(false);
+    const dragCounter = useRef(0);
     const { addFiles } = useUpload();
 
-    const handleDragEnter = useCallback((e: DragEvent) => {
+    const handleDragEnter = useCallback((e: React.DragEvent) => {
         e.preventDefault();
+        e.stopPropagation();
+        dragCounter.current++;
         if (e.dataTransfer?.types.includes('Files')) {
             setDragging(true);
         }
     }, []);
 
-    const handleDragLeave = useCallback((e: DragEvent) => {
+    const handleDragLeave = useCallback((e: React.DragEvent) => {
         e.preventDefault();
-        if (e.relatedTarget === null) {
+        e.stopPropagation();
+        dragCounter.current--;
+        if (dragCounter.current === 0) {
             setDragging(false);
         }
     }, []);
 
-    const handleDragOver = useCallback((e: DragEvent) => {
+    const handleDragOver = useCallback((e: React.DragEvent) => {
         e.preventDefault();
+        e.stopPropagation();
     }, []);
 
     const handleDrop = useCallback(
-        (e: DragEvent) => {
+        (e: React.DragEvent) => {
             e.preventDefault();
+            e.stopPropagation();
+            dragCounter.current = 0;
             setDragging(false);
             if (e.dataTransfer?.files.length) {
                 addFiles(e.dataTransfer.files);
@@ -37,27 +50,29 @@ export function UploadDropzone() {
         [addFiles]
     );
 
-    useEffect(() => {
-        window.addEventListener('dragenter', handleDragEnter);
-        window.addEventListener('dragleave', handleDragLeave);
-        window.addEventListener('dragover', handleDragOver);
-        window.addEventListener('drop', handleDrop);
-        return () => {
-            window.removeEventListener('dragenter', handleDragEnter);
-            window.removeEventListener('dragleave', handleDragLeave);
-            window.removeEventListener('dragover', handleDragOver);
-            window.removeEventListener('drop', handleDrop);
-        };
-    }, [handleDragEnter, handleDragLeave, handleDragOver, handleDrop]);
-
-    if (!dragging) return null;
-
     return (
-        <div className="fixed inset-0 z-50 bg-stone-900/80 flex items-center justify-center pointer-events-none">
-            <div className="flex flex-col items-center gap-4 text-stone-50">
-                <Upload className="w-12 h-12" />
-                <p className="text-lg font-serif">Drop to upload</p>
-            </div>
+        <div
+            className={`relative ${className}`}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+        >
+            {children}
+
+            {dragging && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-stone-50/80 backdrop-blur-sm transition-opacity">
+                    <div className="absolute inset-4 rounded-xl border-2 border-dashed border-stone-400 pointer-events-none" />
+                    <div className="flex flex-col items-center gap-3 pointer-events-none">
+                        <div className="w-14 h-14 rounded-full bg-stone-200 flex items-center justify-center">
+                            <Upload className="w-7 h-7 text-stone-600" />
+                        </div>
+                        <p className="text-base font-serif text-stone-700">
+                            Drop files to upload
+                        </p>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

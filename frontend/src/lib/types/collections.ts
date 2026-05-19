@@ -3,7 +3,6 @@ import type { MediaListItem } from './media';
 export interface Collection {
     id: string;
     name: string;
-    description: string | null;
     coverKey: string | null;
     createdAt: string;
     updatedAt: string;
