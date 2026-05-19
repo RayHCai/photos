@@ -80,7 +80,7 @@ export default function GalleryPage() {
                 />
                 <IconButton
                     icon={Plus}
-                    onClick={openFilePicker}
+                    onClick={() => openFilePicker()}
                     title="Upload"
                     className="flex-shrink-0"
                 />
