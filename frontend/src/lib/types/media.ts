@@ -1,0 +1,45 @@
+export type MediaType = 'PHOTO' | 'VIDEO';
+export type ProcessingStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+export interface MediaListItem {
+    id: string;
+    type: MediaType;
+    fileName: string;
+    thumbnailKey: string | null;
+    width: number | null;
+    height: number | null;
+    durationSeconds: number | null;
+    takenAt: string | null;
+    processingStatus: ProcessingStatus;
+    createdAt: string;
+}
+
+export interface MediaItem extends MediaListItem {
+    originalKey: string;
+    mimeType: string;
+    fileSize: string;
+    latitude: number | null;
+    longitude: number | null;
+    city: string | null;
+    country: string | null;
+    cameraMake: string | null;
+    cameraModel: string | null;
+    processingError: string | null;
+    faces: FaceWithPerson[];
+}
+
+export interface FaceWithPerson {
+    id: string;
+    mediaItemId: string;
+    personId: string | null;
+    boxX: number;
+    boxY: number;
+    boxWidth: number;
+    boxHeight: number;
+    confidence: number | null;
+    cropKey: string | null;
+    person: {
+        id: string;
+        name: string | null;
+    } | null;
+}
