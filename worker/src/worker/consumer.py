@@ -95,7 +95,7 @@ async def start_consumers() -> None:
     media_worker = BullWorker(
         "process-media",
         _handle_process_media,
-        {"connection": redis_opts, "concurrency": 1},
+        {"connection": redis_opts, "concurrency": settings.media_concurrency},
     )
     _workers.append(media_worker)
     logger.info("media_consumer_started", queue="process-media")

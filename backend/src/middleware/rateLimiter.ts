@@ -1,6 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import RedisStore from 'rate-limit-redis';
-import { redisConnection } from '../config/redis.js';
+import { redisConnection, getCachedSession, cacheSession } from '../config/redis.js';
 import { prisma } from '../config/prisma.js';
 
 export const rateLimiter = rateLimit({
@@ -14,10 +14,19 @@ export const rateLimiter = rateLimit({
             req.cookies?.session_token;
         if (!token) return false;
 
+        // Check Redis cache first — avoid DB hit on every request
+        const cached = await getCachedSession(token);
+        if (cached) return cached.expiresAt > new Date();
+
+        // Cache miss — check DB and populate cache
         const session = await prisma.session.findUnique({
             where: { token },
         });
-        return !!session && session.expiresAt > new Date();
+        if (session && session.expiresAt > new Date()) {
+            await cacheSession(token, session.id, session.expiresAt);
+            return true;
+        }
+        return false;
     },
     store: new RedisStore({
         sendCommand: (...args: string[]) =>

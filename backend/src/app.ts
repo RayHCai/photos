@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -18,6 +19,7 @@ import internalRoutes from './routes/internal.routes.js';
 export function createApp() {
     const app = express();
 
+    app.use(compression());
     app.use(helmet());
 
     app.use(

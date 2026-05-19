@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../config/prisma.js';
 import { env } from '../config/env.js';
+import { cacheSession } from '../config/redis.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { logger } from '../utils/logger.js';
 
@@ -33,6 +34,7 @@ export async function login(
         },
     });
 
+    await cacheSession(session.token, session.id, session.expiresAt);
     logger.info({ sessionId: session.id, ipAddress, expiresAt }, 'auth: session created');
     return { token: session.token, expiresAt: session.expiresAt };
 }
