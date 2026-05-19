@@ -2,7 +2,7 @@ import { apiFetch } from './client';
 
 const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
 const PART_SIZE = 10 * 1024 * 1024;
-const CONCURRENCY = 4;
+const CONCURRENCY = 6;
 
 interface DuplicateEntry {
     id: string;

@@ -163,7 +163,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         if (processingRef.current) return;
         processingRef.current = true;
 
-        const FILE_CONCURRENCY = 3;
+        const FILE_CONCURRENCY = 8;
 
         const processItem = async (item: typeof queueRef.current[0]) => {
             dispatch({ type: 'SET_UPLOADING', id: item.id });

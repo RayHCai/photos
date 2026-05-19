@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     service_secret: str = ""
 
+    media_concurrency: int = 3
+
     log_level: str = "info"
 
 

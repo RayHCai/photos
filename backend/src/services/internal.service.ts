@@ -297,12 +297,17 @@ export async function deleteAllOrphanPersons(): Promise<number> {
 }
 
 export async function batchCreatePersons(count: number): Promise<{ ids: string[] }> {
-    const ids: string[] = [];
-    for (let i = 0; i < count; i++) {
-        const person = await prisma.person.create({ data: {} });
-        ids.push(person.id);
-    }
-    return { ids };
+    if (count === 0) return { ids: [] };
+
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+        `INSERT INTO persons (id, created_at, updated_at)
+         SELECT gen_random_uuid(), now(), now()
+         FROM generate_series(1, $1)
+         RETURNING id`,
+        count,
+    );
+
+    return { ids: rows.map((r) => r.id) };
 }
 
 // ─── Media Queries (for retry routes) ────────────────────────

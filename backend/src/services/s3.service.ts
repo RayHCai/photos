@@ -1,6 +1,7 @@
 import {
     PutObjectCommand,
     DeleteObjectCommand,
+    DeleteObjectsCommand,
     GetObjectCommand,
     CreateMultipartUploadCommand,
     UploadPartCommand,
@@ -79,7 +80,29 @@ export async function deleteObject(key: string) {
 }
 
 export async function deleteObjects(keys: string[]) {
-    await Promise.all(keys.map((key) => deleteObject(key)));
+    if (keys.length === 0) return;
+
+    // S3 DeleteObjects supports up to 1000 keys per request
+    const BATCH_SIZE = 1000;
+    for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+        const batch = keys.slice(i, i + BATCH_SIZE);
+        await s3Client.send(
+            new DeleteObjectsCommand({
+                Bucket: env.S3_BUCKET,
+                Delete: {
+                    Objects: batch.map((Key) => ({ Key })),
+                    Quiet: true,
+                },
+            })
+        );
+
+        // Invalidate presigned URL cache entries
+        const pipeline = redisConnection.pipeline();
+        for (const key of batch) {
+            pipeline.del(`presigned:${key}`);
+        }
+        await pipeline.exec();
+    }
 }
 
 // S3 Multipart Upload orchestration
