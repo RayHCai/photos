@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Trash2, FolderPlus, Download } from 'lucide-react';
+import { X, Trash2, FolderPlus, Download, RotateCcw } from 'lucide-react';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddToCollectionModal } from '@/components/collections/AddToCollectionModal';
@@ -18,6 +18,10 @@ interface SelectionToolbarProps {
     showAddToCollection?: boolean;
     /** Show "Download" button (media mode) */
     showDownload?: boolean;
+    /** Show "Retry" button for reprocessing failed items */
+    showRetry?: boolean;
+    /** Called to retry selected items. Must return a promise. */
+    onRetry?: (ids: string[]) => Promise<void>;
     /** Custom URL function for downloads (defaults to originalUrl) */
     downloadUrlFn?: (id: string) => string;
     /** Loading state for delete action */
@@ -30,6 +34,8 @@ export function SelectionToolbar({
     deleteConfirmMessage,
     showAddToCollection,
     showDownload,
+    showRetry,
+    onRetry,
     downloadUrlFn,
     deleteLoading,
 }: SelectionToolbarProps) {
@@ -97,6 +103,15 @@ export function SelectionToolbar({
                         variant="ghost"
                         onClick={handleDownload}
                         title="Download selected"
+                    />
+                )}
+                {showRetry && onRetry && (
+                    <IconButton
+                        icon={RotateCcw}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onRetry(Array.from(selection.selectedIds))}
+                        title="Retry processing"
                     />
                 )}
                 <IconButton

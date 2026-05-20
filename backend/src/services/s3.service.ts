@@ -3,6 +3,7 @@ import {
     DeleteObjectCommand,
     DeleteObjectsCommand,
     GetObjectCommand,
+    HeadObjectCommand,
     CreateMultipartUploadCommand,
     UploadPartCommand,
     CompleteMultipartUploadCommand,
@@ -67,6 +68,20 @@ export async function getPresignedDownloadUrl(key: string) {
     const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
     await redisConnection.setex(cacheKey, THUMBNAIL_CACHE_TTL, url);
     return url;
+}
+
+export async function objectExists(key: string): Promise<boolean> {
+    try {
+        await s3Client.send(
+            new HeadObjectCommand({
+                Bucket: env.S3_BUCKET,
+                Key: key,
+            })
+        );
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 export async function deleteObject(key: string) {

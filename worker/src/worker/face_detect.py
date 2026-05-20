@@ -59,6 +59,12 @@ def detect_faces(image: Image.Image) -> list[DetectedFace]:
         bbox = face.bbox.astype(int)
         x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
 
+        # Skip faces that are too small — tiny faces produce unreliable embeddings
+        face_w = x2 - x1
+        face_h = y2 - y1
+        if face_w < settings.face_min_size or face_h < settings.face_min_size:
+            continue
+
         # Normalize bounding box to 0-1 range
         box_x = max(0.0, x1 / w)
         box_y = max(0.0, y1 / h)

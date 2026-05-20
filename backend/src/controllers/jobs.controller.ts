@@ -17,6 +17,18 @@ export const retryFailed = asyncHandler(async (_req: Request, res: Response) => 
     res.json({ count });
 });
 
+export const batchRetry = asyncHandler(async (req: Request, res: Response) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ error: 'ids array is required' });
+        return;
+    }
+    logger.info({ count: ids.length }, 'batch retry media requested');
+    const count = await mediaService.batchRetryMedia(ids);
+    logger.info({ count }, 'batch retry media enqueued');
+    res.json({ count });
+});
+
 export const enqueuePending = asyncHandler(async (_req: Request, res: Response) => {
     logger.info('enqueue all pending media requested');
     const count = await mediaService.enqueueAllPending();

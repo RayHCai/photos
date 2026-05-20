@@ -9,10 +9,10 @@ import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { SearchInput } from '@/components/ui/SearchInput';
 import { batchDeleteMedia } from '@/lib/api/media';
+import { batchRetry } from '@/lib/api/jobs';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
-import { IconButton } from '@/components/ui/IconButton';
 import { FileDropZone } from '@/components/upload/UploadDropzone';
+import { UploadMenu } from '@/components/upload/UploadMenu';
 import { toast } from 'sonner';
 import type { MediaListItem } from '@/lib/types/media';
 
@@ -22,7 +22,7 @@ export default function GalleryPage() {
     const [search, setSearch] = useState('');
     const selection = useMediaSelection();
     const queryClient = useQueryClient();
-    const { openFilePicker } = useFileUpload();
+    const { openFilePicker, openFolderPicker } = useFileUpload();
 
     const { data: searchData, isLoading: isSearching } = useSearch(search);
 
@@ -34,6 +34,17 @@ export default function GalleryPage() {
         }
         catch {
             toast.error('Failed to delete');
+        }
+    }, [queryClient]);
+
+    const handleBatchRetry = useCallback(async (ids: string[]) => {
+        try {
+            const { count } = await batchRetry(ids);
+            queryClient.invalidateQueries({ queryKey: ['media'] });
+            toast.success(`Retrying ${count} item${count !== 1 ? 's' : ''}`);
+        }
+        catch {
+            toast.error('Failed to retry');
         }
     }, [queryClient]);
 
@@ -77,12 +88,12 @@ export default function GalleryPage() {
                     onDelete={handleBatchDelete}
                     showAddToCollection
                     showDownload
+                    showRetry
+                    onRetry={handleBatchRetry}
                 />
-                <IconButton
-                    icon={Plus}
-                    onClick={() => openFilePicker()}
-                    title="Upload"
-                    className="flex-shrink-0"
+                <UploadMenu
+                    onUploadFiles={() => openFilePicker()}
+                    onUploadFolder={() => openFolderPicker()}
                 />
             </div>
 

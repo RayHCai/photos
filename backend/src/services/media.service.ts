@@ -282,9 +282,30 @@ export async function getOriginalUrl(id: string) {
 export async function checkDuplicateFileNames(fileNames: string[]) {
     const existing = await prisma.mediaItem.findMany({
         where: { fileName: { in: fileNames } },
-        select: { id: true, fileName: true, thumbnailKey: true },
+        select: { id: true, fileName: true, thumbnailKey: true, originalKey: true },
     });
-    return existing;
+
+    // Verify S3 objects exist; delete orphan DB records for failed uploads
+    const verified: typeof existing = [];
+    const orphanIds: string[] = [];
+
+    await Promise.all(
+        existing.map(async (item) => {
+            const exists = await s3Service.objectExists(item.originalKey);
+            if (exists) {
+                verified.push(item);
+            } else {
+                orphanIds.push(item.id);
+            }
+        })
+    );
+
+    if (orphanIds.length > 0) {
+        await prisma.mediaItem.deleteMany({ where: { id: { in: orphanIds } } });
+        logger.info({ count: orphanIds.length }, 'media: cleaned up orphan records with missing S3 objects');
+    }
+
+    return verified.map(({ originalKey: _, ...rest }) => rest);
 }
 
 export async function retryAllFailed() {
@@ -299,6 +320,20 @@ export async function retryAllFailed() {
 
     logger.info({ count: failedItems.length }, 'media: retried all failed items');
     return failedItems.length;
+}
+
+export async function batchRetryMedia(ids: string[]) {
+    const items = await prisma.mediaItem.findMany({
+        where: { id: { in: ids }, processingStatus: { in: ['FAILED', 'PENDING'] } },
+        select: { id: true, originalKey: true, mimeType: true, type: true },
+    });
+
+    for (const item of items) {
+        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type);
+    }
+
+    logger.info({ requested: ids.length, retried: items.length }, 'media: batch retry completed');
+    return items.length;
 }
 
 export async function enqueueAllPending() {

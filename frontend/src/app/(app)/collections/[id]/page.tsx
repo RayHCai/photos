@@ -11,9 +11,9 @@ import { CollectionSettingsModal } from '@/components/collections/CollectionSett
 import { useFileUpload } from '@/lib/hooks/useFileUpload';
 import { CenteredSpinner } from '@/components/ui/CenteredSpinner';
 import { Button } from '@/components/ui/Button';
-import { IconButton } from '@/components/ui/IconButton';
 import { FileDropZone } from '@/components/upload/UploadDropzone';
-import { Plus, Settings } from 'lucide-react';
+import { UploadMenu } from '@/components/upload/UploadMenu';
+import { Settings } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function CollectionDetailPage() {
@@ -25,7 +25,7 @@ export default function CollectionDetailPage() {
     const selection = useMediaSelection();
     const addItems = useAddCollectionItems();
     const removeItems = useRemoveCollectionItems();
-    const { openFilePicker } = useFileUpload();
+    const { openFilePicker, openFolderPicker } = useFileUpload();
 
     const handleRemoveItems = useCallback(async (ids: string[]) => {
         await new Promise<void>((resolve, reject) => {
@@ -87,10 +87,9 @@ export default function CollectionDetailPage() {
                     />
                     {!selection.isSelecting && (
                         <>
-                            <IconButton
-                                icon={Plus}
-                                onClick={() => openFilePicker(id)}
-                                title="Upload photos"
+                            <UploadMenu
+                                onUploadFiles={() => openFilePicker(id)}
+                                onUploadFolder={() => openFolderPicker(id)}
                             />
                             <Button
                                 variant="ghost"
