@@ -61,7 +61,8 @@ export function FileDropZone({ children, className = '' }: FileDropZoneProps) {
                         hasDirectories = true;
                     }
                     entries.push(entry);
-                } else {
+                }
+                else {
                     // Fallback for browsers without webkitGetAsEntry
                     const file = items[i].getAsFile();
                     if (file) plainFiles.push(file);
@@ -82,10 +83,12 @@ export function FileDropZone({ children, className = '' }: FileDropZoneProps) {
                     }
 
                     addFiles(allMedia);
-                } catch {
+                }
+                catch {
                     toast.error('Failed to read dropped files');
                 }
-            } else if (e.dataTransfer?.files.length) {
+            }
+            else if (e.dataTransfer?.files.length) {
                 addFiles(e.dataTransfer.files);
             }
         },

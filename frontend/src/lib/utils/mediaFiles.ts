@@ -39,7 +39,8 @@ function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEn
             reader.readEntries((entries) => {
                 if (entries.length === 0) {
                     resolve(all);
-                } else {
+                }
+                else {
                     all.push(...entries);
                     readBatch();
                 }
