@@ -239,7 +239,7 @@ function buildFilterClauses(parsed: ParsedQuery, paramOffset: number) {
     }
 
     if (parsed.mediaType) {
-        clauses.push(`m.type = $${idx++}`);
+        clauses.push(`m.type = $${idx++}::"MediaType"`);
         params.push(parsed.mediaType);
     }
 
