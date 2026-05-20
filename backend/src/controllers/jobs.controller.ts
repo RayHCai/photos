@@ -16,3 +16,10 @@ export const retryFailed = asyncHandler(async (_req: Request, res: Response) => 
     logger.info({ count }, 'retry all failed media enqueued');
     res.json({ count });
 });
+
+export const enqueuePending = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('enqueue all pending media requested');
+    const count = await mediaService.enqueueAllPending();
+    logger.info({ count }, 'enqueue all pending media completed');
+    res.json({ count });
+});
