@@ -14,9 +14,11 @@ class Settings(BaseSettings):
     clip_model: str = "ViT-B-32"
     clip_pretrained: str = "openai"
 
-    face_det_thresh: float = 0.5
-    face_confidence_thresh: float = 0.65
-    face_match_thresh: float = 0.45
+    face_det_thresh: float = 0.6
+    face_confidence_thresh: float = 0.72
+    face_new_person_thresh: float = 0.87
+    face_match_thresh: float = 0.55
+    face_min_size: int = 50
 
     service_secret: str = ""
 

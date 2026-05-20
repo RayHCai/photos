@@ -82,7 +82,7 @@ async def assign_or_create(
     person_id = await find_nearest_person(embedding)
 
     if person_id is None:
-        if confidence < settings.face_confidence_thresh:
+        if confidence < settings.face_new_person_thresh:
             logger.info("face_skipped_low_confidence", confidence=round(confidence, 3))
             return None
         person_id = await create_person()

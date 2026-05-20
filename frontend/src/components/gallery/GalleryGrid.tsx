@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useCallback } from 'react';
+import { useMemo, useRef, useCallback, useState, useLayoutEffect, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { GalleryRow } from './GalleryRow';
 import { DateHeader } from './DateHeader';
@@ -43,8 +43,21 @@ export function GalleryGrid({
     thumbnailSrcFn,
 }: GalleryGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const [measuredWidth, setMeasuredWidth] = useState(0);
 
-    const containerWidth = propWidth ?? (containerRef.current?.clientWidth || 1200);
+    useLayoutEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        setMeasuredWidth(el.clientWidth);
+        const observer = new ResizeObserver((entries) => {
+            const width = Math.round(entries[0].contentRect.width);
+            if (width > 0) setMeasuredWidth(width);
+        });
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, []);
+
+    const containerWidth = propWidth ?? measuredWidth;
 
     const mediaMap = useMemo(() => {
         const map = new Map<string, MediaListItem>();
@@ -106,6 +119,10 @@ export function GalleryGrid({
         estimateSize: (index) => virtualRows[index]?.height || 220,
         overscan: 5,
     });
+
+    useEffect(() => {
+        virtualizer.measure();
+    }, [virtualRows]);
 
     const handleFetchMore = useCallback(() => {
         if (fetchMore && !isFetching) {

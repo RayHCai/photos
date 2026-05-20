@@ -10,3 +10,7 @@ export function getQueueStats(): Promise<{
 export function retryFailed(): Promise<{ count: number }> {
     return apiFetch('/jobs/retry-failed', { method: 'POST' });
 }
+
+export function batchRetry(ids: string[]): Promise<{ count: number }> {
+    return apiFetch('/jobs/retry', { method: 'POST', body: JSON.stringify({ ids }) });
+}

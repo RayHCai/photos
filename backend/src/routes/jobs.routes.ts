@@ -11,5 +11,6 @@ router.use(authMiddleware);
 
 router.get('/stats', jobsController.getStats);
 router.post('/retry-failed', jobsController.retryFailed);
+router.post('/retry', jobsController.batchRetry);
 
 export default router;
