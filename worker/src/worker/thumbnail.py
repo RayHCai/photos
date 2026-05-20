@@ -41,7 +41,7 @@ def generate_video_thumbnail(video_path: str) -> bytes:
                 "-ss", "1",
                 "-vframes", "1",
                 "-vf", f"scale='min({MAX_DIMENSION},iw)':'-1'",
-                "-quality", str(WEBP_QUALITY),
+                "-q:v", str(WEBP_QUALITY),
                 tmp_path,
             ],
             capture_output=True,
