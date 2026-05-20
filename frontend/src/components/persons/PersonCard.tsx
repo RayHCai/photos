@@ -17,7 +17,8 @@ export function PersonCard({ person, onClick, isSelected, isSelecting, onSelect 
         if (isSelecting && onSelect) {
             e.preventDefault();
             onSelect(e);
-        } else {
+        }
+        else {
             onClick();
         }
     };

@@ -32,7 +32,8 @@ export default function PersonsPage() {
         try {
             await Promise.all(ids.map((id) => deletePerson.mutateAsync(id)));
             toast.success(`Deleted ${ids.length} person${ids.length !== 1 ? 's' : ''}`);
-        } catch {
+        }
+        catch {
             toast.error('Failed to delete');
         }
     }, [deletePerson]);
@@ -73,7 +74,8 @@ export default function PersonsPage() {
                             if (!selection.isSelecting) selection.startSelecting();
                             if (e.shiftKey) {
                                 selection.addRange(p.id, personIds);
-                            } else {
+                            }
+                            else {
                                 selection.toggle(p.id);
                             }
                         }}
