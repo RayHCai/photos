@@ -300,3 +300,17 @@ export async function retryAllFailed() {
     logger.info({ count: failedItems.length }, 'media: retried all failed items');
     return failedItems.length;
 }
+
+export async function enqueueAllPending() {
+    const pendingItems = await prisma.mediaItem.findMany({
+        where: { processingStatus: 'PENDING' },
+        select: { id: true, originalKey: true, mimeType: true, type: true },
+    });
+
+    for (const item of pendingItems) {
+        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type);
+    }
+
+    logger.info({ count: pendingItems.length }, 'media: enqueued all pending items');
+    return pendingItems.length;
+}

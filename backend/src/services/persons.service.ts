@@ -51,13 +51,21 @@ export async function mergePersons(targetId: string, sourceId: string) {
 
 export async function deletePerson(id: string) {
     await findOrThrow(() => prisma.person.findUnique({ where: { id } }), 'Person');
+
+    const faces = await prisma.face.findMany({
+        where: { personId: id },
+        select: { cropKey: true },
+    });
+    const cropKeys = faces.map(f => f.cropKey).filter((k): k is string => k !== null);
+
     await prisma.$transaction([
-        prisma.face.updateMany({
-            where: { personId: id },
-            data: { personId: null },
-        }),
+        prisma.face.deleteMany({ where: { personId: id } }),
         prisma.person.delete({ where: { id } }),
     ]);
+
+    if (cropKeys.length > 0) {
+        await s3Service.deleteObjects(cropKeys);
+    }
 }
 
 export async function deleteOrphanPersons(personIds?: string[]): Promise<number> {

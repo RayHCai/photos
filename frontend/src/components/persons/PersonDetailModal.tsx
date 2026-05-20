@@ -163,7 +163,7 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
                 open={deleteOpen}
                 onClose={() => setDeleteOpen(false)}
                 onConfirm={handleDelete}
-                message="Delete this person? Their faces will be unassigned."
+                message="Delete this person? Their faces will be permanently removed."
                 loading={deletePerson.isPending}
             />
 
