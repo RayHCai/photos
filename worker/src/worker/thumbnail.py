@@ -28,27 +28,34 @@ def generate_photo_thumbnail(image: Image.Image) -> bytes:
     return result
 
 
+def _extract_frame(video_path: str, tmp_path: str, seek: str) -> None:
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-ss", seek,
+            "-i", video_path,
+            "-vframes", "1",
+            "-q:v", "2",
+            tmp_path,
+        ],
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+
+
 def generate_video_thumbnail(video_path: str) -> bytes:
-    with tempfile.NamedTemporaryFile(suffix=".webp", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp_path = tmp.name
 
     try:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i", video_path,
-                "-ss", "1",
-                "-vframes", "1",
-                "-vf", f"scale='min({MAX_DIMENSION},iw)':'-1'",
-                "-q:v", str(WEBP_QUALITY),
-                tmp_path,
-            ],
-            capture_output=True,
-            timeout=30,
-            check=True,
-        )
-        return Path(tmp_path).read_bytes()
+        try:
+            _extract_frame(video_path, tmp_path, "1")
+        except subprocess.CalledProcessError:
+            _extract_frame(video_path, tmp_path, "0")
+        frame = Image.open(tmp_path)
+        return generate_photo_thumbnail(frame)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         logger.warning("video_thumbnail_failed", error=str(exc))
         raise
