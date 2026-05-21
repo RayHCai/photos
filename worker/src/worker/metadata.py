@@ -13,6 +13,20 @@ from worker.log import get_logger
 logger = get_logger(__name__)
 
 
+def _clean_exif_string(value: object) -> str | None:
+    """Strip null bytes and whitespace from EXIF string values."""
+    s = str(value).replace("\x00", "").strip()
+    return s or None
+
+
+def _finite_or_none(value: float | None) -> float | None:
+    """Return None if value is NaN or Infinity."""
+    if value is None:
+        return None
+    from math import isfinite
+    return value if isfinite(value) else None
+
+
 @dataclass
 class MediaMetadata:
     width: int | None = None
@@ -58,14 +72,14 @@ def extract_photo_metadata(image: Image.Image) -> MediaMetadata:
 
     # Camera info
     if "Make" in decoded:
-        meta.camera_make = str(decoded["Make"]).strip()
+        meta.camera_make = _clean_exif_string(decoded["Make"])
     if "Model" in decoded:
-        meta.camera_model = str(decoded["Model"]).strip()
+        meta.camera_model = _clean_exif_string(decoded["Model"])
 
     # Date taken
     for field in ("DateTimeOriginal", "DateTimeDigitized", "DateTime"):
         if field in decoded and decoded[field]:
-            parsed = _parse_exif_datetime(str(decoded[field]))
+            parsed = _parse_exif_datetime(str(decoded[field]).replace("\x00", ""))
             if parsed:
                 meta.taken_at = parsed
                 break
@@ -85,9 +99,11 @@ def extract_photo_metadata(image: Image.Image) -> MediaMetadata:
 
         if lat_dms and lat_ref and lon_dms and lon_ref:
             try:
-                meta.latitude = _dms_to_decimal(lat_dms, str(lat_ref))  # type: ignore[arg-type]
-                meta.longitude = _dms_to_decimal(lon_dms, str(lon_ref))  # type: ignore[arg-type]
-            except (TypeError, IndexError, ValueError):
+                lat = _dms_to_decimal(lat_dms, str(lat_ref))  # type: ignore[arg-type]
+                lon = _dms_to_decimal(lon_dms, str(lon_ref))  # type: ignore[arg-type]
+                meta.latitude = _finite_or_none(lat)
+                meta.longitude = _finite_or_none(lon)
+            except (TypeError, IndexError, ValueError, ZeroDivisionError):
                 logger.warning("failed_to_parse_gps")
 
     logger.info(

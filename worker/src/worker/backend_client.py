@@ -56,7 +56,11 @@ async def _request(method: str, path: str, **kwargs: Any) -> Any:
     if response.status_code >= 400:
         detail = response.text
         try:
-            detail = response.json().get("error", detail)
+            body = response.json()
+            detail = body.get("error", detail)
+            # Include zod validation details if present
+            if "details" in body:
+                detail = f"{detail}: {body['details']}"
         except Exception:
             pass
         raise BackendError(response.status_code, detail)
