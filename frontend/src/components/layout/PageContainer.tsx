@@ -19,7 +19,7 @@ export function PageContainer({
     return (
         <div className="h-screen flex flex-col">
             {/* Toolbar */}
-            <div className="relative flex items-center gap-2 px-[30px] pt-3 pb-9">
+            <div className="relative flex items-center justify-center gap-2 px-[30px] pt-3 pb-9">
                 {toolbar}
             </div>
 

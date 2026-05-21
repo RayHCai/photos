@@ -112,6 +112,7 @@ async def persist_content(
     fts_document: str,
     thumbnail_key: str | None = None,
     clip_embedding: list[float] | None = None,
+    blur_hash: str | None = None,
 ) -> None:
     await _request("PUT", f"/media/{media_item_id}/content", json={
         "width": width,
@@ -127,7 +128,19 @@ async def persist_content(
         "ftsDocument": fts_document,
         "thumbnailKey": thumbnail_key,
         "clipEmbedding": clip_embedding,
+        "blurHash": blur_hash,
     })
+
+
+async def persist_blurhash_only(media_item_id: str, blur_hash: str) -> None:
+    await _request("PUT", f"/media/{media_item_id}/blur-hash", json={
+        "blurHash": blur_hash,
+    })
+
+
+async def get_thumbnail_key(media_item_id: str) -> str | None:
+    data = await _request("GET", f"/media/{media_item_id}/thumbnail-key")
+    return data["thumbnailKey"]
 
 
 async def persist_clip_only(media_item_id: str, embedding: list[float]) -> None:

@@ -48,7 +48,7 @@ export default function CollectionsPage() {
                 emptyMessage="No collections"
                 toolbar={
                     <>
-                        <div className="flex-1 flex justify-center">
+                        <div className="sm:flex-1 flex sm:justify-center">
                             <SearchInput
                                 value={search}
                                 onChange={setSearch}

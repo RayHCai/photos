@@ -35,3 +35,10 @@ export const enqueuePending = asyncHandler(async (_req: Request, res: Response) 
     logger.info({ count }, 'enqueue all pending media completed');
     res.json({ count });
 });
+
+export const backfillBlurHashes = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('blurhash backfill requested');
+    const count = await mediaService.backfillBlurHashes();
+    logger.info({ count }, 'blurhash backfill enqueued');
+    res.json({ count });
+});

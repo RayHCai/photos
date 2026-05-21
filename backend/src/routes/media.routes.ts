@@ -24,6 +24,16 @@ router.get(
 router.get('/shell', mediaController.shell);
 router.get('/timeline', mediaController.timeline);
 
+router.post(
+    '/thumbnail-urls',
+    validate({
+        body: z.object({
+            ids: z.array(z.string()).min(1).max(200),
+        }),
+    }),
+    mediaController.batchThumbnails
+);
+
 router.get('/:id', mediaController.getById);
 
 router.post(

@@ -1,9 +1,13 @@
 import { Prisma } from '@prisma/client';
+import { nanoid } from 'nanoid';
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../middleware/errorHandler.js';
 import * as s3Service from './s3.service.js';
+import * as collectionsService from './collections.service.js';
+import * as shareService from './share.service.js';
 import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
+import { logger } from '../utils/logger.js';
 
 export async function listPersons() {
     return prisma.person.findMany({
@@ -42,6 +46,9 @@ export async function mergePersons(targetId: string, sourceId: string) {
         }),
         prisma.person.delete({ where: { id: sourceId } }),
     ]);
+
+    // Sync target person's shared collection
+    await syncPersonCollection(targetId);
 
     return prisma.person.findUnique({
         where: { id: targetId },
@@ -140,4 +147,111 @@ export async function getPersonAvatarUrl(id: string) {
     }
 
     return s3Service.getPresignedDownloadUrl(person.avatarKey);
+}
+
+// ─── Share Person ───────────────────────────────────────────
+
+function slugify(name: string): string {
+    let slug = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .replace(/-{2,}/g, '-');
+
+    if (slug.length < 3) {
+        slug = slug ? `${slug}-${nanoid(5)}` : nanoid(8);
+    }
+
+    return slug.substring(0, 50);
+}
+
+async function getPersonMediaIds(personId: string): Promise<string[]> {
+    const faces = await prisma.face.findMany({
+        where: { personId },
+        select: { mediaItemId: true },
+        distinct: ['mediaItemId'],
+    });
+    return faces.map(f => f.mediaItemId);
+}
+
+export async function syncPersonCollection(personId: string) {
+    const collection = await prisma.collection.findUnique({
+        where: { personId },
+    });
+    if (!collection) return;
+
+    const mediaItemIds = await getPersonMediaIds(personId);
+
+    await prisma.collectionItem.deleteMany({
+        where: { collectionId: collection.id },
+    });
+
+    if (mediaItemIds.length > 0) {
+        await collectionsService.addItems(collection.id, mediaItemIds);
+    }
+
+    logger.debug({ personId, collectionId: collection.id, itemCount: mediaItemIds.length }, 'person collection synced');
+}
+
+export async function sharePerson(personId: string) {
+    const person = await findOrThrow(
+        () => prisma.person.findUnique({ where: { id: personId } }),
+        'Person'
+    );
+
+    if (!person.name) {
+        throw new AppError(400, 'Person must have a name before sharing');
+    }
+
+    let collection = await prisma.collection.findUnique({
+        where: { personId },
+        include: {
+            shareLinks: { where: { isActive: true }, take: 1 },
+        },
+    });
+
+    const mediaItemIds = await getPersonMediaIds(personId);
+
+    if (collection) {
+        // Sync items
+        await prisma.collectionItem.deleteMany({
+            where: { collectionId: collection.id },
+        });
+        if (mediaItemIds.length > 0) {
+            await collectionsService.addItems(collection.id, mediaItemIds);
+        }
+
+        // Return existing active share link
+        if (collection.shareLinks.length > 0) {
+            return {
+                collection: { id: collection.id, name: collection.name },
+                shareLink: collection.shareLinks[0],
+                created: false,
+            };
+        }
+    } else {
+        collection = await prisma.collection.create({
+            data: { name: person.name, personId },
+            include: { shareLinks: { where: { isActive: true }, take: 1 } },
+        });
+
+        if (mediaItemIds.length > 0) {
+            await collectionsService.addItems(collection.id, mediaItemIds);
+        }
+    }
+
+    // Generate slug
+    let slug = slugify(person.name);
+    const existing = await prisma.shareLink.findUnique({ where: { slug } });
+    if (existing) {
+        slug = `${slug.substring(0, 44)}-${nanoid(5)}`;
+    }
+
+    const shareLink = await shareService.createShareLink(collection.id, { slug });
+
+    return {
+        collection: { id: collection.id, name: collection.name },
+        shareLink,
+        created: true,
+    };
 }

@@ -44,6 +44,8 @@ router.post(
 
 router.delete('/:id', personsController.deleteOne);
 
+router.post('/:id/share', personsController.share);
+
 router.get('/:id/avatar', personsController.getAvatar);
 
 router.get(

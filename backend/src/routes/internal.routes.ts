@@ -26,7 +26,7 @@ router.post(
     '/media/:id/retry-task',
     validate({
         body: z.object({
-            startStage: z.enum(['full', 'clip', 'faces']).default('full'),
+            startStage: z.enum(['full', 'clip', 'faces', 'blurhash']).default('full'),
         }),
     }),
     internalController.createRetryTask,
@@ -60,10 +60,23 @@ router.put(
             ftsDocument: z.string(),
             thumbnailKey: z.string().nullable().optional(),
             clipEmbedding: z.array(z.number()).length(512).nullable().optional(),
+            blurHash: z.string().nullable().optional(),
         }),
     }),
     internalController.persistContent
 );
+
+router.put(
+    '/media/:id/blur-hash',
+    validate({
+        body: z.object({
+            blurHash: z.string(),
+        }),
+    }),
+    internalController.persistBlurHashOnly
+);
+
+router.get('/media/:id/thumbnail-key', internalController.getThumbnailKey);
 
 router.put(
     '/media/:id/clip-embedding',
@@ -156,7 +169,7 @@ router.post(
     '/media/query-for-retry',
     validate({
         body: z.object({
-            filter: z.enum(['all', 'failed', 'missing_clip', 'missing_faces']),
+            filter: z.enum(['all', 'failed', 'missing_clip', 'missing_faces', 'missing_blurhash']),
         }),
     }),
     internalController.queryMediaItemsForRetry

@@ -24,7 +24,7 @@ interface PhotoGalleryProps {
     selection: ReturnType<typeof useMediaSelection>;
 
     // Custom thumbnail source (for shared links)
-    thumbnailSrcFn?: (id: string) => string;
+    thumbnailSrcFn?: (id: string) => string | undefined;
 
     // Custom lightbox renderer. Defaults to MediaLightbox.
     renderLightbox?: (props: LightboxProps) => ReactNode;

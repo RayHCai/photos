@@ -70,6 +70,7 @@ interface PersistContentData {
     ftsDocument: string;
     thumbnailKey?: string | null;
     clipEmbedding?: number[] | null;
+    blurHash?: string | null;
 }
 
 export async function persistContent(mediaItemId: string, data: PersistContentData) {
@@ -95,6 +96,7 @@ export async function persistContent(mediaItemId: string, data: PersistContentDa
             thumbnail_key = COALESCE($13, thumbnail_key),
             clip_embedding = CASE WHEN $14::text IS NOT NULL
                 THEN $14::vector ELSE clip_embedding END,
+            blur_hash = COALESCE($15, blur_hash),
             processing_status = 'COMPLETED',
             processing_error = NULL,
             updated_at = now()
@@ -113,7 +115,26 @@ export async function persistContent(mediaItemId: string, data: PersistContentDa
         data.ftsDocument,
         data.thumbnailKey ?? null,
         embeddingStr,
+        data.blurHash ?? null,
     );
+}
+
+export async function persistBlurHashOnly(mediaItemId: string, blurHash: string) {
+    await prisma.mediaItem.update({
+        where: { id: mediaItemId },
+        data: { blurHash },
+    });
+}
+
+export async function getThumbnailKey(mediaItemId: string) {
+    const item = await findOrThrow(
+        () => prisma.mediaItem.findUnique({
+            where: { id: mediaItemId },
+            select: { thumbnailKey: true },
+        }),
+        'Media item'
+    );
+    return { thumbnailKey: item.thumbnailKey };
 }
 
 export async function persistClipOnly(mediaItemId: string, embedding: number[]) {
@@ -143,6 +164,11 @@ export async function clearFaces(mediaItemId: string): Promise<number> {
         const orphansDeleted = await personsService.deleteOrphanPersons(personIds);
         if (orphansDeleted > 0) {
             logger.info({ orphansDeleted, mediaItemId }, 'orphan persons cleaned up after clearFaces');
+        }
+
+        // Sync shared collections for affected persons
+        for (const pid of personIds) {
+            await personsService.syncPersonCollection(pid);
         }
     }
 
@@ -236,6 +262,11 @@ export async function insertFace(data: InsertFaceData): Promise<{ id: string }> 
         });
     }
 
+    // Sync person's shared collection if one exists
+    if (data.personId) {
+        await personsService.syncPersonCollection(data.personId);
+    }
+
     return { id: rows[0].id };
 }
 
@@ -282,6 +313,12 @@ export async function batchReassignFaces(
         count += batch.length;
     }
 
+    // Sync shared collections for all affected persons
+    const uniquePersonIds = [...new Set(assignments.map(a => a.personId))];
+    for (const pid of uniquePersonIds) {
+        await personsService.syncPersonCollection(pid);
+    }
+
     return count;
 }
 
@@ -322,7 +359,7 @@ export async function getMediaItemInfo(mediaItemId: string) {
     );
 }
 
-type RetryFilter = 'all' | 'failed' | 'missing_clip' | 'missing_faces';
+type RetryFilter = 'all' | 'failed' | 'missing_clip' | 'missing_faces' | 'missing_blurhash';
 
 export async function queryMediaItemsForRetry(filter: RetryFilter) {
     let whereClause: string;
@@ -338,6 +375,9 @@ export async function queryMediaItemsForRetry(filter: RetryFilter) {
             break;
         case 'missing_faces':
             whereClause = `processing_status = 'COMPLETED' AND clip_embedding IS NOT NULL AND id NOT IN (SELECT DISTINCT media_item_id FROM faces)`;
+            break;
+        case 'missing_blurhash':
+            whereClause = "blur_hash IS NULL AND processing_status = 'COMPLETED'";
             break;
     }
 

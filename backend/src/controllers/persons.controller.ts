@@ -53,3 +53,11 @@ export const getAvatar = asyncHandler(async (req: Request, res: Response) => {
     const url = await personsService.getPersonAvatarUrl(req.params.id as string);
     res.redirect(url);
 });
+
+export const share = asyncHandler(async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    logger.info({ personId: id }, 'sharing person');
+    const result = await personsService.sharePerson(id);
+    logger.info({ personId: id, slug: result.shareLink.slug, created: result.created }, 'person shared');
+    res.status(result.created ? 201 : 200).json(result);
+});

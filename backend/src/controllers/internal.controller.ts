@@ -48,6 +48,18 @@ export const persistContent = asyncHandler(async (req: Request, res: Response) =
     res.status(204).send();
 });
 
+export const persistBlurHashOnly = asyncHandler(async (req: Request, res: Response) => {
+    const mediaId = req.params.id as string;
+    logger.info({ mediaId }, 'persisting blur hash');
+    await internalService.persistBlurHashOnly(mediaId, req.body.blurHash);
+    res.status(204).send();
+});
+
+export const getThumbnailKey = asyncHandler(async (req: Request, res: Response) => {
+    const result = await internalService.getThumbnailKey(req.params.id as string);
+    res.json(result);
+});
+
 export const persistClipOnly = asyncHandler(async (req: Request, res: Response) => {
     const mediaId = req.params.id as string;
     logger.info({ mediaId }, 'persisting CLIP embedding');

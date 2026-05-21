@@ -98,6 +98,12 @@ export const batchDelete = asyncHandler(async (req: Request, res: Response) => {
     res.json({ deleted: count });
 });
 
+export const batchThumbnails = asyncHandler(async (req: Request, res: Response) => {
+    const ids = req.body.ids as string[];
+    const urls = await mediaService.getBatchThumbnailUrls(ids);
+    res.json(urls);
+});
+
 export const getThumbnail = asyncHandler(async (req: Request, res: Response) => {
     const url = await mediaService.getThumbnailUrl(req.params.id as string);
     res.redirect(url);

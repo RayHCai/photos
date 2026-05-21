@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import blurhash
 from PIL import Image
 
 from worker.log import get_logger
@@ -91,3 +92,12 @@ def extract_video_frames(video_path: str, interval_seconds: float = 5.0, max_fra
 
         logger.info("video_frames_extracted", count=len(frames), interval_seconds=interval_seconds)
         return frames
+
+
+def generate_blurhash(image: Image.Image, x_components: int = 4, y_components: int = 4) -> str:
+    """Generate a BlurHash string from a PIL Image (ideally the thumbnail)."""
+    img = image.copy().convert("RGB")
+    img.thumbnail((64, 64), Image.Resampling.LANCZOS)
+    hash_str: str = blurhash.encode(img, x_components, y_components)
+    logger.info("blurhash_generated", hash=hash_str, width=img.width, height=img.height)
+    return hash_str

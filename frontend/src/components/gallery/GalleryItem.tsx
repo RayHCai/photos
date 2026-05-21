@@ -1,12 +1,26 @@
 'use client';
 
-import { memo } from 'react';
-import { Play } from 'lucide-react';
+import { memo, useMemo } from 'react';
+import { decode } from 'blurhash';
+import { PlayCircle } from 'lucide-react';
 import { thumbnailUrl } from '@/lib/api/media';
 import { formatDuration } from '@/lib/utils/format';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { useSelectableItem } from '@/lib/hooks/useSelectableItem';
 import type { MediaShellItem } from '@/lib/types/media';
+
+function blurhashToDataUrl(hash: string, width = 32, height = 32): string | null {
+    if (typeof document === 'undefined') return null;
+    const pixels = decode(hash, width, height);
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+    const imageData = ctx.createImageData(width, height);
+    imageData.data.set(pixels);
+    ctx.putImageData(imageData, 0, 0);
+    return canvas.toDataURL();
+}
 
 interface GalleryItemProps {
     item: MediaShellItem;
@@ -35,12 +49,28 @@ export const GalleryItem = memo(function GalleryItem({
         onClick: item.processingStatus === 'COMPLETED' ? onClick : undefined,
     });
 
+    const blurDataUrl = useMemo(() => {
+        if (!item.blurHash) return null;
+        try {
+            return blurhashToDataUrl(item.blurHash);
+        } catch {
+            return null;
+        }
+    }, [item.blurHash]);
+
     return (
         <div
             className={`relative overflow-hidden bg-stone-100 flex-shrink-0 group select-none ${
                 item.processingStatus === 'COMPLETED' || isSelecting ? 'cursor-pointer' : 'cursor-default'
             }`}
-            style={{ width, height }}
+            style={{
+                width,
+                height,
+                ...(blurDataUrl && {
+                    backgroundImage: `url(${blurDataUrl})`,
+                    backgroundSize: 'cover',
+                }),
+            }}
             onClick={handleClick}
             onContextMenu={handleContextMenu}
         >
@@ -61,10 +91,11 @@ export const GalleryItem = memo(function GalleryItem({
             )}
 
             {item.type === 'VIDEO' && (
-                <div className="absolute bottom-1 right-1 flex items-center gap-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded-sm">
-                    <Play className="w-3 h-3" />
-                    {item.durationSeconds !== null &&
-                        formatDuration(item.durationSeconds)}
+                <div className="absolute bottom-1 right-1 flex items-center gap-1 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]">
+                    {item.durationSeconds !== null && (
+                        <span className="text-[11px] font-medium">{formatDuration(item.durationSeconds)}</span>
+                    )}
+                    <PlayCircle className="w-4 h-4" />
                 </div>
             )}
 

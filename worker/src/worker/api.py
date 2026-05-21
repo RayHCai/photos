@@ -87,7 +87,7 @@ async def retry_single(media_id: str, req: RetryRequest) -> RetryResponse:
     return RetryResponse(job_id=job_id, media_item_id=media_id, stage=req.stage)
 
 
-BatchFilter = Literal["all", "failed", "missing_clip", "missing_faces"]
+BatchFilter = Literal["all", "failed", "missing_clip", "missing_faces", "missing_blurhash"]
 
 
 class BatchRetryRequest(BaseModel):
