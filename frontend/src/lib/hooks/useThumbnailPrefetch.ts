@@ -16,7 +16,6 @@ export function useThumbnailPrefetch(
 
     const thumbnailSrcFn = useCallback(
         (id: string): string | undefined => cache.current.get(id),
-        // eslint-disable-next-line react-hooks/exhaustive-deps
         [version]
     );
 

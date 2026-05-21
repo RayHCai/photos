@@ -111,7 +111,8 @@ export function GalleryGrid({
                     });
                 }
             }
-        } else {
+        }
+        else {
             const availableWidth = containerWidth - 132;
 
             for (const group of groups) {

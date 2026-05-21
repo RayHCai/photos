@@ -53,7 +53,8 @@ export const GalleryItem = memo(function GalleryItem({
         if (!item.blurHash) return null;
         try {
             return blurhashToDataUrl(item.blurHash);
-        } catch {
+        }
+        catch {
             return null;
         }
     }, [item.blurHash]);
