@@ -291,6 +291,7 @@ async def process_photo(
 
     if start_stage == "blurhash":
         await _stage_blurhash(media_item_id)
+        await api.set_processing_status(media_item_id, "COMPLETED")
         logger.info("photo_processed", media_item_id=media_item_id)
         return
 
@@ -323,6 +324,7 @@ async def process_video(
 
     if start_stage == "blurhash":
         await _stage_blurhash(media_item_id)
+        await api.set_processing_status(media_item_id, "COMPLETED")
         logger.info("video_processed", media_item_id=media_item_id)
         return
 
