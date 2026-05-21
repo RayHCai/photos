@@ -10,6 +10,8 @@ const EXT_TO_MIME: Record<string, string> = {
     tiff: 'image/tiff',
     avif: 'image/avif',
     mkv: 'video/x-matroska',
+    mov: 'video/quicktime',
+    avi: 'video/x-msvideo',
 };
 
 function resolveMimeType(file: File): string {
