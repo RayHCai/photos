@@ -85,15 +85,14 @@ export function useTimelineScrollbar(
             if (rafRef.current !== null) return;
             rafRef.current = requestAnimationFrame(() => {
                 updatePosition();
+                setIsScrolling(true);
+                if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+                scrollTimeoutRef.current = setTimeout(() => {
+                    setIsScrolling(false);
+                    scrollTimeoutRef.current = null;
+                }, 1200);
                 rafRef.current = null;
             });
-
-            setIsScrolling(true);
-            if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-            scrollTimeoutRef.current = setTimeout(() => {
-                setIsScrolling(false);
-                scrollTimeoutRef.current = null;
-            }, 1200);
         };
 
         updatePosition();

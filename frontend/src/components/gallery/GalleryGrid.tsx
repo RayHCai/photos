@@ -159,7 +159,7 @@ export function GalleryGrid({
         count: virtualRows.length,
         getScrollElement: () => containerRef.current,
         estimateSize: (index) => virtualRows[index]?.height || (isMobile ? 100 : 220),
-        overscan: isMobile ? 15 : 5,
+        overscan: isMobile ? 3 : 5,
     });
 
     const prefetchSrcFn = useThumbnailPrefetch(virtualRows, virtualizer, !thumbnailSrcFn);
@@ -192,6 +192,8 @@ export function GalleryGrid({
                                     height: virtualItem.size,
                                     transform: `translateY(${virtualItem.start}px)`,
                                     padding: isMobile ? `0 ${MOBILE_PADDING}px` : '0 66px',
+                                    contain: 'layout style paint',
+                                    willChange: 'transform',
                                 }}
                             >
                                 {row.type === 'date-header' ? (
