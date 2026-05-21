@@ -7,6 +7,8 @@ const router = Router();
 
 router.post('/enqueue-pending', serviceAuthMiddleware, jobsController.enqueuePending);
 router.post('/backfill-blurhash', serviceAuthMiddleware, jobsController.backfillBlurHashes);
+router.post('/backfill-all-blurhash', serviceAuthMiddleware, jobsController.backfillAllMissingBlurHashes);
+router.post('/fix-orphaned-processing', serviceAuthMiddleware, jobsController.fixOrphanedProcessing);
 
 router.use(authMiddleware);
 

@@ -408,3 +408,34 @@ export async function backfillBlurHashes() {
     logger.info({ count: items.length }, 'media: blurhash backfill enqueued');
     return items.length;
 }
+
+export async function backfillAllMissingBlurHashes() {
+    const items = await prisma.mediaItem.findMany({
+        where: { blurHash: null, thumbnailKey: { not: null } },
+        select: { id: true, originalKey: true, mimeType: true, type: true },
+    });
+
+    for (const item of items) {
+        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type, 'blurhash');
+    }
+
+    logger.info({ count: items.length }, 'media: backfill ALL missing blurhashes enqueued');
+    return items.length;
+}
+
+export async function fixOrphanedProcessing() {
+    const result = await prisma.mediaItem.updateMany({
+        where: {
+            processingStatus: 'PROCESSING',
+            thumbnailKey: { not: null },
+            blurHash: { not: null },
+        },
+        data: {
+            processingStatus: 'COMPLETED',
+            processingError: null,
+        },
+    });
+
+    logger.info({ count: result.count }, 'media: orphaned PROCESSING items fixed to COMPLETED');
+    return result.count;
+}

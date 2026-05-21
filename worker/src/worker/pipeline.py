@@ -63,7 +63,8 @@ async def _stage_content_photo(
     blur_hash = generate_blurhash(thumb_image)
 
     logger.info("step_encode_clip", media_item_id=media_item_id)
-    clip_emb = encode_image(image)
+    clip_input = image.convert("RGB") if image.mode != "RGB" else image
+    clip_emb = encode_image(clip_input)
     fts_doc = _build_fts_document(meta, file_name)
 
     logger.info(
@@ -159,7 +160,8 @@ async def _stage_content_video(
 
 
 async def _stage_clip_photo(image: Image.Image, media_item_id: str) -> None:
-    clip_emb = encode_image(image)
+    clip_input = image.convert("RGB") if image.mode != "RGB" else image
+    clip_emb = encode_image(clip_input)
     await api.persist_clip_only(media_item_id, clip_emb.tolist())
     logger.info("stage_clip_done", media_item_id=media_item_id)
 

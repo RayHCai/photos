@@ -42,3 +42,17 @@ export const backfillBlurHashes = asyncHandler(async (_req: Request, res: Respon
     logger.info({ count }, 'blurhash backfill enqueued');
     res.json({ count });
 });
+
+export const backfillAllMissingBlurHashes = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('backfill ALL missing blurhashes requested');
+    const count = await mediaService.backfillAllMissingBlurHashes();
+    logger.info({ count }, 'backfill ALL missing blurhashes enqueued');
+    res.json({ count });
+});
+
+export const fixOrphanedProcessing = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('fix orphaned PROCESSING items requested');
+    const count = await mediaService.fixOrphanedProcessing();
+    logger.info({ count }, 'orphaned PROCESSING items fixed');
+    res.json({ count });
+});
