@@ -9,6 +9,7 @@ dependencies = [
     "bullmq>=2.0",
     "httpx>=0.27",
     "pillow>=11.0",
+    "pillow-heif>=0.18",
     "open-clip-torch>=2.26",
     "torch>=2.4",
     "insightface>=0.7",
