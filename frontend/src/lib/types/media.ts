@@ -5,6 +5,7 @@ export interface MediaShellItem {
     id: string;
     type: MediaType;
     thumbnailKey: string | null;
+    blurHash: string | null;
     width: number | null;
     height: number | null;
     durationSeconds: number | null;

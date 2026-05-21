@@ -16,13 +16,14 @@ from worker.log import get_logger
 from worker.metadata import MediaMetadata, extract_photo_metadata, extract_video_metadata
 from worker.thumbnail import (
     extract_video_frames,
+    generate_blurhash,
     generate_photo_thumbnail,
     generate_video_thumbnail,
 )
 
 logger = get_logger(__name__)
 
-Stage = Literal["full", "clip", "faces"]
+Stage = Literal["full", "clip", "faces", "blurhash"]
 
 
 def _build_fts_document(meta: MediaMetadata, file_name: str) -> str:
@@ -57,6 +58,10 @@ async def _stage_content_photo(
     logger.info("step_upload_thumbnail", media_item_id=media_item_id, size_bytes=len(thumb_bytes))
     thumb_key = await s3.generate_key_and_upload("thumbnails", thumb_bytes, "image/webp")
 
+    logger.info("step_generate_blurhash", media_item_id=media_item_id)
+    thumb_image = Image.open(io.BytesIO(thumb_bytes))
+    blur_hash = generate_blurhash(thumb_image)
+
     logger.info("step_encode_clip", media_item_id=media_item_id)
     clip_emb = encode_image(image)
     fts_doc = _build_fts_document(meta, file_name)
@@ -83,6 +88,7 @@ async def _stage_content_photo(
         fts_document=fts_doc,
         thumbnail_key=thumb_key,
         clip_embedding=clip_emb.tolist(),
+        blur_hash=blur_hash,
     )
     logger.info("stage_content_done", media_item_id=media_item_id)
 
@@ -107,6 +113,10 @@ async def _stage_content_video(
 
     logger.info("step_upload_thumbnail", media_item_id=media_item_id, size_bytes=len(thumb_bytes))
     thumb_key = await s3.generate_key_and_upload("thumbnails", thumb_bytes, "image/webp")
+
+    logger.info("step_generate_blurhash", media_item_id=media_item_id)
+    thumb_image = Image.open(io.BytesIO(thumb_bytes))
+    blur_hash = generate_blurhash(thumb_image)
 
     clip_embedding: list[float] | None = None
     if frames:
@@ -140,6 +150,7 @@ async def _stage_content_video(
         fts_document=fts_doc,
         thumbnail_key=thumb_key,
         clip_embedding=clip_embedding,
+        blur_hash=blur_hash,
     )
     logger.info("stage_content_done", media_item_id=media_item_id)
 
@@ -244,6 +255,29 @@ async def _stage_faces_video(frames: list[Image.Image], media_item_id: str) -> N
     logger.info("stage_faces_done", media_item_id=media_item_id, count=total)
 
 
+# ─── Stage: BlurHash only ──────────────────────────────────────────────────
+
+
+async def _stage_blurhash(media_item_id: str) -> None:
+    """Download existing thumbnail from S3 and compute blurhash."""
+    logger.info("step_get_thumbnail_key", media_item_id=media_item_id)
+    thumb_key = await api.get_thumbnail_key(media_item_id)
+    if not thumb_key:
+        logger.warning("stage_blurhash_no_thumbnail", media_item_id=media_item_id)
+        return
+
+    logger.info("step_download_thumbnail", media_item_id=media_item_id, key=thumb_key)
+    thumb_bytes = await s3.download_to_bytes(thumb_key)
+    thumb_image = Image.open(io.BytesIO(thumb_bytes))
+
+    logger.info("step_generate_blurhash", media_item_id=media_item_id)
+    blur_hash = generate_blurhash(thumb_image)
+
+    logger.info("step_persist_blurhash", media_item_id=media_item_id, hash=blur_hash)
+    await api.persist_blurhash_only(media_item_id, blur_hash)
+    logger.info("stage_blurhash_done", media_item_id=media_item_id)
+
+
 # ─── Orchestrators ───────────────────────────────────────────────────────────
 
 
@@ -254,6 +288,11 @@ async def process_photo(
     start_stage: Stage = "full",
 ) -> None:
     logger.info("processing_photo", media_item_id=media_item_id, stage=start_stage)
+
+    if start_stage == "blurhash":
+        await _stage_blurhash(media_item_id)
+        logger.info("photo_processed", media_item_id=media_item_id)
+        return
 
     logger.info("step_download_original", media_item_id=media_item_id, key=original_key)
     raw = await s3.download_to_bytes(original_key)
@@ -281,6 +320,11 @@ async def process_video(
     start_stage: Stage = "full",
 ) -> None:
     logger.info("processing_video", media_item_id=media_item_id, stage=start_stage)
+
+    if start_stage == "blurhash":
+        await _stage_blurhash(media_item_id)
+        logger.info("video_processed", media_item_id=media_item_id)
+        return
 
     tmp_path: str | None = None
     try:

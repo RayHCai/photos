@@ -45,3 +45,13 @@ export function getPersonMedia(
 export function personAvatarUrl(id: string): string {
     return apiUrl(`/persons/${id}/avatar`);
 }
+
+export interface SharePersonResult {
+    collection: { id: string; name: string };
+    shareLink: { id: string; slug: string; collectionId: string };
+    created: boolean;
+}
+
+export function sharePerson(id: string): Promise<SharePersonResult> {
+    return apiFetch(`/persons/${id}/share`, { method: 'POST' });
+}

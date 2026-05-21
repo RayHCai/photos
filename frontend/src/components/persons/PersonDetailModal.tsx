@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { X, Edit2, Merge, Trash2 } from 'lucide-react';
+import { X, Edit2, Merge, Trash2, Share2 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
 import { ModalOverlay } from '@/components/ui/ModalOverlay';
 import { usePersonMedia, useDeletePerson } from '@/lib/hooks/usePersons';
@@ -11,6 +11,7 @@ import { thumbnailUrl } from '@/lib/api/media';
 import { pluralize } from '@/lib/utils/pluralize';
 import { PersonRenameDialog } from './PersonRenameDialog';
 import { PersonMergeDialog } from './PersonMergeDialog';
+import { PersonShareDialog } from './PersonShareDialog';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { Spinner } from '@/components/ui/Spinner';
 import { MediaLightbox } from '@/components/media/MediaLightbox';
@@ -30,6 +31,7 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
     const [renameOpen, setRenameOpen] = useState(false);
     const [mergeOpen, setMergeOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
     const allItems = useMemo(
@@ -56,7 +58,7 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
 
     return (
         <>
-            <ModalOverlay onClose={onClose} enabled={!renameOpen && !mergeOpen && !deleteOpen && !lightboxId}>
+            <ModalOverlay onClose={onClose} enabled={!renameOpen && !mergeOpen && !deleteOpen && !shareOpen && !lightboxId}>
                 <div className="bg-stone-50 rounded shadow-lg w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col overflow-hidden">
                     {/* Header */}
                     <div className="flex items-center justify-between px-6 py-4 border-b border-stone-200">
@@ -73,6 +75,18 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
                                 icon={Edit2}
                                 onClick={() => setRenameOpen(true)}
                                 title="Rename"
+                            />
+                            <IconButton
+                                icon={Share2}
+                                onClick={() => {
+                                    if (!person.name) {
+                                        toast.error('Name this person before sharing');
+                                        setRenameOpen(true);
+                                        return;
+                                    }
+                                    setShareOpen(true);
+                                }}
+                                title="Share"
                             />
                             <IconButton
                                 icon={Merge}
@@ -152,6 +166,15 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
                 sourceId={person.id}
                 sourceName={person.name}
             />
+
+            {person.name && (
+                <PersonShareDialog
+                    open={shareOpen}
+                    onClose={() => setShareOpen(false)}
+                    personId={person.id}
+                    personName={person.name}
+                />
+            )}
 
             <ConfirmModal
                 open={deleteOpen}

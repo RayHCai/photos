@@ -56,3 +56,13 @@ export function useDeletePerson() {
         },
     });
 }
+
+export function useSharePerson() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: personsApi.sharePerson,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['collections'] });
+        },
+    });
+}

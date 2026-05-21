@@ -18,6 +18,7 @@ interface SearchResult {
     type: string;
     file_name: string;
     thumbnail_key: string | null;
+    blur_hash: string | null;
     taken_at: Date | null;
     width: number | null;
     height: number | null;
@@ -252,6 +253,7 @@ function mapSearchResult(r: SearchResult) {
         type: r.type,
         fileName: r.file_name,
         thumbnailKey: r.thumbnail_key,
+        blurHash: r.blur_hash,
         width: r.width,
         height: r.height,
         durationSeconds: r.duration_seconds,
@@ -326,7 +328,7 @@ async function searchWithClipAndFilters(
     await prisma.$executeRaw`SELECT set_config('hnsw.ef_search', ${String(env.HNSW_EF_SEARCH)}, true)`;
 
     const results = await prisma.$queryRawUnsafe<SearchResult[]>(
-        `SELECT m.id, m.type, m.file_name, m.thumbnail_key,
+        `SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
                 m.taken_at, m.width, m.height, m.duration_seconds,
                 1 - (m.clip_embedding <=> $1::vector) AS similarity
          FROM media_items m
@@ -357,7 +359,7 @@ async function searchWithFtsAndFilters(
     const whereExtra = clauses.length > 0 ? `AND ${clauses.join(' AND ')}` : '';
 
     const results = await prisma.$queryRawUnsafe<SearchResult[]>(
-        `SELECT m.id, m.type, m.file_name, m.thumbnail_key,
+        `SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
                 m.taken_at, m.width, m.height, m.duration_seconds,
                 ts_rank(m.fts_vector, plainto_tsquery('english', $1)) AS rank
          FROM media_items m
@@ -393,7 +395,7 @@ async function searchWithFiltersOnly(
 
     const [results, countResult] = await Promise.all([
         prisma.$queryRawUnsafe<SearchResult[]>(
-            `SELECT m.id, m.type, m.file_name, m.thumbnail_key,
+            `SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
                     m.taken_at, m.width, m.height, m.duration_seconds
              FROM media_items m
              ${mainWhere}
@@ -477,7 +479,7 @@ export async function search(params: SearchParams) {
 
     // Path 3: Nothing parsed — last-resort FTS on the original query
     const results = await prisma.$queryRawUnsafe<SearchResult[]>(
-        `SELECT m.id, m.type, m.file_name, m.thumbnail_key,
+        `SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
                 m.taken_at, m.width, m.height, m.duration_seconds,
                 ts_rank(m.fts_vector, plainto_tsquery('english', $1)) AS rank
          FROM media_items m

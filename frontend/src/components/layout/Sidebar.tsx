@@ -20,7 +20,9 @@ export function Sidebar() {
                 />
             )}
 
-            <div className="fixed top-4 left-4 z-50 flex flex-col items-center gap-1">
+            <div className={`fixed top-4 left-4 z-50 flex flex-col items-center gap-1 rounded-xl p-1 transition-all duration-300 ${
+                open ? 'bg-white/80 backdrop-blur-lg shadow-lg shadow-stone-200/50' : 'bg-transparent'
+            }`}>
                 {/* Hamburger / X toggle */}
                 <button
                     onClick={() => setOpen(!open)}

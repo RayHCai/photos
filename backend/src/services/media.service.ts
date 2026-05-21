@@ -45,7 +45,7 @@ async function _createTaskAndEnqueue(
     originalKey: string,
     mimeType: string,
     type: 'PHOTO' | 'VIDEO',
-    startStage: 'full' | 'clip' | 'faces' = 'full',
+    startStage: 'full' | 'clip' | 'faces' | 'blurhash' = 'full',
 ) {
     const taskId = randomUUID();
     await prisma.mediaItem.update({
@@ -188,6 +188,7 @@ export async function getShellData() {
             takenAt: true,
             createdAt: true,
             thumbnailKey: true,
+            blurHash: true,
             durationSeconds: true,
             processingStatus: true,
         },
@@ -296,6 +297,22 @@ export async function getThumbnailUrl(id: string) {
     return s3Service.getPresignedDownloadUrl(item.thumbnailKey);
 }
 
+export async function getBatchThumbnailUrls(ids: string[]) {
+    const items = await prisma.mediaItem.findMany({
+        where: { id: { in: ids }, thumbnailKey: { not: null } },
+        select: { id: true, thumbnailKey: true },
+    });
+
+    const entries = await Promise.all(
+        items.map(async (item) => {
+            const url = await s3Service.getPresignedDownloadUrl(item.thumbnailKey!);
+            return [item.id, url] as const;
+        })
+    );
+
+    return Object.fromEntries(entries) as Record<string, string>;
+}
+
 export async function getOriginalUrl(id: string) {
     const item = await findOrThrow(
         () => prisma.mediaItem.findUnique({
@@ -376,4 +393,18 @@ export async function enqueueAllPending() {
 
     logger.info({ count: pendingItems.length }, 'media: enqueued all pending items');
     return pendingItems.length;
+}
+
+export async function backfillBlurHashes() {
+    const items = await prisma.mediaItem.findMany({
+        where: { blurHash: null, processingStatus: 'COMPLETED' },
+        select: { id: true, originalKey: true, mimeType: true, type: true },
+    });
+
+    for (const item of items) {
+        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type, 'blurhash');
+    }
+
+    logger.info({ count: items.length }, 'media: blurhash backfill enqueued');
+    return items.length;
 }

@@ -2,6 +2,7 @@ export interface SearchResult {
     id: string;
     type: 'PHOTO' | 'VIDEO';
     thumbnailKey: string | null;
+    blurHash: string | null;
     takenAt: string | null;
     width: number | null;
     height: number | null;

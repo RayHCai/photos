@@ -6,6 +6,7 @@ import { serviceAuthMiddleware } from '../middleware/serviceAuth.js';
 const router = Router();
 
 router.post('/enqueue-pending', serviceAuthMiddleware, jobsController.enqueuePending);
+router.post('/backfill-blurhash', serviceAuthMiddleware, jobsController.backfillBlurHashes);
 
 router.use(authMiddleware);
 

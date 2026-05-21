@@ -48,8 +48,8 @@ export default function PersonsPage() {
             emptyMessage="No people"
             toolbar={
                 <>
-                    <div className="w-9 flex-shrink-0" />
-                    <div className="flex-1 flex justify-center">
+                    <div className="w-9 flex-shrink-0 hidden sm:block" />
+                    <div className="sm:flex-1 flex sm:justify-center">
                         <SearchInput
                             value={search}
                             onChange={setSearch}
@@ -61,7 +61,7 @@ export default function PersonsPage() {
                         onDelete={handleDeletePersons}
                         deleteConfirmMessage={`Delete ${selection.count} selected person${selection.count !== 1 ? 's' : ''}? This cannot be undone.`}
                     />
-                    <div className="w-9 flex-shrink-0" />
+                    <div className="w-9 flex-shrink-0 hidden sm:block" />
                 </>
             }
         >

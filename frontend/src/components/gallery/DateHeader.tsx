@@ -12,7 +12,7 @@ export const DateHeader = memo(function DateHeader({
     return (
         <div
             className="py-2 sticky top-0 z-10 bg-stone-50/90 backdrop-blur-sm text-left"
-            style={contentOffset ? { paddingLeft: Math.max(0, contentOffset - 4) } : undefined}
+            style={contentOffset ? { paddingLeft: Math.max(0, contentOffset - 4) } : { paddingLeft: 4 }}
         >
             <h2 className="text-sm font-serif text-stone-700">{label}</h2>
         </div>

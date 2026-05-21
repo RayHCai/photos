@@ -39,6 +39,7 @@ model MediaItem {
     type             MediaType
     originalKey      String           @unique @map("original_key")
     thumbnailKey     String?          @map("thumbnail_key")
+    blurHash         String?          @map("blur_hash")
     fileName         String           @map("file_name")
     mimeType         String           @map("mime_type")
     fileSize         BigInt           @map("file_size")
@@ -80,7 +81,8 @@ model Person {
     createdAt DateTime @default(now()) @map("created_at")
     updatedAt DateTime @updatedAt @map("updated_at")
 
-    faces Face[]
+    faces      Face[]
+    collection Collection?
 
     @@map("persons")
 }
@@ -114,9 +116,11 @@ model Collection {
     name        String
     description String?
     coverKey    String?  @map("cover_key")
+    personId    String?  @unique @map("person_id")
     createdAt   DateTime @default(now()) @map("created_at")
     updatedAt   DateTime @updatedAt @map("updated_at")
 
+    person     Person?        @relation(fields: [personId], references: [id], onDelete: SetNull)
     items      CollectionItem[]
     shareLinks ShareLink[]
 

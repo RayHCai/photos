@@ -57,6 +57,7 @@ export default function GalleryPage() {
             id: item.id,
             type: item.type as MediaShellItem['type'],
             thumbnailKey: item.thumbnailKey,
+            blurHash: item.blurHash ?? null,
             width: item.width,
             height: item.height,
             durationSeconds: item.durationSeconds,
@@ -71,8 +72,8 @@ export default function GalleryPage() {
     return (
         <FileDropZone className="h-screen flex flex-col">
             {/* Toolbar */}
-            <div className="relative flex items-center gap-2 px-[30px] pt-3 pb-9">
-                <div className="flex-1 flex justify-center">
+            <div className="relative flex items-center justify-center gap-2 px-[30px] pt-3 pb-9">
+                <div className="sm:flex-1 flex sm:justify-center">
                     <SearchInput
                         value={search}
                         onChange={setSearch}

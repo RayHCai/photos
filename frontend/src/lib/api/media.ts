@@ -44,6 +44,13 @@ export function thumbnailUrl(id: string): string {
     return apiUrl(`/media/${id}/thumbnail`);
 }
 
+export function getBatchThumbnailUrls(ids: string[]): Promise<Record<string, string>> {
+    return apiFetch('/media/thumbnail-urls', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+    });
+}
+
 export function originalUrl(id: string): string {
     return apiUrl(`/media/${id}/original`);
 }
