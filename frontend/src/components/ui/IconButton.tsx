@@ -4,7 +4,7 @@ import { type LucideIcon } from 'lucide-react';
 type Size = 'xs' | 'sm' | 'md' | 'lg';
 type Variant = 'surface' | 'overlay' | 'ghost';
 
-export interface IconButtonStyleOptions {
+interface IconButtonStyleOptions {
     size?: Size;
     variant?: Variant;
     danger?: boolean;
@@ -74,7 +74,7 @@ export function getIconButtonStyles(opts: IconButtonStyleOptions = {}) {
     };
 }
 
-export interface IconButtonProps
+interface IconButtonProps
     extends ButtonHTMLAttributes<HTMLButtonElement>,
         IconButtonStyleOptions {
     icon: LucideIcon;

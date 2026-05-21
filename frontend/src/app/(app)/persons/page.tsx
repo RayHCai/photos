@@ -4,11 +4,13 @@ import { useMemo, useState, useCallback } from 'react';
 import { usePersons, useDeletePerson } from '@/lib/hooks/usePersons';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 import { useSearchFilter } from '@/lib/hooks/useSearchFilter';
+import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { PersonCard } from '@/components/persons/PersonCard';
 import { PersonDetailModal } from '@/components/persons/PersonDetailModal';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { SearchInput } from '@/components/ui/SearchInput';
+import { pluralize } from '@/lib/utils/pluralize';
 import { toast } from 'sonner';
 import type { Person } from '@/lib/types/persons';
 
@@ -19,6 +21,7 @@ export default function PersonsPage() {
     const selection = useMediaSelection();
     const deletePerson = useDeletePerson();
 
+    useEscapeKey(selection.clearSelection, selection.isSelecting);
     const filteredPersons = useSearchFilter(persons, search, useCallback((p) => p.name, []));
     const personIds = useMemo(() => filteredPersons.map((p) => p.id), [filteredPersons]);
 
@@ -31,7 +34,7 @@ export default function PersonsPage() {
     const handleDeletePersons = useCallback(async (ids: string[]) => {
         try {
             await Promise.all(ids.map((id) => deletePerson.mutateAsync(id)));
-            toast.success(`Deleted ${ids.length} person${ids.length !== 1 ? 's' : ''}`);
+            toast.success(`Deleted ${pluralize(ids.length, 'person', 'people')}`);
         }
         catch {
             toast.error('Failed to delete');
@@ -70,15 +73,7 @@ export default function PersonsPage() {
                         onClick={() => setSelectedPerson(p)}
                         isSelected={selection.selectedIds.has(p.id)}
                         isSelecting={selection.isSelecting}
-                        onSelect={(e: React.MouseEvent) => {
-                            if (!selection.isSelecting) selection.startSelecting();
-                            if (e.shiftKey) {
-                                selection.addRange(p.id, personIds);
-                            }
-                            else {
-                                selection.toggle(p.id);
-                            }
-                        }}
+                        onSelect={(e: React.MouseEvent) => selection.handleSelect(p.id, personIds, e)}
                     />
                 ))}
             </div>

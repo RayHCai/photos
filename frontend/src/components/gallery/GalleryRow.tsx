@@ -3,11 +3,11 @@
 import { memo } from 'react';
 import { GalleryItem } from './GalleryItem';
 import type { LayoutRow } from '@/lib/utils/imageLayout';
-import type { MediaListItem } from '@/lib/types/media';
+import type { MediaShellItem } from '@/lib/types/media';
 
 interface GalleryRowProps {
     row: LayoutRow;
-    mediaItems: Map<string, MediaListItem>;
+    mediaItems: Map<string, MediaShellItem>;
     onItemClick: (id: string) => void;
     selectedIds?: Set<string>;
     isSelecting?: boolean;

@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from './client';
+import { apiFetch, apiUrl, buildQueryString } from './client';
 import type { CursorPaginatedResponse } from '../types/api';
 import type { Person, PersonMediaItem } from '../types/persons';
 
@@ -38,10 +38,8 @@ export function getPersonMedia(
     id: string,
     params: { cursor?: string; limit?: number }
 ): Promise<CursorPaginatedResponse<PersonMediaItem>> {
-    const sp = new URLSearchParams();
-    if (params.cursor) sp.set('cursor', params.cursor);
-    if (params.limit) sp.set('limit', String(params.limit));
-    return apiFetch(`/persons/${id}/media?${sp}`);
+    const qs = buildQueryString(params);
+    return apiFetch(`/persons/${id}/media?${qs}`);
 }
 
 export function personAvatarUrl(id: string): string {

@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
-import { Button } from '@/components/ui/Button';
+import { TextInput } from '@/components/ui/TextInput';
+import { DialogFooter } from '@/components/ui/DialogFooter';
 import { useRenamePerson } from '@/lib/hooks/usePersons';
 import { toast } from 'sonner';
 
@@ -39,22 +40,13 @@ export function PersonRenameDialog({
     return (
         <Dialog open={open} onClose={onClose} title="Rename person">
             <form onSubmit={handleSubmit} className="space-y-4">
-                <input
-                    type="text"
+                <TextInput
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Name"
-                    className="w-full px-3 py-2 border border-stone-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-stone-300"
                     autoFocus
                 />
-                <div className="flex justify-end gap-2">
-                    <Button variant="secondary" onClick={onClose} type="button">
-                        Cancel
-                    </Button>
-                    <Button type="submit" loading={rename.isPending}>
-                        Save
-                    </Button>
-                </div>
+                <DialogFooter onCancel={onClose} loading={rename.isPending} />
             </form>
         </Dialog>
     );

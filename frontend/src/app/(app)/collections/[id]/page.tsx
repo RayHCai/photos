@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useCollection, useAddCollectionItems, useRemoveCollectionItems } from '@/lib/hooks/useCollections';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
+import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { CollectionItemPicker } from '@/components/collections/CollectionItemPicker';
@@ -14,6 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { FileDropZone } from '@/components/upload/UploadDropzone';
 import { UploadMenu } from '@/components/upload/UploadMenu';
 import { Settings } from 'lucide-react';
+import { pluralize } from '@/lib/utils/pluralize';
 import { toast } from 'sonner';
 
 export default function CollectionDetailPage() {
@@ -23,6 +25,7 @@ export default function CollectionDetailPage() {
     const [pickerOpen, setPickerOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const selection = useMediaSelection();
+    useEscapeKey(selection.clearSelection, selection.isSelecting);
     const addItems = useAddCollectionItems();
     const removeItems = useRemoveCollectionItems();
     const { openFilePicker, openFolderPicker } = useFileUpload();
@@ -33,7 +36,7 @@ export default function CollectionDetailPage() {
                 { collectionId: id, mediaItemIds: ids },
                 {
                     onSuccess: () => {
-                        toast.success(`${ids.length} item${ids.length !== 1 ? 's' : ''} removed from collection`);
+                        toast.success(`${pluralize(ids.length, 'item')} removed from collection`);
                         resolve();
                     },
                     onError: () => reject(),
@@ -74,8 +77,7 @@ export default function CollectionDetailPage() {
                         {collection.name}
                     </h1>
                     <p className="text-xs text-stone-400 mt-0.5">
-                        {mediaItems.length} item
-                        {mediaItems.length !== 1 ? 's' : ''}
+                        {pluralize(mediaItems.length, 'item')}
                     </p>
                 </div>
                 <div className="flex-1 flex items-center justify-end gap-2">

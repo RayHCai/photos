@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
 import { Button } from './Button';
+import { ModalOverlay } from './ModalOverlay';
 
 interface ConfirmModalProps {
     open: boolean;
@@ -20,24 +20,10 @@ export function ConfirmModal({
     confirmLabel = 'Delete',
     loading = false,
 }: ConfirmModalProps) {
-    useEffect(() => {
-        if (!open) return;
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
-        };
-        document.addEventListener('keydown', handleEsc);
-        return () => document.removeEventListener('keydown', handleEsc);
-    }, [open, onClose]);
-
     if (!open) return null;
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40"
-            onClick={(e) => {
-                if (e.target === e.currentTarget) onClose();
-            }}
-        >
+        <ModalOverlay onClose={onClose}>
             <div className="bg-stone-50 rounded shadow-lg w-full max-w-sm mx-4 px-6 py-5">
                 <p className="text-sm text-stone-600 mb-5">{message}</p>
                 <div className="flex justify-end gap-2">
@@ -49,6 +35,6 @@ export function ConfirmModal({
                     </Button>
                 </div>
             </div>
-        </div>
+        </ModalOverlay>
     );
 }

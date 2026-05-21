@@ -1,6 +1,7 @@
 'use client';
 
 import { useUpload } from '@/lib/hooks/useUpload';
+import { pluralize } from '@/lib/utils/pluralize';
 import {
     ChevronDown,
     ChevronUp,
@@ -32,7 +33,7 @@ export function UploadProgress() {
                 <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-semibold text-stone-900 leading-tight">
                         {allDone
-                            ? `${completed} upload${completed !== 1 ? 's' : ''} complete`
+                            ? `${pluralize(completed, 'upload')} complete`
                             : `Uploading ${completed + 1} of ${total}`}
                     </p>
                 </div>

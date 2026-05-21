@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listShareLinks, createShareLink, revokeShareLink } from '@/lib/api/share';
 import { Button } from '@/components/ui/Button';
 import { IconButton, getIconButtonStyles } from '@/components/ui/IconButton';
+import { TextInput } from '@/components/ui/TextInput';
+import { pluralize } from '@/lib/utils/pluralize';
 import { Link2, Trash2, Copy, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -63,8 +65,7 @@ export function ShareLinkManager({ collectionId }: ShareLinkManagerProps) {
             </h3>
 
             <div className="flex gap-2">
-                <input
-                    type="text"
+                <TextInput
                     value={slug}
                     onChange={(e) => setSlug(e.target.value)}
                     placeholder="Custom slug (optional)"
@@ -91,8 +92,7 @@ export function ShareLinkManager({ collectionId }: ShareLinkManagerProps) {
                                     /s/{link.slug}
                                 </p>
                                 <p className="text-xs text-stone-400">
-                                    {link.viewCount} view
-                                    {link.viewCount !== 1 ? 's' : ''}
+                                    {pluralize(link.viewCount, 'view')}
                                 </p>
                             </div>
                             <div className="flex items-center gap-1">

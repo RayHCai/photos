@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { X, ImageIcon } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { ModalOverlay } from '../ui/ModalOverlay';
 import { thumbnailUrl } from '@/lib/api/media';
 import type { PendingDuplicate } from '@/lib/providers/UploadProvider';
 
@@ -12,7 +13,6 @@ interface DuplicateModalProps {
 }
 
 export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
-    const overlayRef = useRef<HTMLDivElement>(null);
     const [decisions, setDecisions] = useState<Map<string, 'skip' | 'keep_both'>>(new Map());
 
     const allDecided = decisions.size === duplicates.length;
@@ -33,16 +33,6 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
         };
     }, [previewUrls]);
 
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                handleSkipAll();
-            }
-        };
-        document.addEventListener('keydown', handleEsc);
-        return () => document.removeEventListener('keydown', handleEsc);
-    }, [duplicates]);
-
     function setDecision(fileName: string, decision: 'skip' | 'keep_both') {
         setDecisions((prev) => {
             const next = new Map(prev);
@@ -51,13 +41,13 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
         });
     }
 
-    function handleSkipAll() {
+    const handleSkipAll = useCallback(() => {
         const all = new Map<string, 'skip' | 'keep_both'>();
         for (const dup of duplicates) {
             all.set(dup.file.name, 'skip');
         }
         onResolve(all);
-    }
+    }, [duplicates, onResolve]);
 
     function handleKeepAll() {
         const all = new Map<string, 'skip' | 'keep_both'>();
@@ -78,13 +68,7 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
     if (duplicates.length === 0) return null;
 
     return (
-        <div
-            ref={overlayRef}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40"
-            onClick={(e) => {
-                if (e.target === overlayRef.current) handleSkipAll();
-            }}
-        >
+        <ModalOverlay onClose={handleSkipAll}>
             <div className="bg-stone-50 rounded shadow-lg w-full max-w-lg mx-4 overflow-hidden max-h-[85vh] flex flex-col">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-stone-200">
                     <h2 className="text-lg font-serif text-stone-900">
@@ -188,6 +172,6 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
                     </Button>
                 </div>
             </div>
-        </div>
+        </ModalOverlay>
     );
 }

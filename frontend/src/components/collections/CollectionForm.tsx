@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { TextInput } from '@/components/ui/TextInput';
 
 interface CollectionFormProps {
     initialName?: string;
@@ -30,12 +31,10 @@ export function CollectionForm({
                 <label className="block text-sm text-stone-700 mb-1">
                     Name
                 </label>
-                <input
-                    type="text"
+                <TextInput
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Collection name"
-                    className="w-full px-3 py-2 border border-stone-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-stone-300"
                     autoFocus
                     required
                 />

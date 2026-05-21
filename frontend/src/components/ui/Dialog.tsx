@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { ModalOverlay } from './ModalOverlay';
 
 interface DialogProps {
     open: boolean;
@@ -11,27 +12,10 @@ interface DialogProps {
 }
 
 export function Dialog({ open, onClose, title, children }: DialogProps) {
-    const overlayRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        if (!open) return;
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
-        };
-        document.addEventListener('keydown', handleEsc);
-        return () => document.removeEventListener('keydown', handleEsc);
-    }, [open, onClose]);
-
     if (!open) return null;
 
     return (
-        <div
-            ref={overlayRef}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40"
-            onClick={(e) => {
-                if (e.target === overlayRef.current) onClose();
-            }}
-        >
+        <ModalOverlay onClose={onClose}>
             <div className="bg-stone-50 rounded shadow-lg w-full max-w-md mx-4 overflow-hidden">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-stone-200">
                     <h2 className="text-lg font-serif text-stone-900">
@@ -46,6 +30,6 @@ export function Dialog({ open, onClose, title, children }: DialogProps) {
                 </div>
                 <div className="px-6 py-4">{children}</div>
             </div>
-        </div>
+        </ModalOverlay>
     );
 }

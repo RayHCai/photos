@@ -6,6 +6,7 @@ import { X, Download } from 'lucide-react';
 import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
+import { pluralize } from '@/lib/utils/pluralize';
 import type { SharedCollection } from '@/lib/types/share';
 
 interface SharedCollectionViewProps {
@@ -96,8 +97,7 @@ export function SharedCollectionView({
                     {collection.name}
                 </h1>
                 <p className="text-xs text-stone-400 mt-1">
-                    {collection.items.length} item
-                    {collection.items.length !== 1 ? 's' : ''}
+                    {pluralize(collection.items.length, 'item')}
                 </p>
                 <SelectionToolbar
                     selection={selection}

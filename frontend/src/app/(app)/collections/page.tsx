@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCollections, useCreateCollection, useDeleteCollection } from '@/lib/hooks/useCollections';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 import { useSearchFilter } from '@/lib/hooks/useSearchFilter';
+import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { CollectionCard } from '@/components/collections/CollectionCard';
 import { CollectionForm } from '@/components/collections/CollectionForm';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
@@ -12,6 +13,7 @@ import { PageContainer } from '@/components/layout/PageContainer';
 import { Dialog } from '@/components/ui/Dialog';
 import { IconButton } from '@/components/ui/IconButton';
 import { SearchInput } from '@/components/ui/SearchInput';
+import { pluralize } from '@/lib/utils/pluralize';
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -24,13 +26,14 @@ export default function CollectionsPage() {
     const createCollection = useCreateCollection();
     const deleteCollection = useDeleteCollection();
 
+    useEscapeKey(selection.clearSelection, selection.isSelecting);
     const filteredCollections = useSearchFilter(collections, search, useCallback((c) => c.name, []));
     const collectionIds = useMemo(() => filteredCollections.map((c) => c.id), [filteredCollections]);
 
     const handleDeleteCollections = useCallback(async (ids: string[]) => {
         try {
             await Promise.all(ids.map((id) => deleteCollection.mutateAsync(id)));
-            toast.success(`Deleted ${ids.length} collection${ids.length !== 1 ? 's' : ''}`);
+            toast.success(`Deleted ${pluralize(ids.length, 'collection')}`);
         }
         catch {
             toast.error('Failed to delete');
@@ -73,15 +76,7 @@ export default function CollectionsPage() {
                                 collection={c}
                                 isSelected={selection.selectedIds.has(c.id)}
                                 isSelecting={selection.isSelecting}
-                                onSelect={(e: React.MouseEvent) => {
-                                    if (!selection.isSelecting) selection.startSelecting();
-                                    if (e.shiftKey) {
-                                        selection.addRange(c.id, collectionIds);
-                                    }
-                                    else {
-                                        selection.toggle(c.id);
-                                    }
-                                }}
+                                onSelect={(e: React.MouseEvent) => selection.handleSelect(c.id, collectionIds, e)}
                             />
                         </div>
                     ))}

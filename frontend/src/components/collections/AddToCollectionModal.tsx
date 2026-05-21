@@ -4,7 +4,9 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, Plus, FolderOpen, Check, Loader2 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
+import { ModalOverlay } from '@/components/ui/ModalOverlay';
 import { useCollections, useCreateCollection, useAddCollectionItems } from '@/lib/hooks/useCollections';
+import { pluralize } from '@/lib/utils/pluralize';
 import { toast } from 'sonner';
 
 interface AddToCollectionModalProps {
@@ -38,15 +40,6 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
         }
     }, [open]);
 
-    useEffect(() => {
-        if (!open) return;
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
-        };
-        document.addEventListener('keydown', handleEsc);
-        return () => document.removeEventListener('keydown', handleEsc);
-    }, [open, onClose]);
-
     if (!open) return null;
 
     const isAdding = addItems.isPending || createCollection.isPending;
@@ -69,7 +62,7 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
         try {
             const collection = await createCollection.mutateAsync({ name: newName.trim() });
             await addItems.mutateAsync({ collectionId: collection.id, mediaItemIds });
-            toast.success(`Created "${newName.trim()}" with ${mediaItemIds.length} item${mediaItemIds.length !== 1 ? 's' : ''}`);
+            toast.success(`Created "${newName.trim()}" with ${pluralize(mediaItemIds.length, 'item')}`);
             onClose();
             router.push(`/collections/${collection.id}`);
         }
@@ -79,10 +72,7 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
     };
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-            onClick={onClose}
-        >
+        <ModalOverlay onClose={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
             <div
                 className="bg-white rounded-lg shadow-xl w-full max-w-xs mx-4 overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
@@ -169,7 +159,7 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
                                 <div className="flex-1 min-w-0 text-left">
                                     <p className="text-xs text-stone-900 truncate">{c.name}</p>
                                     <p className="text-[11px] leading-tight text-stone-400">
-                                        {c._count.items} item{c._count.items !== 1 ? 's' : ''}
+                                        {pluralize(c._count.items, 'item')}
                                     </p>
                                 </div>
                                 {addItems.isPending && addItems.variables?.collectionId === c.id && (
@@ -183,6 +173,6 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
                 {/* Bottom padding */}
                 {collections.length === 0 && <div className="pb-2" />}
             </div>
-        </div>
+        </ModalOverlay>
     );
 }

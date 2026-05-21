@@ -11,7 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { uploadFile, checkDuplicates } from '../api/upload';
 import { addItems } from '../api/collections';
 
-export interface UploadItem {
+interface UploadItem {
     id: string;
     fileName: string;
     status: 'pending' | 'uploading' | 'completed' | 'failed';
@@ -133,7 +133,7 @@ function getNextFileName(originalName: string, existingNames: string[]): string 
     return `${stem} (${maxN + 1})${ext}`;
 }
 
-export interface UploadContextValue {
+interface UploadContextValue {
     items: UploadItem[];
     isOpen: boolean;
     pendingDuplicates: PendingDuplicate[];

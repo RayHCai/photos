@@ -1,7 +1,10 @@
 'use client';
 
-import { User, Check } from 'lucide-react';
+import { User } from 'lucide-react';
 import { personAvatarUrl } from '@/lib/api/persons';
+import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
+import { useSelectableItem } from '@/lib/hooks/useSelectableItem';
+import { pluralize } from '@/lib/utils/pluralize';
 import type { Person } from '@/lib/types/persons';
 
 interface PersonCardProps {
@@ -13,22 +16,7 @@ interface PersonCardProps {
 }
 
 export function PersonCard({ person, onClick, isSelected, isSelecting, onSelect }: PersonCardProps) {
-    const handleClick = (e: React.MouseEvent) => {
-        if (isSelecting && onSelect) {
-            e.preventDefault();
-            onSelect(e);
-        }
-        else {
-            onClick();
-        }
-    };
-
-    const handleContextMenu = (e: React.MouseEvent) => {
-        if (onSelect) {
-            e.preventDefault();
-            onSelect(e);
-        }
-    };
+    const { handleClick, handleContextMenu } = useSelectableItem({ isSelecting, onSelect, onClick });
 
     return (
         <button
@@ -52,26 +40,12 @@ export function PersonCard({ person, onClick, isSelected, isSelecting, onSelect 
                     {person.name || 'Unknown'}
                 </p>
                 <p className="text-xs text-stone-500">
-                    {person._count.faces} photo
-                    {person._count.faces !== 1 ? 's' : ''}
+                    {pluralize(person._count.faces, 'photo')}
                 </p>
             </div>
 
             {onSelect && (
-                <div
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onSelect(e);
-                    }}
-                    className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-none border-2 flex items-center justify-center cursor-pointer transition-all ${
-                        isSelected
-                            ? 'bg-stone-900 border-stone-900'
-                            : 'border-white bg-black/20'
-                    } ${isSelecting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                >
-                    {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
-                </div>
+                <SelectionCheckbox isSelected={isSelected} isSelecting={isSelecting} onSelect={onSelect} />
             )}
         </button>
     );

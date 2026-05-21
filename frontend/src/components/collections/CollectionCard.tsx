@@ -1,9 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { FolderOpen, Check } from 'lucide-react';
+import { FolderOpen } from 'lucide-react';
 import type { Collection } from '@/lib/types/collections';
 import { thumbnailUrl } from '@/lib/api/media';
+import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
+import { useSelectableItem } from '@/lib/hooks/useSelectableItem';
+import { pluralize } from '@/lib/utils/pluralize';
 
 interface CollectionCardProps {
     collection: Collection;
@@ -18,19 +21,7 @@ export function CollectionCard({ collection, isSelected, isSelecting, onSelect }
         collection.coverItem.processingStatus === 'COMPLETED' &&
         collection.coverItem.thumbnailKey;
 
-    const handleClick = (e: React.MouseEvent) => {
-        if (isSelecting && onSelect) {
-            e.preventDefault();
-            onSelect(e);
-        }
-    };
-
-    const handleContextMenu = (e: React.MouseEvent) => {
-        if (onSelect) {
-            e.preventDefault();
-            onSelect(e);
-        }
-    };
+    const { handleClick, handleContextMenu } = useSelectableItem({ isSelecting, onSelect });
 
     return (
         <Link
@@ -57,26 +48,12 @@ export function CollectionCard({ collection, isSelected, isSelecting, onSelect }
                     {collection.name}
                 </h3>
                 <p className="text-xs text-stone-500 mt-0.5">
-                    {collection._count.items} item
-                    {collection._count.items !== 1 ? 's' : ''}
+                    {pluralize(collection._count.items, 'item')}
                 </p>
             </div>
 
             {onSelect && (
-                <div
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onSelect(e);
-                    }}
-                    className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-none border-2 flex items-center justify-center cursor-pointer transition-all ${
-                        isSelected
-                            ? 'bg-stone-900 border-stone-900'
-                            : 'border-white bg-black/20'
-                    } ${isSelecting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                >
-                    {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
-                </div>
+                <SelectionCheckbox isSelected={isSelected} isSelecting={isSelecting} onSelect={onSelect} />
             )}
         </Link>
     );

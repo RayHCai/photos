@@ -43,3 +43,11 @@ export async function apiFetch<T>(
 export function apiUrl(path: string): string {
     return `${API_BASE}${path}`;
 }
+
+export function buildQueryString(params: Record<string, string | number | undefined | null>): string {
+    const sp = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null) sp.set(key, String(value));
+    }
+    return sp.toString();
+}

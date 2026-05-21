@@ -4,7 +4,8 @@ import { useState, useCallback, useMemo, type ReactNode } from 'react';
 import { GalleryGrid } from './GalleryGrid';
 import { MediaLightbox } from '@/components/media/MediaLightbox';
 import { Spinner } from '@/components/ui/Spinner';
-import type { MediaListItem } from '@/lib/types/media';
+import { useLightboxNavigation } from '@/lib/hooks/useLightboxNavigation';
+import type { MediaShellItem } from '@/lib/types/media';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 
 interface LightboxProps {
@@ -15,14 +16,9 @@ interface LightboxProps {
 }
 
 interface PhotoGalleryProps {
-    items: MediaListItem[];
+    items: MediaShellItem[];
     isLoading?: boolean;
     emptyMessage?: string;
-
-    // Infinite scroll
-    hasMore?: boolean;
-    fetchMore?: () => void;
-    isFetching?: boolean;
 
     // Selection
     selection: ReturnType<typeof useMediaSelection>;
@@ -38,42 +34,19 @@ export function PhotoGallery({
     items,
     isLoading,
     emptyMessage = 'No photos',
-    hasMore,
-    fetchMore,
-    isFetching,
     selection,
     thumbnailSrcFn,
     renderLightbox,
 }: PhotoGalleryProps) {
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
-    const lightboxIndex = lightboxId
-        ? items.findIndex((i) => i.id === lightboxId)
-        : -1;
-
-    const handlePrev = useCallback(() => {
-        if (lightboxIndex > 0) {
-            setLightboxId(items[lightboxIndex - 1].id);
-        }
-    }, [lightboxIndex, items]);
-
-    const handleNext = useCallback(() => {
-        if (lightboxIndex < items.length - 1) {
-            setLightboxId(items[lightboxIndex + 1].id);
-        }
-    }, [lightboxIndex, items]);
+    const { onPrev, onNext } = useLightboxNavigation(items, lightboxId, setLightboxId);
 
     const orderedIds = useMemo(() => items.map((i) => i.id), [items]);
 
     const handleItemSelect = useCallback(
         (id: string, e: React.MouseEvent) => {
-            if (!selection.isSelecting) selection.startSelecting();
-            if (e.shiftKey) {
-                selection.addRange(id, orderedIds);
-            }
-            else {
-                selection.toggle(id);
-            }
+            selection.handleSelect(id, orderedIds, e);
         },
         [selection, orderedIds]
     );
@@ -100,9 +73,8 @@ export function PhotoGallery({
         ? {
             mediaId: lightboxId,
             onClose: () => setLightboxId(null),
-            onPrev: lightboxIndex > 0 ? handlePrev : undefined,
-            onNext:
-                lightboxIndex < items.length - 1 ? handleNext : undefined,
+            onPrev,
+            onNext,
         }
         : null;
 
@@ -112,9 +84,6 @@ export function PhotoGallery({
                 <GalleryGrid
                     items={items}
                     onItemClick={(id) => setLightboxId(id)}
-                    hasMore={hasMore}
-                    fetchMore={fetchMore}
-                    isFetching={isFetching}
                     selectedIds={selection.selectedIds}
                     isSelecting={selection.isSelecting}
                     onItemSelect={handleItemSelect}

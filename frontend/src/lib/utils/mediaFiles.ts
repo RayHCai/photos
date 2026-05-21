@@ -8,7 +8,7 @@ function getExtension(name: string): string {
     return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
 }
 
-export function isMediaFile(file: File): boolean {
+function isMediaFile(file: File): boolean {
     // Skip dotfiles (.DS_Store, thumbs.db, etc.)
     if (file.name.startsWith('.')) return false;
 
