@@ -16,6 +16,16 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
     res.json(result);
 });
 
+export const shell = asyncHandler(async (_req: Request, res: Response) => {
+    const items = await mediaService.getShellData();
+    res.json(items);
+});
+
+export const timeline = asyncHandler(async (_req: Request, res: Response) => {
+    const result = await mediaService.getTimeline();
+    res.json(result);
+});
+
 export const getById = asyncHandler(async (req: Request, res: Response) => {
     const item = await mediaService.getMediaById(req.params.id as string);
     res.json(item);

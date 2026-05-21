@@ -10,14 +10,6 @@ export function usePersons() {
     });
 }
 
-export function usePerson(id: string) {
-    return useQuery({
-        queryKey: ['persons', id],
-        queryFn: () => personsApi.getPerson(id),
-        enabled: !!id,
-    });
-}
-
 export function usePersonMedia(personId: string | null) {
     return useInfiniteQuery({
         queryKey: ['persons', personId, 'media'],

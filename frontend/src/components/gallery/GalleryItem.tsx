@@ -1,13 +1,15 @@
 'use client';
 
 import { memo } from 'react';
-import { Play, Check } from 'lucide-react';
+import { Play } from 'lucide-react';
 import { thumbnailUrl } from '@/lib/api/media';
 import { formatDuration } from '@/lib/utils/format';
-import type { MediaListItem } from '@/lib/types/media';
+import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
+import { useSelectableItem } from '@/lib/hooks/useSelectableItem';
+import type { MediaShellItem } from '@/lib/types/media';
 
 interface GalleryItemProps {
-    item: MediaListItem;
+    item: MediaShellItem;
     width: number;
     height: number;
     onClick: () => void;
@@ -27,21 +29,11 @@ export const GalleryItem = memo(function GalleryItem({
     onSelect,
     thumbnailSrc,
 }: GalleryItemProps) {
-    const handleClick = (e: React.MouseEvent) => {
-        if (isSelecting && onSelect) {
-            onSelect(e);
-        }
-        else if (item.processingStatus === 'COMPLETED') {
-            onClick();
-        }
-    };
-
-    const handleContextMenu = (e: React.MouseEvent) => {
-        if (onSelect) {
-            e.preventDefault();
-            onSelect(e);
-        }
-    };
+    const { handleClick, handleContextMenu } = useSelectableItem({
+        isSelecting,
+        onSelect,
+        onClick: item.processingStatus === 'COMPLETED' ? onClick : undefined,
+    });
 
     return (
         <div
@@ -55,7 +47,7 @@ export const GalleryItem = memo(function GalleryItem({
             {item.processingStatus === 'COMPLETED' && item.thumbnailKey ? (
                 <img
                     src={thumbnailSrc ?? thumbnailUrl(item.id)}
-                    alt={item.fileName}
+                    alt="Photo"
                     loading="lazy"
                     className="w-full h-full object-cover"
                     draggable={false}
@@ -77,19 +69,7 @@ export const GalleryItem = memo(function GalleryItem({
             )}
 
             {onSelect && (
-                <div
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onSelect(e);
-                    }}
-                    className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-none border-2 flex items-center justify-center cursor-pointer transition-all ${
-                        isSelected
-                            ? 'bg-stone-900 border-stone-900'
-                            : 'border-white bg-black/20'
-                    } ${isSelecting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                >
-                    {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
-                </div>
+                <SelectionCheckbox isSelected={isSelected} isSelecting={isSelecting} onSelect={onSelect} />
             )}
 
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors pointer-events-none" />

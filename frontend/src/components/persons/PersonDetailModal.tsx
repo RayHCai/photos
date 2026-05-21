@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import { X, Edit2, Merge, Trash2 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
+import { ModalOverlay } from '@/components/ui/ModalOverlay';
 import { usePersonMedia, useDeletePerson } from '@/lib/hooks/usePersons';
 import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
-import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
+import { useLightboxNavigation } from '@/lib/hooks/useLightboxNavigation';
 import { thumbnailUrl } from '@/lib/api/media';
+import { pluralize } from '@/lib/utils/pluralize';
 import { PersonRenameDialog } from './PersonRenameDialog';
 import { PersonMergeDialog } from './PersonMergeDialog';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -30,8 +32,6 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
-    const overlayRef = useRef<HTMLDivElement>(null);
-
     const allItems = useMemo(
         () => data?.pages.flatMap((p) => p.items) || [],
         [data]
@@ -42,7 +42,7 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
         !!hasNextPage && !isFetchingNextPage
     );
 
-    useEscapeKey(onClose, !renameOpen && !mergeOpen && !deleteOpen && !lightboxId);
+    const { onPrev, onNext } = useLightboxNavigation(allItems, lightboxId, setLightboxId);
 
     const handleDelete = () => {
         deletePerson.mutate(person.id, {
@@ -56,13 +56,7 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
 
     return (
         <>
-            <div
-                ref={overlayRef}
-                className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40"
-                onClick={(e) => {
-                    if (e.target === overlayRef.current) onClose();
-                }}
-            >
+            <ModalOverlay onClose={onClose} enabled={!renameOpen && !mergeOpen && !deleteOpen && !lightboxId}>
                 <div className="bg-stone-50 rounded shadow-lg w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col overflow-hidden">
                     {/* Header */}
                     <div className="flex items-center justify-between px-6 py-4 border-b border-stone-200">
@@ -71,7 +65,7 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
                                 {person.name || 'Unknown'}
                             </h2>
                             <p className="text-xs text-stone-500">
-                                {person._count.faces} photo{person._count.faces !== 1 ? 's' : ''}
+                                {pluralize(person._count.faces, 'photo')}
                             </p>
                         </div>
                         <div className="flex items-center gap-1">
@@ -143,7 +137,7 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
                         )}
                     </div>
                 </div>
-            </div>
+            </ModalOverlay>
 
             <PersonRenameDialog
                 open={renameOpen}
@@ -171,22 +165,8 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
                 <MediaLightbox
                     mediaId={lightboxId}
                     onClose={() => setLightboxId(null)}
-                    onPrev={
-                        allItems.findIndex((i) => i.id === lightboxId) > 0
-                            ? () => {
-                                const idx = allItems.findIndex((i) => i.id === lightboxId);
-                                setLightboxId(allItems[idx - 1].id);
-                            }
-                            : undefined
-                    }
-                    onNext={
-                        allItems.findIndex((i) => i.id === lightboxId) < allItems.length - 1
-                            ? () => {
-                                const idx = allItems.findIndex((i) => i.id === lightboxId);
-                                setLightboxId(allItems[idx + 1].id);
-                            }
-                            : undefined
-                    }
+                    onPrev={onPrev}
+                    onNext={onNext}
                 />
             )}
         </>

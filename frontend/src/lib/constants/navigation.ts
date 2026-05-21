@@ -1,6 +1,6 @@
 import { type LucideIcon, Images, FolderOpen, Users } from 'lucide-react';
 
-export interface NavItem {
+interface NavItem {
     href: string;
     label: string;
     icon: LucideIcon;

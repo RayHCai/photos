@@ -1,10 +1,9 @@
-export type MediaType = 'PHOTO' | 'VIDEO';
-export type ProcessingStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+type MediaType = 'PHOTO' | 'VIDEO';
+type ProcessingStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
-export interface MediaListItem {
+export interface MediaShellItem {
     id: string;
     type: MediaType;
-    fileName: string;
     thumbnailKey: string | null;
     width: number | null;
     height: number | null;
@@ -12,6 +11,10 @@ export interface MediaListItem {
     takenAt: string | null;
     processingStatus: ProcessingStatus;
     createdAt: string;
+}
+
+export interface MediaListItem extends MediaShellItem {
+    fileName: string;
 }
 
 export interface MediaItem extends MediaListItem {
@@ -28,7 +31,7 @@ export interface MediaItem extends MediaListItem {
     faces: FaceWithPerson[];
 }
 
-export interface FaceWithPerson {
+interface FaceWithPerson {
     id: string;
     mediaItemId: string;
     personId: string | null;

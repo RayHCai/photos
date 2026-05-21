@@ -1,10 +1,11 @@
 'use client';
 
 import { useMemo, useState, useCallback } from 'react';
-import { useMediaList } from '@/lib/hooks/useMediaList';
+import { useShellData } from '@/lib/hooks/useShellData';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 import { useFileUpload } from '@/lib/hooks/useFileUpload';
 import { useSearch } from '@/lib/hooks/useSearch';
+import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { SearchInput } from '@/components/ui/SearchInput';
@@ -13,18 +14,19 @@ import { batchRetry } from '@/lib/api/jobs';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileDropZone } from '@/components/upload/UploadDropzone';
 import { UploadMenu } from '@/components/upload/UploadMenu';
+import { pluralize } from '@/lib/utils/pluralize';
 import { toast } from 'sonner';
-import type { MediaListItem } from '@/lib/types/media';
+import type { MediaShellItem } from '@/lib/types/media';
 
 export default function GalleryPage() {
-    const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
-        useMediaList();
+    const { data: shellData, isLoading } = useShellData();
     const [search, setSearch] = useState('');
     const selection = useMediaSelection();
     const queryClient = useQueryClient();
     const { openFilePicker, openFolderPicker } = useFileUpload();
 
     const { data: searchData, isLoading: isSearching } = useSearch(search);
+    useEscapeKey(selection.clearSelection, selection.isSelecting);
 
     const handleBatchDelete = useCallback(async (ids: string[]) => {
         try {
@@ -41,25 +43,19 @@ export default function GalleryPage() {
         try {
             const { count } = await batchRetry(ids);
             queryClient.invalidateQueries({ queryKey: ['media'] });
-            toast.success(`Retrying ${count} item${count !== 1 ? 's' : ''}`);
+            toast.success(`Retrying ${pluralize(count, 'item')}`);
         }
         catch {
             toast.error('Failed to retry');
         }
     }, [queryClient]);
 
-    const galleryItems = useMemo(
-        () => data?.pages.flatMap((p) => p.items) || [],
-        [data]
-    );
-
-    // Map search results to MediaListItem shape for the gallery
-    const searchItems = useMemo((): MediaListItem[] => {
+    // Map search results to MediaShellItem shape for the gallery
+    const searchItems = useMemo((): MediaShellItem[] => {
         if (!searchData?.items) return [];
         return searchData.items.map((item) => ({
             id: item.id,
-            type: item.type as MediaListItem['type'],
-            fileName: '',
+            type: item.type as MediaShellItem['type'],
             thumbnailKey: item.thumbnailKey,
             width: item.width,
             height: item.height,
@@ -99,12 +95,9 @@ export default function GalleryPage() {
 
             {/* Gallery — shows search results or full library */}
             <PhotoGallery
-                items={isSearchActive ? searchItems : galleryItems}
+                items={isSearchActive ? searchItems : (shellData ?? [])}
                 isLoading={isSearchActive ? isSearching : isLoading}
                 selection={selection}
-                hasMore={isSearchActive ? false : hasNextPage}
-                fetchMore={() => fetchNextPage()}
-                isFetching={isFetchingNextPage}
                 emptyMessage={isSearchActive ? 'No results found' : undefined}
             />
         </FileDropZone>

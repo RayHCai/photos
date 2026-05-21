@@ -1,15 +1,15 @@
 import { format } from 'date-fns';
 import { formatDate } from './format';
-import type { MediaListItem } from '../types/media';
+import type { MediaShellItem } from '../types/media';
 
-export interface DateGroup {
+interface DateGroup<T extends MediaShellItem = MediaShellItem> {
     date: string;
     label: string;
-    items: MediaListItem[];
+    items: T[];
 }
 
-export function groupByDate(items: MediaListItem[]): DateGroup[] {
-    const groups = new Map<string, MediaListItem[]>();
+export function groupByDate<T extends MediaShellItem>(items: T[]): DateGroup<T>[] {
+    const groups = new Map<string, T[]>();
 
     for (const item of items) {
         const dateStr = item.takenAt || item.createdAt;

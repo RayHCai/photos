@@ -1,4 +1,4 @@
-export interface LayoutItem {
+interface LayoutItem {
     id: string;
     width: number | null;
     height: number | null;

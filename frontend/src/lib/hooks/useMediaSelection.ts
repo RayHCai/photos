@@ -65,6 +65,16 @@ export function useMediaSelection() {
         setIsSelecting(true);
     }, []);
 
+    const handleSelect = useCallback((id: string, orderedIds: string[], e: React.MouseEvent) => {
+        if (!isSelecting) setIsSelecting(true);
+        if (e.shiftKey) {
+            addRange(id, orderedIds);
+        }
+        else {
+            toggle(id);
+        }
+    }, [isSelecting, addRange, toggle]);
+
     return {
         selectedIds,
         isSelecting,
@@ -73,6 +83,7 @@ export function useMediaSelection() {
         selectAll,
         clearSelection,
         startSelecting,
+        handleSelect,
         count: selectedIds.size,
     };
 }

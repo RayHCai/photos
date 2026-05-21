@@ -21,6 +21,9 @@ router.get(
     mediaController.list
 );
 
+router.get('/shell', mediaController.shell);
+router.get('/timeline', mediaController.timeline);
+
 router.get('/:id', mediaController.getById);
 
 router.post(

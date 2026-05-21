@@ -177,6 +177,34 @@ export async function listMedia(params: {
     return paginateResults(items, limit);
 }
 
+export async function getShellData() {
+    return prisma.mediaItem.findMany({
+        orderBy: [{ takenAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+            id: true,
+            type: true,
+            width: true,
+            height: true,
+            takenAt: true,
+            createdAt: true,
+            thumbnailKey: true,
+            durationSeconds: true,
+            processingStatus: true,
+        },
+    });
+}
+
+export async function getTimeline() {
+    const rows = await prisma.$queryRaw<Array<{ month: string; count: bigint }>>`
+        SELECT to_char(COALESCE("taken_at", "created_at"), 'YYYY-MM') AS month,
+               COUNT(*)::bigint AS count
+        FROM "media_items"
+        GROUP BY month
+        ORDER BY month DESC
+    `;
+    return rows.map((r) => ({ month: r.month, count: Number(r.count) }));
+}
+
 export async function getMediaById(id: string) {
     return findOrThrow(
         () => prisma.mediaItem.findUnique({

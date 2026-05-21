@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
-import { Button } from '@/components/ui/Button';
+import { DialogFooter } from '@/components/ui/DialogFooter';
 import { usePersons, useMergePersons } from '@/lib/hooks/usePersons';
 import { toast } from 'sonner';
 
@@ -57,18 +57,7 @@ export function PersonMergeDialog({
                         </option>
                     ))}
                 </select>
-                <div className="flex justify-end gap-2">
-                    <Button variant="secondary" onClick={onClose} type="button">
-                        Cancel
-                    </Button>
-                    <Button
-                        type="submit"
-                        loading={merge.isPending}
-                        disabled={!targetId}
-                    >
-                        Merge
-                    </Button>
-                </div>
+                <DialogFooter onCancel={onClose} submitLabel="Merge" loading={merge.isPending} disabled={!targetId} />
             </form>
         </Dialog>
     );
