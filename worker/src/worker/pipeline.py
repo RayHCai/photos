@@ -5,7 +5,10 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
+import pillow_heif
 from PIL import Image, ImageOps
+
+pillow_heif.register_heif_opener()
 
 from worker import backend_client as api, s3
 from worker.clip_encoder import encode_image, encode_images
