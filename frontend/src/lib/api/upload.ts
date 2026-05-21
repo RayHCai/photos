@@ -4,6 +4,20 @@ const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
 const PART_SIZE = 10 * 1024 * 1024;
 const CONCURRENCY = 6;
 
+const EXT_TO_MIME: Record<string, string> = {
+    heic: 'image/heic',
+    heif: 'image/heif',
+    tiff: 'image/tiff',
+    avif: 'image/avif',
+    mkv: 'video/x-matroska',
+};
+
+function resolveMimeType(file: File): string {
+    if (file.type) return file.type;
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    return EXT_TO_MIME[ext] ?? 'application/octet-stream';
+}
+
 interface DuplicateEntry {
     id: string;
     fileName: string;
@@ -88,7 +102,7 @@ async function singleUpload(
             method: 'POST',
             body: JSON.stringify({
                 fileName: fileName || file.name,
-                mimeType: file.type,
+                mimeType: resolveMimeType(file),
                 fileSize: file.size,
             }),
         }
@@ -117,7 +131,7 @@ async function multipartUpload(
             method: 'POST',
             body: JSON.stringify({
                 fileName: fileName || file.name,
-                mimeType: file.type,
+                mimeType: resolveMimeType(file),
                 fileSize: file.size,
             }),
         }

@@ -50,7 +50,7 @@ async function _createTaskAndEnqueue(
     const taskId = randomUUID();
     await prisma.mediaItem.update({
         where: { id: mediaItemId },
-        data: { currentTaskId: taskId },
+        data: { currentTaskId: taskId, processingStatus: 'PENDING', processingError: null },
     });
     await queueService.enqueueMediaProcessing({ mediaItemId, taskId, originalKey, mimeType, type, startStage });
     logger.info({ mediaItemId, taskId, type, startStage }, 'media: processing task enqueued');
