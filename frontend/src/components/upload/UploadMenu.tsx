@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Plus, File, Folder } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
+import { useIsMobile } from '@/lib/hooks/useIsMobile';
 
 interface UploadMenuProps {
     onUploadFiles: () => void;
@@ -13,6 +14,7 @@ interface UploadMenuProps {
 export function UploadMenu({ onUploadFiles, onUploadFolder, className }: UploadMenuProps) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
+    const isMobile = useIsMobile();
 
     useEffect(() => {
         if (!open) return;
@@ -35,15 +37,26 @@ export function UploadMenu({ onUploadFiles, onUploadFolder, className }: UploadM
         onUploadFolder();
     }, [onUploadFolder]);
 
+    const handleClick = useCallback(() => {
+        if (isMobile) {
+            // On mobile, skip the dropdown — folder upload (webkitdirectory) isn't
+            // supported on Android/iOS, so open the file picker directly.
+            onUploadFiles();
+        }
+        else {
+            setOpen((o) => !o);
+        }
+    }, [isMobile, onUploadFiles]);
+
     return (
         <div ref={ref} className={`relative ${className ?? ''}`}>
             <IconButton
                 icon={Plus}
-                onClick={() => setOpen((o) => !o)}
+                onClick={handleClick}
                 title="Upload"
                 className="flex-shrink-0"
             />
-            {open && (
+            {open && !isMobile && (
                 <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-stone-200 bg-white py-1 shadow-lg">
                     <button
                         className="flex w-full items-center gap-2 px-3 py-2 text-sm text-stone-700 hover:bg-stone-50 transition-colors"

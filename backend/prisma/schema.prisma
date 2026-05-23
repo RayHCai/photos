@@ -16,7 +16,6 @@ model Session {
     expiresAt DateTime @map("expires_at")
     createdAt DateTime @default(now()) @map("created_at")
 
-    @@index([token])
     @@index([expiresAt])
     @@map("sessions")
 }
@@ -41,6 +40,7 @@ model MediaItem {
     thumbnailKey     String?          @map("thumbnail_key")
     blurHash         String?          @map("blur_hash")
     streamingKey     String?          @map("streaming_key")
+    webKey           String?          @map("web_key")
     fileName         String           @map("file_name")
     mimeType         String           @map("mime_type")
     fileSize         BigInt           @map("file_size")
@@ -141,6 +141,7 @@ model CollectionItem {
 
     @@unique([collectionId, mediaItemId])
     @@index([collectionId])
+    @@index([mediaItemId])
     @@map("collection_items")
 }
 
@@ -155,7 +156,6 @@ model ShareLink {
 
     collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
 
-    @@index([slug])
     @@map("share_links")
 }
 

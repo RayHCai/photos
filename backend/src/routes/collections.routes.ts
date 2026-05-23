@@ -21,6 +21,16 @@ router.post(
     collectionsController.create
 );
 
+router.post(
+    '/membership',
+    validate({
+        body: z.object({
+            mediaItemIds: z.array(z.string()).min(1),
+        }),
+    }),
+    collectionsController.membership
+);
+
 router.get('/hidden', collectionsController.getHidden);
 router.get('/favorites', collectionsController.getFavorites);
 

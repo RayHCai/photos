@@ -5,7 +5,7 @@ import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
 
 export async function listCollections() {
     const collections = await prisma.collection.findMany({
-        where: { systemType: { not: 'HIDDEN' } },
+        where: { OR: [{ systemType: null }, { systemType: { not: 'HIDDEN' } }] },
         orderBy: { updatedAt: 'desc' },
         include: {
             _count: { select: { items: true } },
@@ -146,4 +146,16 @@ export async function removeItems(
             mediaItemId: { in: mediaItemIds },
         },
     });
+}
+
+export async function getCollectionMembership(mediaItemIds: string[]) {
+    const memberships = await prisma.collectionItem.groupBy({
+        by: ['collectionId'],
+        where: { mediaItemId: { in: mediaItemIds } },
+        _count: { mediaItemId: true },
+    });
+
+    return memberships
+        .filter((m) => m._count.mediaItemId === mediaItemIds.length)
+        .map((m) => m.collectionId);
 }

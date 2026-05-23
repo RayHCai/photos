@@ -19,6 +19,7 @@ const envSchema = z.object({
     WORKER_SECRET: z.string().default(''),
     HNSW_EF_SEARCH: z.coerce.number().default(100),
     LOG_LEVEL: z.string().default('info'),
+    CDN_BASE_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

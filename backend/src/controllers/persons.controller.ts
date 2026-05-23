@@ -51,6 +51,7 @@ export const getMedia = asyncHandler(async (req: Request, res: Response) => {
 
 export const getAvatar = asyncHandler(async (req: Request, res: Response) => {
     const url = await personsService.getPersonAvatarUrl(req.params.id as string);
+    res.set('Cache-Control', 'private, max-age=3300');
     res.redirect(url);
 });
 

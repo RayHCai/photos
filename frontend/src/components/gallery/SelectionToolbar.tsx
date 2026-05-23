@@ -5,7 +5,7 @@ import { X, Trash2, FolderPlus, Download, RotateCcw, EyeOff } from 'lucide-react
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddToCollectionModal } from '@/components/collections/AddToCollectionModal';
-import { downloadMediaFile, originalUrl } from '@/lib/api/media';
+import { downloadUrl } from '@/lib/api/media';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 
 interface SelectionToolbarProps {
@@ -62,11 +62,16 @@ export function SelectionToolbar({
         }
     };
 
-    const getDownloadUrl = downloadUrlFn ?? originalUrl;
+    const getDownloadUrl = downloadUrlFn ?? downloadUrl;
 
     const handleDownload = useCallback(() => {
         for (const id of selection.selectedIds) {
-            downloadMediaFile(id, getDownloadUrl);
+            const a = document.createElement('a');
+            a.href = getDownloadUrl(id);
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         }
     }, [selection.selectedIds, getDownloadUrl]);
 

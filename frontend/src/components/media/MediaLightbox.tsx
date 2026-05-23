@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getMediaById, originalUrl } from '@/lib/api/media';
+import { getMediaById, originalUrl, thumbnailUrl, webUrl } from '@/lib/api/media';
 import { VideoPlayer } from './VideoPlayer';
 import { MediaDetail } from './MediaDetail';
 import { MediaActions } from './MediaActions';
-import { X, ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Info, Loader2 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
 
 interface MediaLightboxProps {
@@ -14,6 +14,8 @@ interface MediaLightboxProps {
     onClose: () => void;
     onPrev?: () => void;
     onNext?: () => void;
+    prevMediaId?: string;
+    nextMediaId?: string;
 }
 
 export function MediaLightbox({
@@ -21,13 +23,34 @@ export function MediaLightbox({
     onClose,
     onPrev,
     onNext,
+    prevMediaId,
+    nextMediaId,
 }: MediaLightboxProps) {
     const [showInfo, setShowInfo] = useState(false);
+    const [originalLoaded, setOriginalLoaded] = useState(false);
+    const preloadedRef = useRef(new Set<string>());
 
     const { data: item } = useQuery({
         queryKey: ['media', mediaId],
         queryFn: () => getMediaById(mediaId),
     });
+
+    // Reset loaded state when mediaId changes
+    useEffect(() => {
+        setOriginalLoaded(false);
+    }, [mediaId]);
+
+    // Preload adjacent images
+    useEffect(() => {
+        const idsToPreload = [prevMediaId, nextMediaId].filter(
+            (id): id is string => !!id && !preloadedRef.current.has(id)
+        );
+        for (const id of idsToPreload) {
+            preloadedRef.current.add(id);
+            const img = new Image();
+            img.src = webUrl(id);
+        }
+    }, [prevMediaId, nextMediaId]);
 
     const handleKeyDown = useCallback(
         (e: KeyboardEvent) => {
@@ -103,16 +126,38 @@ export function MediaLightbox({
                 )}
 
                 {item && (
-                    <div className="max-w-[90vw] max-h-[90vh]">
+                    <div className="max-w-[90vw] max-h-[90vh] relative">
                         {item.type === 'VIDEO' ? (
                             <VideoPlayer src={originalUrl(item.id)} />
                         ) : (
-                            <img
-                                src={originalUrl(item.id)}
-                                alt={item.fileName}
-                                className="max-w-full max-h-[90vh] object-contain"
-                                draggable={false}
-                            />
+                            <>
+                                {/* Thumbnail placeholder — shown instantly */}
+                                <img
+                                    src={thumbnailUrl(item.id)}
+                                    alt=""
+                                    className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
+                                        originalLoaded ? 'opacity-0 absolute inset-0' : 'opacity-100'
+                                    }`}
+                                    draggable={false}
+                                />
+                                {/* Web-optimized image — fades in on top */}
+                                <img
+                                    key={item.id}
+                                    src={webUrl(item.id)}
+                                    alt={item.fileName}
+                                    className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
+                                        originalLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0'
+                                    }`}
+                                    draggable={false}
+                                    onLoad={() => setOriginalLoaded(true)}
+                                />
+                                {/* Loading spinner */}
+                                {!originalLoaded && (
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                        <Loader2 className="w-8 h-8 text-white/50 animate-spin" />
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 )}

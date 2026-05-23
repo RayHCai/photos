@@ -13,6 +13,7 @@ from worker.log import get_logger
 logger = get_logger(__name__)
 
 MAX_DIMENSION = 400
+WEB_MAX_DIMENSION = 2000
 WEBP_QUALITY = 80
 
 
@@ -26,6 +27,24 @@ def generate_photo_thumbnail(image: Image.Image) -> bytes:
     buf.seek(0)
     result = buf.read()
     logger.info("photo_thumbnail_generated", width=img.width, height=img.height, size_bytes=len(result))
+    return result
+
+
+def generate_web_image(image: Image.Image) -> bytes:
+    """Generate a web-optimized version (~2000px max dimension) for fast lightbox viewing."""
+    img = image.copy()
+    # Skip if image is already smaller than web size
+    if img.width <= WEB_MAX_DIMENSION and img.height <= WEB_MAX_DIMENSION:
+        img = img.convert("RGB")
+    else:
+        img.thumbnail((WEB_MAX_DIMENSION, WEB_MAX_DIMENSION), Image.Resampling.LANCZOS)
+        img = img.convert("RGB")
+
+    buf = io.BytesIO()
+    img.save(buf, format="WEBP", quality=WEBP_QUALITY)
+    buf.seek(0)
+    result = buf.read()
+    logger.info("web_image_generated", width=img.width, height=img.height, size_bytes=len(result))
     return result
 
 

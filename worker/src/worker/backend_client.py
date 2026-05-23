@@ -117,6 +117,7 @@ async def persist_content(
     thumbnail_key: str | None = None,
     clip_embedding: list[float] | None = None,
     blur_hash: str | None = None,
+    web_key: str | None = None,
 ) -> None:
     await _request("PUT", f"/media/{media_item_id}/content", json={
         "width": width,
@@ -133,6 +134,7 @@ async def persist_content(
         "thumbnailKey": thumbnail_key,
         "clipEmbedding": clip_embedding,
         "blurHash": blur_hash,
+        "webKey": web_key,
     })
 
 
@@ -145,6 +147,12 @@ async def persist_blurhash_only(media_item_id: str, blur_hash: str) -> None:
 async def persist_streaming_key(media_item_id: str, streaming_key: str) -> None:
     await _request("PUT", f"/media/{media_item_id}/streaming-key", json={
         "streamingKey": streaming_key,
+    })
+
+
+async def persist_web_key(media_item_id: str, web_key: str) -> None:
+    await _request("PUT", f"/media/{media_item_id}/web-key", json={
+        "webKey": web_key,
     })
 
 

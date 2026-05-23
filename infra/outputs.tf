@@ -18,3 +18,13 @@ output "iam_secret_access_key" {
   value       = aws_iam_access_key.app.secret
   sensitive   = true
 }
+
+output "cloudfront_domain_name" {
+  description = "CloudFront distribution domain (set as CDN_BASE_URL with https:// prefix)"
+  value       = aws_cloudfront_distribution.thumbnails.domain_name
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID"
+  value       = aws_cloudfront_distribution.thumbnails.id
+}

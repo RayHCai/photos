@@ -25,11 +25,12 @@ from worker.thumbnail import (
     generate_blurhash,
     generate_photo_thumbnail,
     generate_video_thumbnail,
+    generate_web_image,
 )
 
 logger = get_logger(__name__)
 
-Stage = Literal["full", "clip", "faces", "blurhash", "transcode"]
+Stage = Literal["full", "clip", "faces", "blurhash", "transcode", "web"]
 
 
 def _build_fts_document(meta: MediaMetadata, file_name: str) -> str:
@@ -175,6 +176,11 @@ async def _stage_content_photo(
     thumb_image = Image.open(io.BytesIO(thumb_bytes))
     blur_hash = generate_blurhash(thumb_image)
 
+    logger.info("step_generate_web_image", media_item_id=media_item_id)
+    web_bytes = generate_web_image(image)
+    logger.info("step_upload_web_image", media_item_id=media_item_id, size_bytes=len(web_bytes))
+    web_key = await s3.generate_key_and_upload("web", web_bytes, "image/webp")
+
     logger.info("step_encode_clip", media_item_id=media_item_id)
     clip_input = image.convert("RGB") if image.mode != "RGB" else image
     clip_emb = encode_image(clip_input)
@@ -203,6 +209,7 @@ async def _stage_content_photo(
         thumbnail_key=thumb_key,
         clip_embedding=clip_emb.tolist(),
         blur_hash=blur_hash,
+        web_key=web_key,
     )
     logger.info("stage_content_done", media_item_id=media_item_id)
 
@@ -393,6 +400,22 @@ async def _stage_blurhash(media_item_id: str) -> None:
     logger.info("stage_blurhash_done", media_item_id=media_item_id)
 
 
+# ─── Stage: Web-optimized image ────────────────────────────────────────────
+
+
+async def _stage_web(image: Image.Image, media_item_id: str) -> None:
+    """Generate and upload a web-optimized image for fast lightbox viewing."""
+    logger.info("step_generate_web_image", media_item_id=media_item_id)
+    web_bytes = generate_web_image(image)
+
+    logger.info("step_upload_web_image", media_item_id=media_item_id, size_bytes=len(web_bytes))
+    web_key = await s3.generate_key_and_upload("web", web_bytes, "image/webp")
+
+    logger.info("step_persist_web_key", media_item_id=media_item_id, key=web_key)
+    await api.persist_web_key(media_item_id, web_key)
+    logger.info("stage_web_done", media_item_id=media_item_id)
+
+
 # ─── Orchestrators ───────────────────────────────────────────────────────────
 
 
@@ -424,6 +447,9 @@ async def process_photo(
         await _stage_faces_photo(image, media_item_id)
     elif start_stage == "faces":
         await _stage_faces_photo(image, media_item_id)
+        await api.set_processing_status(media_item_id, "COMPLETED")
+    elif start_stage == "web":
+        await _stage_web(image, media_item_id)
         await api.set_processing_status(media_item_id, "COMPLETED")
 
     logger.info("photo_processed", media_item_id=media_item_id)

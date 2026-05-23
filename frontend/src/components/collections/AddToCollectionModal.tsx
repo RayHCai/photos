@@ -6,7 +6,7 @@ import { X, Plus, FolderOpen, Check, Loader2 } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
 import { IconButton } from '@/components/ui/IconButton';
 import { ModalOverlay } from '@/components/ui/ModalOverlay';
-import { useCollections, useCreateCollection, useAddCollectionItems } from '@/lib/hooks/useCollections';
+import { useCollections, useCreateCollection, useAddCollectionItems, useRemoveCollectionItems, useCollectionMembership } from '@/lib/hooks/useCollections';
 import { pluralize } from '@/lib/utils/pluralize';
 import { toast } from 'sonner';
 
@@ -19,12 +19,15 @@ interface AddToCollectionModalProps {
 export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToCollectionModalProps) {
     const router = useRouter();
     const { data: collections = [] } = useCollections();
+    const { data: memberOf = new Set<string>() } = useCollectionMembership(mediaItemIds);
     const createCollection = useCreateCollection();
     const addItems = useAddCollectionItems();
+    const removeItems = useRemoveCollectionItems();
 
     const [creatingNew, setCreatingNew] = useState(false);
     const [newName, setNewName] = useState('');
     const [addedTo, setAddedTo] = useState<string | null>(null);
+    const [removedFrom, setRemovedFrom] = useState<string | null>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -38,34 +41,48 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
             setCreatingNew(false);
             setNewName('');
             setAddedTo(null);
+            setRemovedFrom(null);
         }
     }, [open]);
 
     if (!open) return null;
 
-    const isAdding = addItems.isPending || createCollection.isPending;
+    const isBusy = addItems.isPending || removeItems.isPending || createCollection.isPending;
 
-    const handleAddToExisting = async (collectionId: string, collectionName: string) => {
-        if (isAdding) return;
+    const handleToggleCollection = async (collectionId: string, collectionName: string) => {
+        if (isBusy) return;
+        const isInCollection = memberOf.has(collectionId);
         try {
-            await addItems.mutateAsync({ collectionId, mediaItemIds });
-            setAddedTo(collectionId);
-            toast.success(`Added to ${collectionName}`);
-            setTimeout(() => onClose(), 600);
+            if (isInCollection) {
+                await removeItems.mutateAsync({ collectionId, mediaItemIds });
+                setRemovedFrom(collectionId);
+                toast.success(`Removed from ${collectionName}`);
+                setTimeout(() => onClose(), 600);
+            }
+            else {
+                await addItems.mutateAsync({ collectionId, mediaItemIds });
+                setAddedTo(collectionId);
+                toast.success(`Added to ${collectionName}`);
+                setTimeout(() => onClose(), 600);
+            }
         }
         catch {
-            toast.error('Failed to add items');
+            toast.error(isInCollection ? 'Failed to remove items' : 'Failed to add items');
         }
     };
 
     const handleCreateAndAdd = async () => {
-        if (!newName.trim() || isAdding) return;
+        if (!newName.trim() || isBusy) return;
         try {
             const collection = await createCollection.mutateAsync({ name: newName.trim() });
             await addItems.mutateAsync({ collectionId: collection.id, mediaItemIds });
-            toast.success(`Created "${newName.trim()}" with ${pluralize(mediaItemIds.length, 'item')}`);
+            toast.success(`Created "${newName.trim()}" with ${pluralize(mediaItemIds.length, 'item')}`, {
+                action: {
+                    label: 'View',
+                    onClick: () => router.push(`/collections/${collection.id}`),
+                },
+            });
             onClose();
-            router.push(`/collections/${collection.id}`);
         }
         catch {
             toast.error('Failed to create collection');
@@ -122,7 +139,7 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
                             />
                             <button
                                 onClick={handleCreateAndAdd}
-                                disabled={!newName.trim() || isAdding}
+                                disabled={!newName.trim() || isBusy}
                                 className="h-7 px-2.5 bg-stone-900 text-white text-xs rounded hover:bg-stone-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                             >
                                 {createCollection.isPending ? (
@@ -143,31 +160,44 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
                 {/* Existing collections */}
                 {collections.length > 0 && (
                     <div className="px-2 pb-3 max-h-52 overflow-y-auto">
-                        {collections.map((c) => (
-                            <button
-                                key={c.id}
-                                onClick={() => handleAddToExisting(c.id, c.name)}
-                                disabled={isAdding}
-                                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-stone-50 transition-colors disabled:opacity-50 group"
-                            >
-                                <div className="w-7 h-7 rounded bg-stone-100 flex items-center justify-center flex-shrink-0 group-hover:bg-stone-200 transition-colors">
-                                    {addedTo === c.id ? (
-                                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                    ) : (
-                                        <FolderOpen className="w-3.5 h-3.5 text-stone-400" />
+                        {collections.map((c) => {
+                            const isInCollection = memberOf.has(c.id);
+                            const justAdded = addedTo === c.id;
+                            const justRemoved = removedFrom === c.id;
+                            const isPending =
+                                (addItems.isPending && addItems.variables?.collectionId === c.id) ||
+                                (removeItems.isPending && removeItems.variables?.collectionId === c.id);
+
+                            return (
+                                <button
+                                    key={c.id}
+                                    onClick={() => handleToggleCollection(c.id, c.name)}
+                                    disabled={isBusy}
+                                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-stone-50 transition-colors disabled:opacity-50 group"
+                                >
+                                    <div className={`w-7 h-7 rounded flex items-center justify-center flex-shrink-0 transition-colors ${
+                                        isInCollection && !justRemoved
+                                            ? 'bg-emerald-100 group-hover:bg-emerald-200'
+                                            : 'bg-stone-100 group-hover:bg-stone-200'
+                                    }`}>
+                                        {justAdded || (isInCollection && !justRemoved) ? (
+                                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                        ) : (
+                                            <FolderOpen className="w-3.5 h-3.5 text-stone-400" />
+                                        )}
+                                    </div>
+                                    <div className="flex-1 min-w-0 text-left">
+                                        <p className="text-xs text-stone-900 truncate">{c.name}</p>
+                                        <p className="text-[11px] leading-tight text-stone-400">
+                                            {pluralize(c._count.items, 'item')}
+                                        </p>
+                                    </div>
+                                    {isPending && (
+                                        <Spinner className="w-3 h-3 flex-shrink-0" />
                                     )}
-                                </div>
-                                <div className="flex-1 min-w-0 text-left">
-                                    <p className="text-xs text-stone-900 truncate">{c.name}</p>
-                                    <p className="text-[11px] leading-tight text-stone-400">
-                                        {pluralize(c._count.items, 'item')}
-                                    </p>
-                                </div>
-                                {addItems.isPending && addItems.variables?.collectionId === c.id && (
-                                    <Spinner className="w-3 h-3 flex-shrink-0" />
-                                )}
-                            </button>
-                        ))}
+                                </button>
+                            );
+                        })}
                     </div>
                 )}
 

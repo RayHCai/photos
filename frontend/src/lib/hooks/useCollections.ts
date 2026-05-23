@@ -39,7 +39,7 @@ export function useAddCollectionItems() {
     return useMutationWithInvalidation(
         ({ collectionId, mediaItemIds }: { collectionId: string; mediaItemIds: string[] }) =>
             collectionsApi.addItems(collectionId, mediaItemIds),
-        (_data, vars) => [['collections'], ['collections', vars.collectionId]]
+        (_data, vars) => [['collections'], ['collections', vars.collectionId], ['collection-membership']]
     );
 }
 
@@ -47,6 +47,15 @@ export function useRemoveCollectionItems() {
     return useMutationWithInvalidation(
         ({ collectionId, mediaItemIds }: { collectionId: string; mediaItemIds: string[] }) =>
             collectionsApi.removeItems(collectionId, mediaItemIds),
-        (_data, vars) => [['collections'], ['collections', vars.collectionId]]
+        (_data, vars) => [['collections'], ['collections', vars.collectionId], ['collection-membership']]
     );
+}
+
+export function useCollectionMembership(mediaItemIds: string[]) {
+    return useQuery({
+        queryKey: ['collection-membership', ...mediaItemIds],
+        queryFn: () => collectionsApi.getCollectionMembership(mediaItemIds),
+        enabled: mediaItemIds.length > 0,
+        select: (data) => new Set(data.collectionIds),
+    });
 }

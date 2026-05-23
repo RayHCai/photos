@@ -27,5 +27,7 @@ export function useLightboxNavigation(
         lightboxIndex,
         onPrev: lightboxIndex > 0 ? handlePrev : undefined,
         onNext: lightboxIndex < items.length - 1 ? handleNext : undefined,
+        prevMediaId: lightboxIndex > 0 ? items[lightboxIndex - 1].id : undefined,
+        nextMediaId: lightboxIndex < items.length - 1 ? items[lightboxIndex + 1].id : undefined,
     };
 }

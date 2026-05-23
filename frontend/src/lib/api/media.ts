@@ -46,11 +46,10 @@ export function originalUrl(id: string): string {
     return apiUrl(`/media/${id}/original`);
 }
 
-export function downloadMediaFile(id: string, urlFn: (id: string) => string = originalUrl) {
-    const a = document.createElement('a');
-    a.href = urlFn(id);
-    a.download = '';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+export function webUrl(id: string): string {
+    return apiUrl(`/media/${id}/web`);
+}
+
+export function downloadUrl(id: string): string {
+    return apiUrl(`/media/${id}/download`);
 }

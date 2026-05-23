@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../middleware/errorHandler.js';
 import * as s3Service from './s3.service.js';
+import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
 
@@ -125,5 +126,8 @@ export async function getSharedMediaUrl(
         throw new AppError(404, `${variant} not available`);
     }
 
+    if (variant === 'thumbnail' && env.CDN_BASE_URL) {
+        return s3Service.getCdnUrl(key);
+    }
     return s3Service.getPresignedDownloadUrl(key);
 }

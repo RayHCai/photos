@@ -20,6 +20,7 @@ router.post('/backfill-blurhash', serviceAuthMiddleware, jobsController.backfill
 router.post('/backfill-all-blurhash', serviceAuthMiddleware, jobsController.backfillAllMissingBlurHashes);
 router.post('/fix-orphaned-processing', serviceAuthMiddleware, jobsController.fixOrphanedProcessing);
 router.post('/backfill-transcode', eitherAuth, jobsController.backfillTranscoding);
+router.post('/backfill-web', eitherAuth, jobsController.backfillWebOptimized);
 router.post('/recluster', eitherAuth, jobsController.triggerRecluster);
 router.post('/rerun-missing-faces', eitherAuth, jobsController.rerunMissingFaces);
 

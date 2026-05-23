@@ -26,7 +26,7 @@ router.post(
     '/media/:id/retry-task',
     validate({
         body: z.object({
-            startStage: z.enum(['full', 'clip', 'faces', 'blurhash', 'transcode']).default('full'),
+            startStage: z.enum(['full', 'clip', 'faces', 'blurhash', 'transcode', 'web']).default('full'),
         }),
     }),
     internalController.createRetryTask,
@@ -61,6 +61,7 @@ router.put(
             thumbnailKey: z.string().nullable().optional(),
             clipEmbedding: z.array(z.number()).length(512).nullable().optional(),
             blurHash: z.string().nullable().optional(),
+            webKey: z.string().nullable().optional(),
         }),
     }),
     internalController.persistContent
@@ -84,6 +85,16 @@ router.put(
         }),
     }),
     internalController.persistStreamingKey
+);
+
+router.put(
+    '/media/:id/web-key',
+    validate({
+        body: z.object({
+            webKey: z.string(),
+        }),
+    }),
+    internalController.persistWebKey
 );
 
 router.get('/media/:id/thumbnail-key', internalController.getThumbnailKey);
@@ -193,7 +204,7 @@ router.post(
     '/s3/upload-url',
     validate({
         body: z.object({
-            prefix: z.enum(['thumbnails', 'crops', 'streaming']),
+            prefix: z.enum(['thumbnails', 'crops', 'streaming', 'web']),
             contentType: z.string(),
         }),
     }),

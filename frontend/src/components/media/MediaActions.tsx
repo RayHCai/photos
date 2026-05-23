@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { batchDeleteMedia, originalUrl } from '@/lib/api/media';
+import { batchDeleteMedia, downloadUrl } from '@/lib/api/media';
 import { Download, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -35,8 +35,7 @@ export function MediaActions({ mediaId, onDelete }: MediaActionsProps) {
         <>
             <div className="flex items-center gap-0.5">
                 <a
-                    href={originalUrl(mediaId)}
-                    download
+                    href={downloadUrl(mediaId)}
                     className={downloadStyles.button}
                     title="Download"
                 >

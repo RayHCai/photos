@@ -12,6 +12,7 @@ import {
     triggerRecluster,
     rerunMissingFaces,
     backfillTranscoding,
+    backfillWebOptimized,
 } from '@/lib/api/jobs';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
@@ -113,6 +114,14 @@ export default function SettingsPage() {
             onClick: async () => {
                 const { count } = await rerunMissingFaces();
                 toast.success(`Enqueued ${count} items for face detection`);
+            },
+        },
+        {
+            label: 'Generate Web Images',
+            description: 'Create web-optimized versions of all photos for faster lightbox viewing',
+            onClick: async () => {
+                const { count } = await backfillWebOptimized();
+                toast.success(`Enqueued ${count} photos for web optimization`);
             },
         },
         {

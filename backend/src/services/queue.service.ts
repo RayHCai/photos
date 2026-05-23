@@ -8,7 +8,7 @@ interface ProcessMediaJobData {
     originalKey: string;
     mimeType: string;
     type: 'PHOTO' | 'VIDEO';
-    startStage?: 'full' | 'clip' | 'faces' | 'blurhash' | 'transcode';
+    startStage?: 'full' | 'clip' | 'faces' | 'blurhash' | 'transcode' | 'web';
 }
 
 interface ReclusterJobData {
