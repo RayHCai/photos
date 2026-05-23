@@ -32,7 +32,8 @@ export default function GalleryPage() {
     const handleToggleFavorite = useCallback((id: string, isFavorite: boolean) => {
         if (isFavorite) {
             removeFromFavorites([id]);
-        } else {
+        }
+        else {
             addToFavorites([id]);
         }
     }, [addToFavorites, removeFromFavorites]);
@@ -44,7 +45,8 @@ export default function GalleryPage() {
         try {
             await hideItems(ids);
             toast.success(`${pluralize(ids.length, 'item')} hidden`);
-        } catch {
+        }
+        catch {
             toast.error('Failed to hide items');
         }
     }, [hideItems]);

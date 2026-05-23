@@ -95,7 +95,8 @@ export function findCurrentDateBinary(
         if (index[mid].scrollTop <= scrollTop) {
             result = mid;
             lo = mid + 1;
-        } else {
+        }
+        else {
             hi = mid - 1;
         }
     }
@@ -156,15 +157,20 @@ function selectMarkers(markers: TimelineMarker[], monthInterval: number): Timeli
         let include = false;
         if (monthInterval >= 60) {
             include = month === 1 && year % 5 === 0;
-        } else if (monthInterval >= 24) {
+        }
+        else if (monthInterval >= 24) {
             include = month === 1 && year % 2 === 0;
-        } else if (monthInterval >= 12) {
+        }
+        else if (monthInterval >= 12) {
             include = month === 1;
-        } else if (monthInterval >= 6) {
+        }
+        else if (monthInterval >= 6) {
             include = month === 1 || month === 7;
-        } else if (monthInterval >= 3) {
+        }
+        else if (monthInterval >= 3) {
             include = (month - 1) % 3 === 0; // Jan, Apr, Jul, Oct
-        } else if (monthInterval >= 2) {
+        }
+        else if (monthInterval >= 2) {
             include = month % 2 === 1; // Jan, Mar, May, Jul, Sep, Nov
         }
 

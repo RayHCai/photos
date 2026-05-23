@@ -95,7 +95,7 @@ export function GalleryGrid({
         if (isMobile) {
             const availableWidth = containerWidth - MOBILE_PADDING * 2;
             const naturalCellSize = Math.floor((availableWidth - (mobileColumns - 1) * MOBILE_GAP) / mobileColumns);
-            const cellSize = gestureCellSize != null ? Math.round(gestureCellSize) : naturalCellSize;
+            const cellSize = gestureCellSize !== null ? Math.round(gestureCellSize) : naturalCellSize;
 
             for (const group of groups) {
                 rows.push({

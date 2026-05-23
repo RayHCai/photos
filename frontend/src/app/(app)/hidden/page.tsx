@@ -7,7 +7,6 @@ import { useHidden } from '@/lib/hooks/useHidden';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { PhotoGallery } from '@/components/gallery/PhotoGallery';
-import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { IconButton } from '@/components/ui/IconButton';
 import { pluralize } from '@/lib/utils/pluralize';
 import { toast } from 'sonner';
@@ -33,7 +32,8 @@ export default function HiddenPage() {
         try {
             await unhideItems(ids);
             toast.success(`${pluralize(ids.length, 'item')} unhidden`);
-        } catch {
+        }
+        catch {
             toast.error('Failed to unhide items');
         }
     }, [unhideItems]);

@@ -37,7 +37,8 @@ function ActionButton({ label, description, onClick }: ActionButtonProps) {
         setLoading(true);
         try {
             await onClick();
-        } finally {
+        }
+        finally {
             setLoading(false);
         }
     }, [onClick]);
