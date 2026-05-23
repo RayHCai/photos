@@ -69,6 +69,7 @@ interface PersistContentData {
     thumbnailKey?: string | null;
     clipEmbedding?: number[] | null;
     blurHash?: string | null;
+    webKey?: string | null;
 }
 
 export async function persistContent(mediaItemId: string, data: PersistContentData) {
@@ -95,6 +96,7 @@ export async function persistContent(mediaItemId: string, data: PersistContentDa
             clip_embedding = CASE WHEN $14::text IS NOT NULL
                 THEN $14::vector ELSE clip_embedding END,
             blur_hash = COALESCE($15, blur_hash),
+            web_key = COALESCE($16, web_key),
             processing_status = 'COMPLETED',
             processing_error = NULL,
             updated_at = now()
@@ -114,6 +116,7 @@ export async function persistContent(mediaItemId: string, data: PersistContentDa
         data.thumbnailKey ?? null,
         embeddingStr,
         data.blurHash ?? null,
+        data.webKey ?? null,
     );
 }
 
@@ -153,6 +156,13 @@ export async function persistStreamingKey(mediaItemId: string, streamingKey: str
     await prisma.mediaItem.update({
         where: { id: mediaItemId },
         data: { streamingKey },
+    });
+}
+
+export async function persistWebKey(mediaItemId: string, webKey: string) {
+    await prisma.mediaItem.update({
+        where: { id: mediaItemId },
+        data: { webKey },
     });
 }
 
@@ -392,7 +402,7 @@ export async function queryMediaItemsForRetry(filter: RetryFilter) {
 // ─── S3 Operations ───────────────────────────────────────────
 
 export async function generateUploadUrl(
-    prefix: 'thumbnails' | 'crops' | 'streaming',
+    prefix: 'thumbnails' | 'crops' | 'streaming' | 'web',
     contentType: string
 ): Promise<{ key: string; url: string }> {
     const ext = contentType.split('/')[1] || 'webp';
@@ -401,6 +411,8 @@ export async function generateUploadUrl(
         key = s3Service.generateThumbnailKey(ext);
     } else if (prefix === 'crops') {
         key = s3Service.generateCropKey(ext);
+    } else if (prefix === 'web') {
+        key = s3Service.generateWebKey(ext);
     } else {
         key = s3Service.generateStreamingKey('mp4');
     }

@@ -106,11 +106,25 @@ export const batchThumbnails = asyncHandler(async (req: Request, res: Response) 
 
 export const getThumbnail = asyncHandler(async (req: Request, res: Response) => {
     const url = await mediaService.getThumbnailUrl(req.params.id as string);
+    res.set('Cache-Control', 'private, max-age=3300');
     res.redirect(url);
 });
 
 export const getOriginal = asyncHandler(async (req: Request, res: Response) => {
     const url = await mediaService.getOriginalUrl(req.params.id as string);
+    res.set('Cache-Control', 'private, max-age=3300');
+    res.redirect(url);
+});
+
+export const getWeb = asyncHandler(async (req: Request, res: Response) => {
+    const url = await mediaService.getWebUrl(req.params.id as string);
+    res.set('Cache-Control', 'private, max-age=3300');
+    res.redirect(url);
+});
+
+export const download = asyncHandler(async (req: Request, res: Response) => {
+    const url = await mediaService.getDownloadUrl(req.params.id as string);
+    res.set('Cache-Control', 'private, max-age=3300');
     res.redirect(url);
 });
 

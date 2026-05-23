@@ -79,6 +79,13 @@ export const backfillTranscoding = asyncHandler(async (_req: Request, res: Respo
     res.json({ count });
 });
 
+export const backfillWebOptimized = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('web-optimized backfill requested');
+    const count = await mediaService.backfillWebOptimized();
+    logger.info({ count }, 'web-optimized backfill enqueued');
+    res.json({ count });
+});
+
 export const getStorageStats = asyncHandler(async (_req: Request, res: Response) => {
     const result = await prisma.mediaItem.aggregate({
         _sum: { fileSize: true },

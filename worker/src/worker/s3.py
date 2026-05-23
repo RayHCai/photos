@@ -38,7 +38,7 @@ async def generate_key_and_upload(
     prefix: str, data: bytes, content_type: str
 ) -> str:
     """Generate a key and upload bytes to S3 via backend presigned URL."""
-    p = prefix if prefix in ("crops", "thumbnails", "streaming") else "thumbnails"
+    p = prefix if prefix in ("crops", "thumbnails", "streaming", "web") else "thumbnails"
     result = await api._request("POST", "/s3/upload-url", json={
         "prefix": p,
         "contentType": content_type,
@@ -56,7 +56,7 @@ async def generate_key_and_upload(
 
 async def upload_file_to_key(prefix: str, file_path: str, content_type: str) -> str:
     """Upload a file from disk to S3 via backend presigned URL."""
-    p = prefix if prefix in ("crops", "thumbnails", "streaming") else "thumbnails"
+    p = prefix if prefix in ("crops", "thumbnails", "streaming", "web") else "thumbnails"
     result = await api._request("POST", "/s3/upload-url", json={
         "prefix": p,
         "contentType": content_type,

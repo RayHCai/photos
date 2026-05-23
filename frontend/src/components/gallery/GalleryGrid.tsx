@@ -183,6 +183,7 @@ export function GalleryGrid({
             <div
                 ref={containerRef}
                 className="h-full overflow-y-auto hide-scrollbar"
+                style={isMobile ? { touchAction: 'pan-y' } : undefined}
             >
                 <div
                     className="relative w-full"

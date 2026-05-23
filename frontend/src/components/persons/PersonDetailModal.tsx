@@ -34,17 +34,21 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
     const [shareOpen, setShareOpen] = useState(false);
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
-    const allItems = useMemo(
-        () => data?.pages.flatMap((p) => p.items) || [],
-        [data]
-    );
+    const allItems = useMemo(() => {
+        const seen = new Set<string>();
+        return (data?.pages.flatMap((p) => p.items) || []).filter((item) => {
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+        });
+    }, [data]);
 
     const sentinelRef = useInfiniteScroll(
         () => fetchNextPage(),
         !!hasNextPage && !isFetchingNextPage
     );
 
-    const { onPrev, onNext } = useLightboxNavigation(allItems, lightboxId, setLightboxId);
+    const { onPrev, onNext, prevMediaId, nextMediaId } = useLightboxNavigation(allItems, lightboxId, setLightboxId);
 
     const handleDelete = () => {
         deletePerson.mutate(person.id, {
@@ -177,6 +181,8 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
                     onClose={() => setLightboxId(null)}
                     onPrev={onPrev}
                     onNext={onNext}
+                    prevMediaId={prevMediaId}
+                    nextMediaId={nextMediaId}
                 />
             )}
         </>

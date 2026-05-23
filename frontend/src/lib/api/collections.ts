@@ -59,3 +59,12 @@ export function removeItems(
         body: JSON.stringify({ mediaItemIds }),
     });
 }
+
+export function getCollectionMembership(
+    mediaItemIds: string[]
+): Promise<{ collectionIds: string[] }> {
+    return apiFetch('/collections/membership', {
+        method: 'POST',
+        body: JSON.stringify({ mediaItemIds }),
+    });
+}

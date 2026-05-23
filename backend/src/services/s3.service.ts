@@ -39,6 +39,10 @@ export function generateStreamingKey(ext: string): string {
     return buildKey('streaming', ext);
 }
 
+export function generateWebKey(ext: string): string {
+    return buildKey('web', ext);
+}
+
 export async function getPresignedUploadUrl(
     key: string,
     mimeType: string,
@@ -56,8 +60,12 @@ export async function getPresignedUploadUrl(
     });
 }
 
-export async function getPresignedDownloadUrl(key: string) {
-    const cacheKey = `presigned:${key}`;
+export function getCdnUrl(key: string): string {
+    return `${env.CDN_BASE_URL}/${key}`;
+}
+
+export async function getPresignedDownloadUrl(key: string, fileName?: string) {
+    const cacheKey = fileName ? `presigned:dl:${key}` : `presigned:${key}`;
     const cached = await redisConnection.get(cacheKey);
     if (cached) {
         return cached;
@@ -66,6 +74,9 @@ export async function getPresignedDownloadUrl(key: string) {
     const command = new GetObjectCommand({
         Bucket: env.S3_BUCKET,
         Key: key,
+        ...(fileName && {
+            ResponseContentDisposition: `attachment; filename="${fileName}"`,
+        }),
     });
 
     const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });

@@ -42,6 +42,7 @@ export const sharedThumbnail = asyncHandler(async (req: Request, res: Response) 
         req.params.mediaId as string,
         'thumbnail'
     );
+    res.set('Cache-Control', 'private, max-age=3300');
     res.redirect(url);
 });
 
@@ -51,5 +52,6 @@ export const sharedOriginal = asyncHandler(async (req: Request, res: Response) =
         req.params.mediaId as string,
         'original'
     );
+    res.set('Cache-Control', 'private, max-age=3300');
     res.redirect(url);
 });

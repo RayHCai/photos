@@ -124,5 +124,7 @@ router.delete('/:id', mediaController.deleteOne);
 
 router.get('/:id/thumbnail', mediaController.getThumbnail);
 router.get('/:id/original', mediaController.getOriginal);
+router.get('/:id/web', mediaController.getWeb);
+router.get('/:id/download', mediaController.download);
 
 export default router;

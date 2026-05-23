@@ -64,3 +64,8 @@ export const removeItems = asyncHandler(async (req: Request, res: Response) => {
     logger.info({ collectionId: id, itemCount }, 'items removed from collection');
     res.json({ message: 'Items removed' });
 });
+
+export const membership = asyncHandler(async (req: Request, res: Response) => {
+    const collectionIds = await collectionsService.getCollectionMembership(req.body.mediaItemIds);
+    res.json({ collectionIds });
+});

@@ -9,20 +9,39 @@ import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
 import { logger } from '../utils/logger.js';
 
+const HIDDEN_EXCLUSION: Prisma.MediaItemWhereInput = {
+    collectionItems: { none: { collection: { systemType: 'HIDDEN' } } },
+};
+
 export async function listPersons() {
-    return prisma.person.findMany({
+    const persons = await prisma.person.findMany({
         orderBy: { name: 'asc' },
         include: {
-            _count: { select: { faces: true } },
+            _count: {
+                select: {
+                    faces: {
+                        where: { mediaItem: HIDDEN_EXCLUSION },
+                    },
+                },
+            },
         },
     });
+    return persons.filter(p => p._count.faces > 0);
 }
 
 export async function getPerson(id: string) {
     return findOrThrow(
         () => prisma.person.findUnique({
             where: { id },
-            include: { _count: { select: { faces: true } } },
+            include: {
+                _count: {
+                    select: {
+                        faces: {
+                            where: { mediaItem: HIDDEN_EXCLUSION },
+                        },
+                    },
+                },
+            },
         }),
         'Person'
     );
@@ -117,7 +136,7 @@ export async function getPersonMedia(
     );
 
     const faces = await prisma.face.findMany({
-        where: { personId },
+        where: { personId, mediaItem: HIDDEN_EXCLUSION },
         take: limit + 1,
         ...applyCursor(cursor),
         include: {
@@ -175,7 +194,7 @@ function slugify(name: string): string {
 
 async function getPersonMediaIds(personId: string): Promise<string[]> {
     const faces = await prisma.face.findMany({
-        where: { personId },
+        where: { personId, mediaItem: HIDDEN_EXCLUSION },
         select: { mediaItemId: true },
         distinct: ['mediaItemId'],
     });

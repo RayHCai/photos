@@ -20,3 +20,4 @@ export const fixOrphanedProcessing = postJob('fix-orphaned-processing');
 export const triggerRecluster = postJob<{ status: string }>('recluster');
 export const rerunMissingFaces = postJob('rerun-missing-faces');
 export const backfillTranscoding = postJob('backfill-transcode');
+export const backfillWebOptimized = postJob('backfill-web');

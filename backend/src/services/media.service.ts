@@ -5,6 +5,7 @@ import { AppError } from '../middleware/errorHandler.js';
 import * as personsService from './persons.service.js';
 import * as s3Service from './s3.service.js';
 import * as queueService from './queue.service.js';
+import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
@@ -34,8 +35,8 @@ function getExtension(fileName: string): string {
     return parts.length > 1 ? parts.pop()! : 'bin';
 }
 
-function collectS3Keys(item: { originalKey: string; thumbnailKey?: string | null; streamingKey?: string | null }): string[] {
-    return [item.originalKey, item.thumbnailKey, item.streamingKey].filter((k): k is string => k != null);
+function collectS3Keys(item: { originalKey: string; thumbnailKey?: string | null; streamingKey?: string | null; webKey?: string | null }): string[] {
+    return [item.originalKey, item.thumbnailKey, item.streamingKey, item.webKey].filter((k): k is string => k != null);
 }
 
 export function validateMimeType(mimeType: string) {
@@ -44,7 +45,7 @@ export function validateMimeType(mimeType: string) {
     }
 }
 
-type StartStage = 'full' | 'clip' | 'faces' | 'blurhash' | 'transcode';
+type StartStage = 'full' | 'clip' | 'faces' | 'blurhash' | 'transcode' | 'web';
 
 async function _createTaskAndEnqueue(
     mediaItemId: string,
@@ -263,7 +264,7 @@ export async function deleteMedia(id: string) {
 export async function batchDeleteMedia(ids: string[]) {
     const items = await prisma.mediaItem.findMany({
         where: { id: { in: ids } },
-        select: { id: true, originalKey: true, thumbnailKey: true, streamingKey: true },
+        select: { id: true, originalKey: true, thumbnailKey: true, streamingKey: true, webKey: true },
     });
 
     const personIds = await personsService.getAffectedPersonIds(ids);
@@ -294,7 +295,9 @@ export async function getThumbnailUrl(id: string) {
         throw new AppError(404, 'Thumbnail not yet available');
     }
 
-    return s3Service.getPresignedDownloadUrl(item.thumbnailKey);
+    return env.CDN_BASE_URL
+        ? s3Service.getCdnUrl(item.thumbnailKey)
+        : await s3Service.getPresignedDownloadUrl(item.thumbnailKey);
 }
 
 export async function getBatchThumbnailUrls(ids: string[]) {
@@ -305,7 +308,9 @@ export async function getBatchThumbnailUrls(ids: string[]) {
 
     const entries = await Promise.all(
         items.map(async (item) => {
-            const url = await s3Service.getPresignedDownloadUrl(item.thumbnailKey!);
+            const url = env.CDN_BASE_URL
+                ? s3Service.getCdnUrl(item.thumbnailKey!)
+                : await s3Service.getPresignedDownloadUrl(item.thumbnailKey!);
             return [item.id, url] as const;
         })
     );
@@ -323,6 +328,38 @@ export async function getOriginalUrl(id: string) {
     );
     const key = (item.type === 'VIDEO' && item.streamingKey) ? item.streamingKey : item.originalKey;
     return s3Service.getPresignedDownloadUrl(key);
+}
+
+export async function getWebUrl(id: string) {
+    const item = await findOrThrow(
+        () => prisma.mediaItem.findUnique({
+            where: { id },
+            select: { webKey: true, originalKey: true, streamingKey: true, type: true },
+        }),
+        'Media item'
+    );
+    // For videos, use streaming key; for photos, prefer web key, fall back to original
+    if (item.type === 'VIDEO') {
+        const key = item.streamingKey ?? item.originalKey;
+        return s3Service.getPresignedDownloadUrl(key);
+    }
+    const key = item.webKey ?? item.originalKey;
+    // Serve web-optimized photos via CDN when available (web/ prefix is in CDN bucket policy)
+    if (env.CDN_BASE_URL && item.webKey) {
+        return s3Service.getCdnUrl(item.webKey);
+    }
+    return s3Service.getPresignedDownloadUrl(key);
+}
+
+export async function getDownloadUrl(id: string) {
+    const item = await findOrThrow(
+        () => prisma.mediaItem.findUnique({
+            where: { id },
+            select: { originalKey: true, fileName: true },
+        }),
+        'Media item'
+    );
+    return s3Service.getPresignedDownloadUrl(item.originalKey, item.fileName);
 }
 
 export async function checkDuplicateFileNames(fileNames: string[]) {
@@ -401,4 +438,8 @@ export async function fixOrphanedProcessing() {
 
 export async function backfillTranscoding() {
     return _queryAndEnqueue({ type: 'VIDEO', streamingKey: null, processingStatus: 'COMPLETED' }, 'transcode', 'transcode backfill enqueued');
+}
+
+export async function backfillWebOptimized() {
+    return _queryAndEnqueue({ type: 'PHOTO', webKey: null, processingStatus: 'COMPLETED' }, 'web', 'web-optimized backfill enqueued');
 }

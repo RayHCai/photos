@@ -13,6 +13,8 @@ interface LightboxProps {
     onClose: () => void;
     onPrev?: () => void;
     onNext?: () => void;
+    prevMediaId?: string;
+    nextMediaId?: string;
 }
 
 interface PhotoGalleryProps {
@@ -48,7 +50,7 @@ export function PhotoGallery({
 }: PhotoGalleryProps) {
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
-    const { onPrev, onNext } = useLightboxNavigation(items, lightboxId, setLightboxId);
+    const { onPrev, onNext, prevMediaId, nextMediaId } = useLightboxNavigation(items, lightboxId, setLightboxId);
 
     const orderedIds = useMemo(() => items.map((i) => i.id), [items]);
 
@@ -69,6 +71,8 @@ export function PhotoGallery({
             onClose: () => setLightboxId(null),
             onPrev,
             onNext,
+            prevMediaId,
+            nextMediaId,
         }
         : null;
 
@@ -96,6 +100,8 @@ export function PhotoGallery({
                         onClose={lightboxProps.onClose}
                         onPrev={lightboxProps.onPrev}
                         onNext={lightboxProps.onNext}
+                        prevMediaId={lightboxProps.prevMediaId}
+                        nextMediaId={lightboxProps.nextMediaId}
                     />
                 ))}
         </>

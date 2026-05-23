@@ -64,6 +64,13 @@ export const persistStreamingKey = asyncHandler(async (req: Request, res: Respon
     res.status(204).send();
 });
 
+export const persistWebKey = asyncHandler(async (req: Request, res: Response) => {
+    const mediaId = req.params.id as string;
+    logger.info({ mediaId }, 'persisting web key');
+    await internalService.persistWebKey(mediaId, req.body.webKey);
+    res.status(204).send();
+});
+
 export const getThumbnailKey = asyncHandler(async (req: Request, res: Response) => {
     const result = await internalService.getThumbnailKey(req.params.id as string);
     res.json(result);
