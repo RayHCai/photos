@@ -118,7 +118,10 @@ export const GalleryItem = memo(function GalleryItem({
             {onToggleFavorite && (
                 <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleFavorite();
+                    }}
                     className={`absolute top-1 left-1 p-0.5 rounded-full transition-opacity ${
                         isFavorite
                             ? 'opacity-100'
