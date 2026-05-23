@@ -1,6 +1,7 @@
 'use client';
 
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { useMutationWithInvalidation } from './useMutationWithInvalidation';
 import * as personsApi from '../api/persons';
 
 export function usePersons() {
@@ -26,43 +27,24 @@ export function usePersonMedia(personId: string | null) {
 }
 
 export function useRenamePerson() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: ({ id, name }: { id: string; name: string }) =>
-            personsApi.renamePerson(id, name),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['persons'] });
-        },
-    });
+    return useMutationWithInvalidation(
+        ({ id, name }: { id: string; name: string }) => personsApi.renamePerson(id, name),
+        [['persons']]
+    );
 }
 
 export function useMergePersons() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: ({ sourceId, targetId }: { sourceId: string; targetId: string }) =>
+    return useMutationWithInvalidation(
+        ({ sourceId, targetId }: { sourceId: string; targetId: string }) =>
             personsApi.mergePersons(sourceId, targetId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['persons'] });
-        },
-    });
+        [['persons']]
+    );
 }
 
 export function useDeletePerson() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: personsApi.deletePerson,
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['persons'] });
-        },
-    });
+    return useMutationWithInvalidation(personsApi.deletePerson, [['persons']]);
 }
 
 export function useSharePerson() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: personsApi.sharePerson,
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['collections'] });
-        },
-    });
+    return useMutationWithInvalidation(personsApi.sharePerson, [['collections']]);
 }

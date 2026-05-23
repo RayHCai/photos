@@ -1,18 +1,9 @@
 import { apiFetch } from './client';
+import { EXT_TO_MIME } from '../constants/mediaFormats';
 
 const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
 const PART_SIZE = 10 * 1024 * 1024;
 const CONCURRENCY = 6;
-
-const EXT_TO_MIME: Record<string, string> = {
-    heic: 'image/heic',
-    heif: 'image/heif',
-    tiff: 'image/tiff',
-    avif: 'image/avif',
-    mkv: 'video/x-matroska',
-    mov: 'video/quicktime',
-    avi: 'video/x-msvideo',
-};
 
 function resolveMimeType(file: File): string {
     if (file.type) return file.type;

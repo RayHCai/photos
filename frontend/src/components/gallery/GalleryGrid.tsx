@@ -8,10 +8,10 @@ import { computeJustifiedLayout, type LayoutRow } from '@/lib/utils/imageLayout'
 import { groupByDate } from '@/lib/utils/groupByDate';
 import { TimelineScrollbar } from './TimelineScrollbar';
 import { useThumbnailPrefetch } from '@/lib/hooks/useThumbnailPrefetch';
+import { usePinchToZoom } from '@/lib/hooks/usePinchToZoom';
 import type { MediaShellItem } from '@/lib/types/media';
 
 const MOBILE_BREAKPOINT = 768;
-const MOBILE_COLUMNS = 4;
 const MOBILE_GAP = 2;
 const MOBILE_PADDING = 4;
 
@@ -39,6 +39,8 @@ interface GalleryGridProps {
     containerWidth?: number;
     selectedIds?: Set<string>;
     isSelecting?: boolean;
+    favoriteIds?: Set<string>;
+    onToggleFavorite?: (id: string, isFavorite: boolean) => void;
     onItemSelect?: (id: string, e: React.MouseEvent) => void;
     thumbnailSrcFn?: (id: string) => string | undefined;
 }
@@ -49,6 +51,8 @@ export function GalleryGrid({
     containerWidth: propWidth,
     selectedIds,
     isSelecting,
+    favoriteIds,
+    onToggleFavorite,
     onItemSelect,
     thumbnailSrcFn,
 }: GalleryGridProps) {
@@ -69,6 +73,10 @@ export function GalleryGrid({
 
     const containerWidth = propWidth ?? measuredWidth;
     const isMobile = containerWidth > 0 && containerWidth < MOBILE_BREAKPOINT;
+    const mobileAvailableWidth = containerWidth - MOBILE_PADDING * 2;
+    const { columns: mobileColumns, gestureCellSize } = usePinchToZoom(
+        containerRef, isMobile, mobileAvailableWidth, MOBILE_GAP
+    );
 
     const mediaMap = useMemo(() => {
         const map = new Map<string, MediaShellItem>();
@@ -86,7 +94,8 @@ export function GalleryGrid({
 
         if (isMobile) {
             const availableWidth = containerWidth - MOBILE_PADDING * 2;
-            const cellSize = Math.floor((availableWidth - (MOBILE_COLUMNS - 1) * MOBILE_GAP) / MOBILE_COLUMNS);
+            const naturalCellSize = Math.floor((availableWidth - (mobileColumns - 1) * MOBILE_GAP) / mobileColumns);
+            const cellSize = gestureCellSize != null ? Math.round(gestureCellSize) : naturalCellSize;
 
             for (const group of groups) {
                 rows.push({
@@ -96,8 +105,8 @@ export function GalleryGrid({
                     date: group.date,
                 });
 
-                for (let i = 0; i < group.items.length; i += MOBILE_COLUMNS) {
-                    const chunk = group.items.slice(i, i + MOBILE_COLUMNS);
+                for (let i = 0; i < group.items.length; i += mobileColumns) {
+                    const chunk = group.items.slice(i, i + mobileColumns);
                     rows.push({
                         type: 'gallery-row',
                         height: cellSize + MOBILE_GAP,
@@ -153,7 +162,7 @@ export function GalleryGrid({
         }
 
         return rows;
-    }, [items, containerWidth, isMobile]);
+    }, [items, containerWidth, isMobile, mobileColumns, gestureCellSize]);
 
     const virtualizer = useVirtualizer({
         count: virtualRows.length,
@@ -205,6 +214,8 @@ export function GalleryGrid({
                                         onItemClick={onItemClick}
                                         selectedIds={selectedIds}
                                         isSelecting={isSelecting}
+                                        favoriteIds={favoriteIds}
+                                        onToggleFavorite={onToggleFavorite}
                                         onItemSelect={onItemSelect}
                                         thumbnailSrcFn={resolvedThumbnailSrcFn}
                                     />

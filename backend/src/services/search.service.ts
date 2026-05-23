@@ -203,6 +203,18 @@ async function parseSearchQuery(rawQuery: string): Promise<ParsedQuery> {
     return { personIds, dateRange, locations, mediaType, clipText };
 }
 
+const HIDDEN_EXCLUSION_SQL = `AND m.id NOT IN (
+        SELECT ci.media_item_id FROM collection_items ci
+        JOIN collections c ON c.id = ci.collection_id
+        WHERE c.system_type = 'HIDDEN'
+    )`;
+
+const HIDDEN_EXCLUSION_WHERE = `WHERE m.id NOT IN (
+        SELECT ci.media_item_id FROM collection_items ci
+        JOIN collections c ON c.id = ci.collection_id
+        WHERE c.system_type = 'HIDDEN'
+    )`;
+
 // ── SQL Helpers ────────────────────────────────────────────────────────
 
 function buildFilterClauses(parsed: ParsedQuery, paramOffset: number) {
@@ -334,6 +346,7 @@ async function searchWithClipAndFilters(
          FROM media_items m
          WHERE m.clip_embedding IS NOT NULL
            ${whereExtra}
+           ${HIDDEN_EXCLUSION_SQL}
          ORDER BY m.clip_embedding <=> $1::vector
          LIMIT $2 OFFSET $3`,
         embeddingStr, limit, offset, ...filterParams,
@@ -365,6 +378,7 @@ async function searchWithFtsAndFilters(
          FROM media_items m
          WHERE m.fts_vector @@ plainto_tsquery('english', $1)
            ${whereExtra}
+           ${HIDDEN_EXCLUSION_SQL}
          ORDER BY rank DESC
          LIMIT $2 OFFSET $3`,
         parsed.clipText, limit, offset, ...filterParams,
@@ -387,11 +401,15 @@ async function searchWithFiltersOnly(
 ) {
     // Main query: $1 = limit, $2 = offset, filters start at $3
     const { clauses: mainClauses, params: mainParams } = buildFilterClauses(parsed, 3);
-    const mainWhere = mainClauses.length > 0 ? `WHERE ${mainClauses.join(' AND ')}` : '';
+    const mainWhere = mainClauses.length > 0
+        ? `WHERE ${mainClauses.join(' AND ')} ${HIDDEN_EXCLUSION_SQL}`
+        : HIDDEN_EXCLUSION_WHERE;
 
     // Count query: filters start at $1
     const { clauses: countClauses, params: countParams } = buildFilterClauses(parsed, 1);
-    const countWhere = countClauses.length > 0 ? `WHERE ${countClauses.join(' AND ')}` : '';
+    const countWhere = countClauses.length > 0
+        ? `WHERE ${countClauses.join(' AND ')} ${HIDDEN_EXCLUSION_SQL}`
+        : HIDDEN_EXCLUSION_WHERE;
 
     const [results, countResult] = await Promise.all([
         prisma.$queryRawUnsafe<SearchResult[]>(
@@ -425,14 +443,18 @@ export async function search(params: SearchParams) {
     const offset = (page - 1) * limit;
 
     if (!q || q.trim().length === 0) {
+        const hiddenFilter = {
+            collectionItems: { none: { collection: { systemType: 'HIDDEN' } } },
+        };
         const [items, total] = await Promise.all([
             prisma.mediaItem.findMany({
+                where: hiddenFilter,
                 orderBy: [{ takenAt: 'desc' }, { createdAt: 'desc' }],
                 take: limit,
                 skip: offset,
                 select: MEDIA_ITEM_SUMMARY_SELECT,
             }),
-            prisma.mediaItem.count(),
+            prisma.mediaItem.count({ where: hiddenFilter }),
         ]);
 
         return { items, total, page, limit, searchType: 'filter' as const };
@@ -484,6 +506,7 @@ export async function search(params: SearchParams) {
                 ts_rank(m.fts_vector, plainto_tsquery('english', $1)) AS rank
          FROM media_items m
          WHERE m.fts_vector @@ plainto_tsquery('english', $1)
+           ${HIDDEN_EXCLUSION_SQL}
          ORDER BY rank DESC
          LIMIT $2 OFFSET $3`,
         q, limit, offset,

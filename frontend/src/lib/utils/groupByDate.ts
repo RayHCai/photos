@@ -23,9 +23,11 @@ export function groupByDate<T extends MediaShellItem>(items: T[]): DateGroup<T>[
         }
     }
 
-    return Array.from(groups.entries()).map(([date, groupItems]) => ({
-        date,
-        label: formatDate(date + 'T00:00:00'),
-        items: groupItems,
-    }));
+    return Array.from(groups.entries())
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([date, groupItems]) => ({
+            date,
+            label: formatDate(date),
+            items: groupItems,
+        }));
 }

@@ -1,11 +1,11 @@
 import { apiFetch, apiUrl, buildQueryString } from './client';
 import type { CursorPaginatedResponse } from '../types/api';
-import type { MediaItem, MediaListItem, MediaShellItem } from '../types/media';
+import type { MediaItem, MediaListItem, MediaShellItem, MediaType, TimelineMonth } from '../types/media';
 
 export function listMedia(params: {
     cursor?: string;
     limit?: number;
-    type?: 'PHOTO' | 'VIDEO';
+    type?: MediaType;
     sort?: 'date_asc' | 'date_desc';
 }): Promise<CursorPaginatedResponse<MediaListItem>> {
     const qs = buildQueryString(params);
@@ -14,10 +14,6 @@ export function listMedia(params: {
 
 export function getMediaById(id: string): Promise<MediaItem> {
     return apiFetch(`/media/${id}`);
-}
-
-export function deleteMedia(id: string): Promise<void> {
-    return apiFetch(`/media/${id}`, { method: 'DELETE' });
 }
 
 export function batchDeleteMedia(ids: string[]): Promise<{ deleted: number }> {
@@ -29,11 +25,6 @@ export function batchDeleteMedia(ids: string[]): Promise<{ deleted: number }> {
 
 export function getShellData(): Promise<MediaShellItem[]> {
     return apiFetch('/media/shell');
-}
-
-export interface TimelineMonth {
-    month: string; // yyyy-MM
-    count: number;
 }
 
 export function getTimeline(): Promise<TimelineMonth[]> {
@@ -53,4 +44,13 @@ export function getBatchThumbnailUrls(ids: string[]): Promise<Record<string, str
 
 export function originalUrl(id: string): string {
     return apiUrl(`/media/${id}/original`);
+}
+
+export function downloadMediaFile(id: string, urlFn: (id: string) => string = originalUrl) {
+    const a = document.createElement('a');
+    a.href = urlFn(id);
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
 }

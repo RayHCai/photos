@@ -4,6 +4,7 @@ export interface Collection {
     id: string;
     name: string;
     coverKey: string | null;
+    systemType: string | null;
     createdAt: string;
     updatedAt: string;
     _count: { items: number };

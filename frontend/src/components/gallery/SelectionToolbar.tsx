@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Trash2, FolderPlus, Download, RotateCcw } from 'lucide-react';
+import { X, Trash2, FolderPlus, Download, RotateCcw, EyeOff } from 'lucide-react';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddToCollectionModal } from '@/components/collections/AddToCollectionModal';
-import { originalUrl } from '@/lib/api/media';
+import { downloadMediaFile, originalUrl } from '@/lib/api/media';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 
 interface SelectionToolbarProps {
@@ -26,6 +26,10 @@ interface SelectionToolbarProps {
     downloadUrlFn?: (id: string) => string;
     /** Loading state for delete action */
     deleteLoading?: boolean;
+    /** Show "Hide" button (eye-off icon) */
+    showHide?: boolean;
+    /** Called to hide selected items */
+    onHide?: (ids: string[]) => Promise<void>;
 }
 
 export function SelectionToolbar({
@@ -38,6 +42,8 @@ export function SelectionToolbar({
     onRetry,
     downloadUrlFn,
     deleteLoading,
+    showHide,
+    onHide,
 }: SelectionToolbarProps) {
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [collectionModalOpen, setCollectionModalOpen] = useState(false);
@@ -60,12 +66,7 @@ export function SelectionToolbar({
 
     const handleDownload = useCallback(() => {
         for (const id of selection.selectedIds) {
-            const a = document.createElement('a');
-            a.href = getDownloadUrl(id);
-            a.download = '';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            downloadMediaFile(id, getDownloadUrl);
         }
     }, [selection.selectedIds, getDownloadUrl]);
 
@@ -94,6 +95,18 @@ export function SelectionToolbar({
                         variant="ghost"
                         onClick={() => setCollectionModalOpen(true)}
                         title="Add to collection"
+                    />
+                )}
+                {showHide && onHide && (
+                    <IconButton
+                        icon={EyeOff}
+                        size="sm"
+                        variant="ghost"
+                        onClick={async () => {
+                            await onHide(Array.from(selection.selectedIds));
+                            selection.clearSelection();
+                        }}
+                        title="Hide selected"
                     />
                 )}
                 {showDownload && (

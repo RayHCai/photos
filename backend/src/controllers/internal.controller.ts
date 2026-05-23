@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import * as internalService from '../services/internal.service.js';
+import * as personsService from '../services/persons.service.js';
+import * as s3Service from '../services/s3.service.js';
 import { asyncHandler } from '../utils/async.js';
 import { logger } from '../utils/logger.js';
 
@@ -25,8 +27,8 @@ export const claimTask = asyncHandler(async (req: Request, res: Response) => {
 
 export const createRetryTask = asyncHandler(async (req: Request, res: Response) => {
     const mediaId = req.params.id as string;
-    logger.info({ mediaId, startStage: req.body.startStage }, 'creating retry task');
-    const result = await internalService.createRetryTask(mediaId, req.body.startStage);
+    logger.info({ mediaId }, 'creating retry task');
+    const result = await internalService.createRetryTask(mediaId);
     logger.info({ mediaId, taskId: result.taskId }, 'retry task created');
     res.status(201).json(result);
 });
@@ -52,6 +54,13 @@ export const persistBlurHashOnly = asyncHandler(async (req: Request, res: Respon
     const mediaId = req.params.id as string;
     logger.info({ mediaId }, 'persisting blur hash');
     await internalService.persistBlurHashOnly(mediaId, req.body.blurHash);
+    res.status(204).send();
+});
+
+export const persistStreamingKey = asyncHandler(async (req: Request, res: Response) => {
+    const mediaId = req.params.id as string;
+    logger.info({ mediaId }, 'persisting streaming key');
+    await internalService.persistStreamingKey(mediaId, req.body.streamingKey);
     res.status(204).send();
 });
 
@@ -140,8 +149,8 @@ export const queryMediaItemsForRetry = asyncHandler(async (req: Request, res: Re
 });
 
 export const getDownloadUrl = asyncHandler(async (req: Request, res: Response) => {
-    const result = await internalService.getDownloadUrl(req.params.key as string);
-    res.json(result);
+    const url = await s3Service.getPresignedDownloadUrl(req.params.key as string);
+    res.json({ url });
 });
 
 export const generateUploadUrl = asyncHandler(async (req: Request, res: Response) => {
@@ -152,7 +161,7 @@ export const generateUploadUrl = asyncHandler(async (req: Request, res: Response
 
 export const deleteOrphanPersons = asyncHandler(async (_req: Request, res: Response) => {
     logger.info('cleaning up orphan persons');
-    const count = await internalService.deleteAllOrphanPersons();
+    const count = await personsService.deleteOrphanPersons();
     logger.info({ deleted: count }, 'orphan persons cleaned up');
     res.json({ deleted: count });
 });

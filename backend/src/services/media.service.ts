@@ -34,18 +34,24 @@ function getExtension(fileName: string): string {
     return parts.length > 1 ? parts.pop()! : 'bin';
 }
 
+function collectS3Keys(item: { originalKey: string; thumbnailKey?: string | null; streamingKey?: string | null }): string[] {
+    return [item.originalKey, item.thumbnailKey, item.streamingKey].filter((k): k is string => k != null);
+}
+
 export function validateMimeType(mimeType: string) {
     if (!SUPPORTED_MIMES.has(mimeType)) {
         throw new AppError(400, `Unsupported file type: ${mimeType}`);
     }
 }
 
+type StartStage = 'full' | 'clip' | 'faces' | 'blurhash' | 'transcode';
+
 async function _createTaskAndEnqueue(
     mediaItemId: string,
     originalKey: string,
     mimeType: string,
     type: 'PHOTO' | 'VIDEO',
-    startStage: 'full' | 'clip' | 'faces' | 'blurhash' = 'full',
+    startStage: StartStage = 'full',
 ) {
     const taskId = randomUUID();
     await prisma.mediaItem.update({
@@ -54,6 +60,22 @@ async function _createTaskAndEnqueue(
     });
     await queueService.enqueueMediaProcessing({ mediaItemId, taskId, originalKey, mimeType, type, startStage });
     logger.info({ mediaItemId, taskId, type, startStage }, 'media: processing task enqueued');
+}
+
+async function _queryAndEnqueue(
+    where: Prisma.MediaItemWhereInput,
+    startStage: StartStage,
+    logLabel: string,
+): Promise<number> {
+    const items = await prisma.mediaItem.findMany({
+        where,
+        select: { id: true, originalKey: true, mimeType: true, type: true },
+    });
+    for (const item of items) {
+        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type, startStage);
+    }
+    logger.info({ count: items.length }, `media: ${logLabel}`);
+    return items.length;
 }
 
 export async function createPresignedUpload(
@@ -150,6 +172,10 @@ export async function completeMultipartUpload(
     return item;
 }
 
+const HIDDEN_EXCLUSION: Prisma.MediaItemWhereInput = {
+    collectionItems: { none: { collection: { systemType: 'HIDDEN' } } },
+};
+
 export async function listMedia(params: {
     cursor?: string;
     limit: number;
@@ -158,7 +184,7 @@ export async function listMedia(params: {
 }) {
     const { cursor, limit, type, sort = 'date_desc' } = params;
 
-    const where: Prisma.MediaItemWhereInput = {};
+    const where: Prisma.MediaItemWhereInput = { ...HIDDEN_EXCLUSION };
     if (type) {
         where.type = type;
     }
@@ -179,19 +205,9 @@ export async function listMedia(params: {
 
 export async function getShellData() {
     return prisma.mediaItem.findMany({
+        where: HIDDEN_EXCLUSION,
         orderBy: [{ takenAt: 'desc' }, { createdAt: 'desc' }],
-        select: {
-            id: true,
-            type: true,
-            width: true,
-            height: true,
-            takenAt: true,
-            createdAt: true,
-            thumbnailKey: true,
-            blurHash: true,
-            durationSeconds: true,
-            processingStatus: true,
-        },
+        select: MEDIA_ITEM_SUMMARY_SELECT,
     });
 }
 
@@ -199,7 +215,12 @@ export async function getTimeline() {
     const rows = await prisma.$queryRaw<Array<{ month: string; count: bigint }>>`
         SELECT to_char(COALESCE("taken_at", "created_at"), 'YYYY-MM') AS month,
                COUNT(*)::bigint AS count
-        FROM "media_items"
+        FROM "media_items" m
+        WHERE m.id NOT IN (
+            SELECT ci.media_item_id FROM collection_items ci
+            JOIN collections c ON c.id = ci.collection_id
+            WHERE c.system_type = 'HIDDEN'
+        )
         GROUP BY month
         ORDER BY month DESC
     `;
@@ -227,11 +248,7 @@ export async function deleteMedia(id: string) {
     );
 
     const personIds = await personsService.getAffectedPersonIds(id);
-
-    const keysToDelete = [item.originalKey];
-    if (item.thumbnailKey) {
-        keysToDelete.push(item.thumbnailKey);
-    }
+    const keysToDelete = collectS3Keys(item);
 
     logger.info({ mediaId: id, s3Keys: keysToDelete.length }, 'media: deleting item and S3 objects');
     await Promise.all([
@@ -240,29 +257,17 @@ export async function deleteMedia(id: string) {
     ]);
     logger.info({ mediaId: id }, 'media: item deleted');
 
-    if (personIds.length > 0) {
-        const orphansDeleted = await personsService.deleteOrphanPersons(personIds);
-        if (orphansDeleted > 0) {
-            logger.info({ mediaId: id, orphansDeleted }, 'media: orphan persons cleaned up');
-        }
-    }
+    await personsService.cleanupOrphanPersons(personIds, 'media delete');
 }
 
 export async function batchDeleteMedia(ids: string[]) {
     const items = await prisma.mediaItem.findMany({
         where: { id: { in: ids } },
-        select: { id: true, originalKey: true, thumbnailKey: true },
+        select: { id: true, originalKey: true, thumbnailKey: true, streamingKey: true },
     });
 
     const personIds = await personsService.getAffectedPersonIds(ids);
-
-    const keysToDelete = items.flatMap((item) => {
-        const keys = [item.originalKey];
-        if (item.thumbnailKey) {
-            keys.push(item.thumbnailKey);
-        }
-        return keys;
-    });
+    const keysToDelete = items.flatMap(collectS3Keys);
 
     logger.info({ requested: ids.length, found: items.length, s3Keys: keysToDelete.length }, 'media: batch deleting');
     await Promise.all([
@@ -271,12 +276,7 @@ export async function batchDeleteMedia(ids: string[]) {
     ]);
     logger.info({ deleted: items.length }, 'media: batch delete completed');
 
-    if (personIds.length > 0) {
-        const orphansDeleted = await personsService.deleteOrphanPersons(personIds);
-        if (orphansDeleted > 0) {
-            logger.info({ orphansDeleted }, 'media: orphan persons cleaned up after batch delete');
-        }
-    }
+    await personsService.cleanupOrphanPersons(personIds, 'batch delete');
 
     return items.length;
 }
@@ -317,11 +317,12 @@ export async function getOriginalUrl(id: string) {
     const item = await findOrThrow(
         () => prisma.mediaItem.findUnique({
             where: { id },
-            select: { originalKey: true },
+            select: { originalKey: true, streamingKey: true, type: true },
         }),
         'Media item'
     );
-    return s3Service.getPresignedDownloadUrl(item.originalKey);
+    const key = (item.type === 'VIDEO' && item.streamingKey) ? item.streamingKey : item.originalKey;
+    return s3Service.getPresignedDownloadUrl(key);
 }
 
 export async function checkDuplicateFileNames(fileNames: string[]) {
@@ -354,73 +355,31 @@ export async function checkDuplicateFileNames(fileNames: string[]) {
 }
 
 export async function retryAllFailed() {
-    const failedItems = await prisma.mediaItem.findMany({
-        where: { processingStatus: 'FAILED' },
-        select: { id: true, originalKey: true, mimeType: true, type: true },
-    });
-
-    for (const item of failedItems) {
-        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type);
-    }
-
-    logger.info({ count: failedItems.length }, 'media: retried all failed items');
-    return failedItems.length;
+    return _queryAndEnqueue({ processingStatus: 'FAILED' }, 'full', 'retried all failed items');
 }
 
 export async function batchRetryMedia(ids: string[]) {
-    const items = await prisma.mediaItem.findMany({
-        where: { id: { in: ids }, processingStatus: { in: ['FAILED', 'PENDING'] } },
-        select: { id: true, originalKey: true, mimeType: true, type: true },
-    });
-
-    for (const item of items) {
-        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type);
-    }
-
-    logger.info({ requested: ids.length, retried: items.length }, 'media: batch retry completed');
-    return items.length;
+    return _queryAndEnqueue(
+        { id: { in: ids }, processingStatus: { in: ['FAILED', 'PENDING'] } },
+        'full',
+        'batch retry completed',
+    );
 }
 
 export async function enqueueAllPending() {
-    const pendingItems = await prisma.mediaItem.findMany({
-        where: { processingStatus: 'PENDING' },
-        select: { id: true, originalKey: true, mimeType: true, type: true },
-    });
-
-    for (const item of pendingItems) {
-        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type);
-    }
-
-    logger.info({ count: pendingItems.length }, 'media: enqueued all pending items');
-    return pendingItems.length;
+    return _queryAndEnqueue({ processingStatus: 'PENDING' }, 'full', 'enqueued all pending items');
 }
 
 export async function backfillBlurHashes() {
-    const items = await prisma.mediaItem.findMany({
-        where: { blurHash: null, processingStatus: 'COMPLETED' },
-        select: { id: true, originalKey: true, mimeType: true, type: true },
-    });
-
-    for (const item of items) {
-        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type, 'blurhash');
-    }
-
-    logger.info({ count: items.length }, 'media: blurhash backfill enqueued');
-    return items.length;
+    return _queryAndEnqueue({ blurHash: null, processingStatus: 'COMPLETED' }, 'blurhash', 'blurhash backfill enqueued');
 }
 
 export async function backfillAllMissingBlurHashes() {
-    const items = await prisma.mediaItem.findMany({
-        where: { blurHash: null, thumbnailKey: { not: null } },
-        select: { id: true, originalKey: true, mimeType: true, type: true },
-    });
+    return _queryAndEnqueue({ blurHash: null, thumbnailKey: { not: null } }, 'blurhash', 'backfill ALL missing blurhashes enqueued');
+}
 
-    for (const item of items) {
-        await _createTaskAndEnqueue(item.id, item.originalKey, item.mimeType, item.type, 'blurhash');
-    }
-
-    logger.info({ count: items.length }, 'media: backfill ALL missing blurhashes enqueued');
-    return items.length;
+export async function rerunMissingFaces() {
+    return _queryAndEnqueue({ processingStatus: 'COMPLETED', faces: { none: {} } }, 'faces', 'rerun missing faces enqueued');
 }
 
 export async function fixOrphanedProcessing() {
@@ -438,4 +397,8 @@ export async function fixOrphanedProcessing() {
 
     logger.info({ count: result.count }, 'media: orphaned PROCESSING items fixed to COMPLETED');
     return result.count;
+}
+
+export async function backfillTranscoding() {
+    return _queryAndEnqueue({ type: 'VIDEO', streamingKey: null, processingStatus: 'COMPLETED' }, 'transcode', 'transcode backfill enqueued');
 }

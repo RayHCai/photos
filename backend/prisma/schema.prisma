@@ -40,6 +40,7 @@ model MediaItem {
     originalKey      String           @unique @map("original_key")
     thumbnailKey     String?          @map("thumbnail_key")
     blurHash         String?          @map("blur_hash")
+    streamingKey     String?          @map("streaming_key")
     fileName         String           @map("file_name")
     mimeType         String           @map("mime_type")
     fileSize         BigInt           @map("file_size")
@@ -117,6 +118,7 @@ model Collection {
     description String?
     coverKey    String?  @map("cover_key")
     personId    String?  @unique @map("person_id")
+    systemType  String?  @unique @map("system_type")
     createdAt   DateTime @default(now()) @map("created_at")
     updatedAt   DateTime @updatedAt @map("updated_at")
 

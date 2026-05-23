@@ -11,26 +11,34 @@ interface GalleryRowProps {
     onItemClick: (id: string) => void;
     selectedIds?: Set<string>;
     isSelecting?: boolean;
+    favoriteIds?: Set<string>;
+    onToggleFavorite?: (id: string, isFavorite: boolean) => void;
     onItemSelect?: (id: string, e: React.MouseEvent) => void;
     thumbnailSrcFn?: (id: string) => string | undefined;
 }
 
-const GridItem = memo(function GridItem({
+const RowItem = memo(function RowItem({
     id,
+    width,
+    height,
     mediaItems,
-    size,
     onItemClick,
     selectedIds,
     isSelecting,
+    favoriteIds,
+    onToggleFavorite,
     onItemSelect,
     thumbnailSrcFn,
 }: {
     id: string;
+    width: number;
+    height: number;
     mediaItems: Map<string, MediaShellItem>;
-    size: number;
     onItemClick: (id: string) => void;
     selectedIds?: Set<string>;
     isSelecting?: boolean;
+    favoriteIds?: Set<string>;
+    onToggleFavorite?: (id: string, isFavorite: boolean) => void;
     onItemSelect?: (id: string, e: React.MouseEvent) => void;
     thumbnailSrcFn?: (id: string) => string | undefined;
 }) {
@@ -40,49 +48,10 @@ const GridItem = memo(function GridItem({
         (e: React.MouseEvent) => onItemSelect?.(id, e),
         [onItemSelect, id],
     );
-
-    if (!mediaItem) return null;
-
-    return (
-        <GalleryItem
-            item={mediaItem}
-            width={size}
-            height={size}
-            onClick={handleClick}
-            isSelected={selectedIds?.has(id)}
-            isSelecting={isSelecting}
-            onSelect={onItemSelect ? handleSelect : undefined}
-            thumbnailSrc={thumbnailSrcFn ? thumbnailSrcFn(id) : undefined}
-        />
-    );
-});
-
-const JustifiedItem = memo(function JustifiedItem({
-    id,
-    scaledWidth,
-    scaledHeight,
-    mediaItems,
-    onItemClick,
-    selectedIds,
-    isSelecting,
-    onItemSelect,
-    thumbnailSrcFn,
-}: {
-    id: string;
-    scaledWidth: number;
-    scaledHeight: number;
-    mediaItems: Map<string, MediaShellItem>;
-    onItemClick: (id: string) => void;
-    selectedIds?: Set<string>;
-    isSelecting?: boolean;
-    onItemSelect?: (id: string, e: React.MouseEvent) => void;
-    thumbnailSrcFn?: (id: string) => string | undefined;
-}) {
-    const mediaItem = mediaItems.get(id);
-    const handleClick = useCallback(() => onItemClick(id), [onItemClick, id]);
-    const handleSelect = useCallback(
-        (e: React.MouseEvent) => onItemSelect?.(id, e),
-        [onItemSelect, id],
+    const isFavorite = favoriteIds?.has(id) ?? false;
+    const handleToggleFavorite = useCallback(
+        () => onToggleFavorite?.(id, isFavorite),
+        [onToggleFavorite, id, isFavorite],
     );
 
     if (!mediaItem) return null;
@@ -90,11 +59,13 @@ const JustifiedItem = memo(function JustifiedItem({
     return (
         <GalleryItem
             item={mediaItem}
-            width={scaledWidth}
-            height={scaledHeight}
+            width={width}
+            height={height}
             onClick={handleClick}
             isSelected={selectedIds?.has(id)}
             isSelecting={isSelecting}
+            isFavorite={isFavorite}
+            onToggleFavorite={onToggleFavorite ? handleToggleFavorite : undefined}
             onSelect={onItemSelect ? handleSelect : undefined}
             thumbnailSrc={thumbnailSrcFn ? thumbnailSrcFn(id) : undefined}
         />
@@ -107,6 +78,8 @@ export const GalleryRow = memo(function GalleryRow({
     onItemClick,
     selectedIds,
     isSelecting,
+    favoriteIds,
+    onToggleFavorite,
     onItemSelect,
     thumbnailSrcFn,
 }: GalleryRowProps) {
@@ -115,14 +88,17 @@ export const GalleryRow = memo(function GalleryRow({
         return (
             <div className="flex gap-[2px]" style={{ height: size }}>
                 {rowData.row.items.map((item) => (
-                    <GridItem
+                    <RowItem
                         key={item.id}
                         id={item.id}
+                        width={size}
+                        height={size}
                         mediaItems={mediaItems}
-                        size={size}
                         onItemClick={onItemClick}
                         selectedIds={selectedIds}
                         isSelecting={isSelecting}
+                        favoriteIds={favoriteIds}
+                        onToggleFavorite={onToggleFavorite}
                         onItemSelect={onItemSelect}
                         thumbnailSrcFn={thumbnailSrcFn}
                     />
@@ -135,15 +111,17 @@ export const GalleryRow = memo(function GalleryRow({
     return (
         <div className="flex justify-center gap-[5px]" style={{ height: rowData.row.height }}>
             {rowData.row.items.map((item) => (
-                <JustifiedItem
+                <RowItem
                     key={item.id}
                     id={item.id}
-                    scaledWidth={item.scaledWidth}
-                    scaledHeight={item.scaledHeight}
+                    width={item.scaledWidth}
+                    height={item.scaledHeight}
                     mediaItems={mediaItems}
                     onItemClick={onItemClick}
                     selectedIds={selectedIds}
                     isSelecting={isSelecting}
+                    favoriteIds={favoriteIds}
+                    onToggleFavorite={onToggleFavorite}
                     onItemSelect={onItemSelect}
                     thumbnailSrcFn={thumbnailSrcFn}
                 />

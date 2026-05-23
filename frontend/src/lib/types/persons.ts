@@ -1,3 +1,5 @@
+import type { MediaListItem } from './media';
+
 export interface Person {
     id: string;
     name: string | null;
@@ -7,13 +9,7 @@ export interface Person {
     _count: { faces: number };
 }
 
-export interface PersonMediaItem {
-    id: string;
-    type: 'PHOTO' | 'VIDEO';
-    fileName: string;
-    thumbnailKey: string | null;
-    width: number | null;
-    height: number | null;
-    durationSeconds: number | null;
-    takenAt: string | null;
-}
+export type PersonMediaItem = Pick<
+    MediaListItem,
+    'id' | 'type' | 'fileName' | 'thumbnailKey' | 'width' | 'height' | 'durationSeconds' | 'takenAt'
+>;

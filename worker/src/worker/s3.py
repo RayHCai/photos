@@ -38,7 +38,7 @@ async def generate_key_and_upload(
     prefix: str, data: bytes, content_type: str
 ) -> str:
     """Generate a key and upload bytes to S3 via backend presigned URL."""
-    p = "crops" if prefix == "crops" else "thumbnails"
+    p = prefix if prefix in ("crops", "thumbnails", "streaming") else "thumbnails"
     result = await api._request("POST", "/s3/upload-url", json={
         "prefix": p,
         "contentType": content_type,
@@ -51,4 +51,23 @@ async def generate_key_and_upload(
         response.raise_for_status()
 
     logger.info("s3_uploaded", key=key, prefix=prefix, size_bytes=len(data), content_type=content_type)
+    return key
+
+
+async def upload_file_to_key(prefix: str, file_path: str, content_type: str) -> str:
+    """Upload a file from disk to S3 via backend presigned URL."""
+    p = prefix if prefix in ("crops", "thumbnails", "streaming") else "thumbnails"
+    result = await api._request("POST", "/s3/upload-url", json={
+        "prefix": p,
+        "contentType": content_type,
+    })
+    key = result["key"]
+    url = result["url"]
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+        with open(file_path, "rb") as f:
+            response = await client.put(url, content=f.read(), headers={"Content-Type": content_type})
+            response.raise_for_status()
+
+    logger.info("s3_file_uploaded", key=key, prefix=prefix, content_type=content_type)
     return key

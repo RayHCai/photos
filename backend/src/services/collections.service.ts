@@ -1,9 +1,11 @@
 import { prisma } from '../config/prisma.js';
+import { AppError } from '../middleware/errorHandler.js';
 import { findOrThrow } from '../utils/db.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
 
 export async function listCollections() {
     const collections = await prisma.collection.findMany({
+        where: { systemType: { not: 'HIDDEN' } },
         orderBy: { updatedAt: 'desc' },
         include: {
             _count: { select: { items: true } },
@@ -62,30 +64,59 @@ export async function updateCollection(
     id: string,
     data: { name?: string; description?: string; coverKey?: string }
 ) {
-    await findOrThrow(
-        () => prisma.collection.findUnique({ where: { id } }),
+    return findOrThrow(
+        () => prisma.collection.update({ where: { id }, data }),
         'Collection'
     );
-    return prisma.collection.update({ where: { id }, data });
 }
 
 export async function deleteCollection(id: string) {
-    await findOrThrow(
-        () => prisma.collection.findUnique({ where: { id } }),
+    const existing = await findOrThrow(
+        () => prisma.collection.findUnique({ where: { id }, select: { id: true, systemType: true } }),
         'Collection'
     );
-    await prisma.collection.delete({ where: { id } });
+    if (existing.systemType) {
+        throw new AppError(403, 'System collections cannot be deleted');
+    }
+    return prisma.collection.delete({ where: { id } });
+}
+
+export async function getOrCreateSystemCollection(systemType: string, defaultName: string) {
+    let collection = await prisma.collection.findUnique({
+        where: { systemType },
+        include: {
+            _count: { select: { items: true } },
+            items: {
+                orderBy: { sortOrder: 'asc' },
+                include: {
+                    mediaItem: { select: MEDIA_ITEM_SUMMARY_SELECT },
+                },
+            },
+        },
+    });
+
+    if (!collection) {
+        collection = await prisma.collection.create({
+            data: { name: defaultName, systemType },
+            include: {
+                _count: { select: { items: true } },
+                items: {
+                    orderBy: { sortOrder: 'asc' },
+                    include: {
+                        mediaItem: { select: MEDIA_ITEM_SUMMARY_SELECT },
+                    },
+                },
+            },
+        });
+    }
+
+    return collection;
 }
 
 export async function addItems(
     collectionId: string,
     mediaItemIds: string[]
 ) {
-    await findOrThrow(
-        () => prisma.collection.findUnique({ where: { id: collectionId } }),
-        'Collection'
-    );
-
     const maxOrder = await prisma.collectionItem.aggregate({
         where: { collectionId },
         _max: { sortOrder: true },

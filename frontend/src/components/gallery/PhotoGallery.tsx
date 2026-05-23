@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo, type ReactNode } from 'react';
 import { GalleryGrid } from './GalleryGrid';
 import { MediaLightbox } from '@/components/media/MediaLightbox';
-import { Spinner } from '@/components/ui/Spinner';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useLightboxNavigation } from '@/lib/hooks/useLightboxNavigation';
 import type { MediaShellItem } from '@/lib/types/media';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
@@ -23,6 +23,12 @@ interface PhotoGalleryProps {
     // Selection
     selection: ReturnType<typeof useMediaSelection>;
 
+    // Favorite item IDs
+    favoriteIds?: Set<string>;
+
+    // Called when a user clicks the favorite star on an item
+    onToggleFavorite?: (id: string, isFavorite: boolean) => void;
+
     // Custom thumbnail source (for shared links)
     thumbnailSrcFn?: (id: string) => string | undefined;
 
@@ -35,6 +41,8 @@ export function PhotoGallery({
     isLoading,
     emptyMessage = 'No photos',
     selection,
+    favoriteIds,
+    onToggleFavorite,
     thumbnailSrcFn,
     renderLightbox,
 }: PhotoGalleryProps) {
@@ -51,22 +59,8 @@ export function PhotoGallery({
         [selection, orderedIds]
     );
 
-    if (isLoading) {
-        return (
-            <div className="flex-1 flex items-center justify-center">
-                <Spinner className="w-6 h-6" />
-            </div>
-        );
-    }
-
-    if (items.length === 0) {
-        return (
-            <div className="flex-1 flex items-center justify-center">
-                <p className="font-serif text-stone-400 select-none">
-                    {emptyMessage}
-                </p>
-            </div>
-        );
+    if (isLoading || items.length === 0) {
+        return <EmptyState isLoading={isLoading} message={emptyMessage} />;
     }
 
     const lightboxProps: LightboxProps | null = lightboxId
@@ -86,6 +80,8 @@ export function PhotoGallery({
                     onItemClick={(id) => setLightboxId(id)}
                     selectedIds={selection.selectedIds}
                     isSelecting={selection.isSelecting}
+                    favoriteIds={favoriteIds}
+                    onToggleFavorite={onToggleFavorite}
                     onItemSelect={handleItemSelect}
                     thumbnailSrcFn={thumbnailSrcFn}
                 />

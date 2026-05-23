@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
+import { FormField } from '@/components/ui/FormField';
 
 interface CollectionFormProps {
     initialName?: string;
@@ -27,10 +28,7 @@ export function CollectionForm({
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-                <label className="block text-sm text-stone-700 mb-1">
-                    Name
-                </label>
+            <FormField label="Name">
                 <TextInput
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -38,7 +36,7 @@ export function CollectionForm({
                     autoFocus
                     required
                 />
-            </div>
+            </FormField>
 
             <Button type="submit" loading={loading} className="w-full">
                 {submitLabel}

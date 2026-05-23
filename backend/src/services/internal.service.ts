@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../config/prisma.js';
 import * as personsService from './persons.service.js';
 import * as s3Service from './s3.service.js';
-import { logger } from '../utils/logger.js';
 import { findOrThrow } from '../utils/db.js';
 import { toVectorLiteral } from '../utils/embeddings.js';
 
@@ -46,7 +45,6 @@ export async function claimTask(mediaItemId: string, taskId: string): Promise<bo
 
 export async function createRetryTask(
     mediaItemId: string,
-    _startStage: string = 'full',
 ): Promise<{ taskId: string }> {
     const taskId = randomUUID();
     await prisma.mediaItem.update({
@@ -151,6 +149,13 @@ export async function persistClipOnly(mediaItemId: string, embedding: number[]) 
     );
 }
 
+export async function persistStreamingKey(mediaItemId: string, streamingKey: string) {
+    await prisma.mediaItem.update({
+        where: { id: mediaItemId },
+        data: { streamingKey },
+    });
+}
+
 // ─── Faces ───────────────────────────────────────────────────
 
 export async function clearFaces(mediaItemId: string): Promise<number> {
@@ -160,16 +165,11 @@ export async function clearFaces(mediaItemId: string): Promise<number> {
         where: { mediaItemId },
     });
 
-    if (personIds.length > 0) {
-        const orphansDeleted = await personsService.deleteOrphanPersons(personIds);
-        if (orphansDeleted > 0) {
-            logger.info({ orphansDeleted, mediaItemId }, 'orphan persons cleaned up after clearFaces');
-        }
+    await personsService.cleanupOrphanPersons(personIds, 'clearFaces');
 
-        // Sync shared collections for affected persons
-        for (const pid of personIds) {
-            await personsService.syncPersonCollection(pid);
-        }
+    // Sync shared collections for affected persons
+    for (const pid of personIds) {
+        await personsService.syncPersonCollection(pid);
     }
 
     return result.count;
@@ -329,10 +329,6 @@ export async function createPerson(): Promise<{ id: string }> {
     return { id: person.id };
 }
 
-export async function deleteAllOrphanPersons(): Promise<number> {
-    return personsService.deleteOrphanPersons();
-}
-
 export async function batchCreatePersons(count: number): Promise<{ ids: string[] }> {
     if (count === 0) return { ids: [] };
 
@@ -346,8 +342,6 @@ export async function batchCreatePersons(count: number): Promise<{ ids: string[]
 
     return { ids: rows.map((r) => r.id) };
 }
-
-// ─── Media Queries (for retry routes) ────────────────────────
 
 export async function getMediaItemInfo(mediaItemId: string) {
     return findOrThrow(
@@ -397,19 +391,19 @@ export async function queryMediaItemsForRetry(filter: RetryFilter) {
 
 // ─── S3 Operations ───────────────────────────────────────────
 
-export async function getDownloadUrl(key: string): Promise<{ url: string }> {
-    const url = await s3Service.getPresignedDownloadUrl(key);
-    return { url };
-}
-
 export async function generateUploadUrl(
-    prefix: 'thumbnails' | 'crops',
+    prefix: 'thumbnails' | 'crops' | 'streaming',
     contentType: string
 ): Promise<{ key: string; url: string }> {
     const ext = contentType.split('/')[1] || 'webp';
-    const key = prefix === 'thumbnails'
-        ? s3Service.generateThumbnailKey(ext)
-        : s3Service.generateCropKey(ext);
+    let key: string;
+    if (prefix === 'thumbnails') {
+        key = s3Service.generateThumbnailKey(ext);
+    } else if (prefix === 'crops') {
+        key = s3Service.generateCropKey(ext);
+    } else {
+        key = s3Service.generateStreamingKey('mp4');
+    }
     const url = await s3Service.getPresignedUploadUrl(key, contentType);
     return { key, url };
 }

@@ -16,6 +16,16 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
     res.status(201).json(collection);
 });
 
+export const getHidden = asyncHandler(async (_req: Request, res: Response) => {
+    const collection = await collectionsService.getOrCreateSystemCollection('HIDDEN', 'Hidden');
+    res.json(collection);
+});
+
+export const getFavorites = asyncHandler(async (_req: Request, res: Response) => {
+    const collection = await collectionsService.getOrCreateSystemCollection('FAVORITES', 'Favorites');
+    res.json(collection);
+});
+
 export const getById = asyncHandler(async (req: Request, res: Response) => {
     const collection = await collectionsService.getCollection(req.params.id as string);
     res.json(collection);

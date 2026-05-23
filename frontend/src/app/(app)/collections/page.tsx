@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCollections, useCreateCollection, useDeleteCollection } from '@/lib/hooks/useCollections';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
-import { useSearchFilter } from '@/lib/hooks/useSearchFilter';
+import { useLocalFilter } from '@/lib/hooks/useLocalFilter';
 import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { CollectionCard } from '@/components/collections/CollectionCard';
 import { CollectionForm } from '@/components/collections/CollectionForm';
@@ -27,7 +27,7 @@ export default function CollectionsPage() {
     const deleteCollection = useDeleteCollection();
 
     useEscapeKey(selection.clearSelection, selection.isSelecting);
-    const filteredCollections = useSearchFilter(collections, search, useCallback((c) => c.name, []));
+    const filteredCollections = useLocalFilter(collections, search, useCallback((c) => c.name, []));
     const collectionIds = useMemo(() => filteredCollections.map((c) => c.id), [filteredCollections]);
 
     const handleDeleteCollections = useCallback(async (ids: string[]) => {

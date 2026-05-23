@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import io
+import json
+import struct
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -26,7 +29,7 @@ from worker.thumbnail import (
 
 logger = get_logger(__name__)
 
-Stage = Literal["full", "clip", "faces", "blurhash"]
+Stage = Literal["full", "clip", "faces", "blurhash", "transcode"]
 
 
 def _build_fts_document(meta: MediaMetadata, file_name: str) -> str:
@@ -42,6 +45,113 @@ def _build_fts_document(meta: MediaMetadata, file_name: str) -> str:
     if meta.taken_at:
         parts.append(meta.taken_at.strftime("%Y %B"))
     return " ".join(parts)
+
+
+# ─── Stage: Transcode ────────────────────────────────────────────────────────
+
+
+def _is_already_web_optimized(file_path: str) -> bool:
+    """Check if video is already H.264 MP4 with moov atom before mdat (faststart)."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet", "-print_format", "json",
+                "-show_format", "-show_streams", file_path,
+            ],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if result.returncode != 0:
+            return False
+        probe = json.loads(result.stdout)
+
+        # Check container is mp4
+        fmt = probe.get("format", {})
+        if "mp4" not in fmt.get("format_name", ""):
+            return False
+
+        # Check video codec is h264
+        is_h264 = False
+        for stream in probe.get("streams", []):
+            if stream.get("codec_type") == "video":
+                is_h264 = stream.get("codec_name") == "h264"
+                break
+        if not is_h264:
+            return False
+
+        # Check moov atom comes before mdat (faststart)
+        with open(file_path, "rb") as f:
+            while True:
+                header = f.read(8)
+                if len(header) < 8:
+                    break
+                size = struct.unpack(">I", header[:4])[0]
+                atom_type = header[4:8]
+                if atom_type == b"moov":
+                    return True  # moov found before mdat = faststart
+                if atom_type == b"mdat":
+                    return False  # mdat found before moov = not faststart
+                if size == 0:
+                    break
+                if size == 1:  # 64-bit extended size
+                    ext = f.read(8)
+                    if len(ext) < 8:
+                        break
+                    size = struct.unpack(">Q", ext)[0]
+                    f.seek(size - 16, 1)
+                else:
+                    f.seek(size - 8, 1)
+        return False
+    except (OSError, struct.error, json.JSONDecodeError, subprocess.TimeoutExpired):
+        return False
+
+
+async def _stage_transcode(tmp_path: str, media_item_id: str) -> None:
+    """Transcode video to web-optimized H.264 MP4 with faststart."""
+    logger.info("step_check_transcode_needed", media_item_id=media_item_id)
+
+    if _is_already_web_optimized(tmp_path):
+        logger.info("step_transcode_skipped", media_item_id=media_item_id, reason="already_optimized")
+        return
+
+    logger.info("step_transcode_start", media_item_id=media_item_id)
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as out_tmp:
+        out_path = out_tmp.name
+
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-i", tmp_path,
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-movflags", "+faststart",
+                "-y",
+                out_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            logger.error("step_transcode_failed", media_item_id=media_item_id, stderr=result.stderr[:500])
+            raise RuntimeError(f"ffmpeg transcode failed: {result.stderr[:200]}")
+
+        out_size = Path(out_path).stat().st_size
+        logger.info("step_transcode_done", media_item_id=media_item_id, output_size=out_size)
+
+        streaming_key = await s3.upload_file_to_key("streaming", out_path, "video/mp4")
+        logger.info("step_persist_streaming_key", media_item_id=media_item_id, key=streaming_key)
+        await api.persist_streaming_key(media_item_id, streaming_key)
+
+        logger.info("stage_transcode_done", media_item_id=media_item_id)
+    finally:
+        Path(out_path).unlink(missing_ok=True)
 
 
 # ─── Stage: Content (metadata + thumbnail + CLIP) ───────────────────────────
@@ -341,6 +451,12 @@ async def process_video(
         await s3.download_to_file(original_key, tmp_path)
         logger.info("step_original_downloaded", media_item_id=media_item_id, size_bytes=Path(tmp_path).stat().st_size)
 
+        if start_stage == "transcode":
+            await _stage_transcode(tmp_path, media_item_id)
+            await api.set_processing_status(media_item_id, "COMPLETED")
+            logger.info("video_processed", media_item_id=media_item_id)
+            return
+
         logger.info("step_extract_video_frames", media_item_id=media_item_id)
         frames = extract_video_frames(tmp_path)
         logger.info("step_video_frames_ready", media_item_id=media_item_id, frame_count=len(frames))
@@ -348,6 +464,7 @@ async def process_video(
         if start_stage == "full":
             await _stage_content_video(tmp_path, frames, media_item_id, file_name)
             await _stage_faces_video(frames, media_item_id)
+            await _stage_transcode(tmp_path, media_item_id)
         elif start_stage == "clip":
             await _stage_clip_video(frames, media_item_id)
             await _stage_faces_video(frames, media_item_id)

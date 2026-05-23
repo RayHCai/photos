@@ -19,6 +19,9 @@ router.post('/enqueue-pending', serviceAuthMiddleware, jobsController.enqueuePen
 router.post('/backfill-blurhash', serviceAuthMiddleware, jobsController.backfillBlurHashes);
 router.post('/backfill-all-blurhash', serviceAuthMiddleware, jobsController.backfillAllMissingBlurHashes);
 router.post('/fix-orphaned-processing', serviceAuthMiddleware, jobsController.fixOrphanedProcessing);
+router.post('/backfill-transcode', eitherAuth, jobsController.backfillTranscoding);
+router.post('/recluster', eitherAuth, jobsController.triggerRecluster);
+router.post('/rerun-missing-faces', eitherAuth, jobsController.rerunMissingFaces);
 
 router.post('/retry-failed', eitherAuth, jobsController.retryFailed);
 router.post('/retry', eitherAuth, jobsController.batchRetry);
@@ -26,5 +29,6 @@ router.post('/retry', eitherAuth, jobsController.batchRetry);
 router.use(authMiddleware);
 
 router.get('/stats', jobsController.getStats);
+router.get('/storage-stats', jobsController.getStorageStats);
 
 export default router;

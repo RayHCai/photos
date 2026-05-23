@@ -1,4 +1,4 @@
-import type { MediaListItem } from './media';
+import type { CollectionItem } from './collections';
 
 export interface ShareLink {
     id: string;
@@ -12,9 +12,5 @@ export interface ShareLink {
 export interface SharedCollection {
     id: string;
     name: string;
-    items: Array<{
-        id: string;
-        sortOrder: number;
-        mediaItem: MediaListItem;
-    }>;
+    items: CollectionItem[];
 }

@@ -1,9 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Dialog } from '@/components/ui/Dialog';
+import { FormDialog } from '@/components/ui/FormDialog';
 import { TextInput } from '@/components/ui/TextInput';
-import { DialogFooter } from '@/components/ui/DialogFooter';
 import { useRenamePerson } from '@/lib/hooks/usePersons';
 import { toast } from 'sonner';
 
@@ -38,16 +37,19 @@ export function PersonRenameDialog({
     };
 
     return (
-        <Dialog open={open} onClose={onClose} title="Rename person">
-            <form onSubmit={handleSubmit} className="space-y-4">
-                <TextInput
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Name"
-                    autoFocus
-                />
-                <DialogFooter onCancel={onClose} loading={rename.isPending} />
-            </form>
-        </Dialog>
+        <FormDialog
+            open={open}
+            onClose={onClose}
+            title="Rename person"
+            onSubmit={handleSubmit}
+            loading={rename.isPending}
+        >
+            <TextInput
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Name"
+                autoFocus
+            />
+        </FormDialog>
     );
 }

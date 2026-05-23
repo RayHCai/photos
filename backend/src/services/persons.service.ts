@@ -29,8 +29,10 @@ export async function getPerson(id: string) {
 }
 
 export async function renamePerson(id: string, name: string) {
-    await findOrThrow(() => prisma.person.findUnique({ where: { id } }), 'Person');
-    return prisma.person.update({ where: { id }, data: { name } });
+    return findOrThrow(
+        () => prisma.person.update({ where: { id }, data: { name } }),
+        'Person'
+    );
 }
 
 export async function mergePersons(targetId: string, sourceId: string) {
@@ -57,8 +59,6 @@ export async function mergePersons(targetId: string, sourceId: string) {
 }
 
 export async function deletePerson(id: string) {
-    await findOrThrow(() => prisma.person.findUnique({ where: { id } }), 'Person');
-
     const faces = await prisma.face.findMany({
         where: { personId: id },
         select: { cropKey: true },
@@ -84,6 +84,14 @@ export async function deleteOrphanPersons(personIds?: string[]): Promise<number>
     }
     const result = await prisma.person.deleteMany({ where });
     return result.count;
+}
+
+export async function cleanupOrphanPersons(personIds: string[], context: string) {
+    if (personIds.length === 0) return;
+    const orphansDeleted = await deleteOrphanPersons(personIds);
+    if (orphansDeleted > 0) {
+        logger.info({ orphansDeleted, context }, 'orphan persons cleaned up');
+    }
 }
 
 export async function getAffectedPersonIds(mediaItemIds: string | string[]): Promise<string[]> {
@@ -210,16 +218,8 @@ export async function sharePerson(personId: string) {
         },
     });
 
-    const mediaItemIds = await getPersonMediaIds(personId);
-
     if (collection) {
-        // Sync items
-        await prisma.collectionItem.deleteMany({
-            where: { collectionId: collection.id },
-        });
-        if (mediaItemIds.length > 0) {
-            await collectionsService.addItems(collection.id, mediaItemIds);
-        }
+        await syncPersonCollection(personId);
 
         // Return existing active share link
         if (collection.shareLinks.length > 0) {
@@ -235,9 +235,7 @@ export async function sharePerson(personId: string) {
             include: { shareLinks: { where: { isActive: true }, take: 1 } },
         });
 
-        if (mediaItemIds.length > 0) {
-            await collectionsService.addItems(collection.id, mediaItemIds);
-        }
+        await syncPersonCollection(personId);
     }
 
     // Generate slug

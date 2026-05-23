@@ -6,10 +6,6 @@ export function listPersons(): Promise<Person[]> {
     return apiFetch('/persons');
 }
 
-export function getPerson(id: string): Promise<Person> {
-    return apiFetch(`/persons/${id}`);
-}
-
 export function renamePerson(
     id: string,
     name: string
@@ -46,7 +42,7 @@ export function personAvatarUrl(id: string): string {
     return apiUrl(`/persons/${id}/avatar`);
 }
 
-export interface SharePersonResult {
+interface SharePersonResult {
     collection: { id: string; name: string };
     shareLink: { id: string; slug: string; collectionId: string };
     created: boolean;
