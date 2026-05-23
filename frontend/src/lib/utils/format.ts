@@ -1,7 +1,9 @@
 import { format, isToday, isYesterday, isThisYear } from 'date-fns';
 
 export function formatDate(dateStr: string): string {
-    const date = new Date(dateStr);
+    // Accept date-only keys like "2024-05-12" by appending a time component
+    const normalized = dateStr.includes('T') ? dateStr : dateStr + 'T00:00:00';
+    const date = new Date(normalized);
     if (isToday(date)) return 'Today';
     if (isYesterday(date)) return 'Yesterday';
     if (isThisYear(date)) return format(date, 'MMMM d');

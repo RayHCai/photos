@@ -3,7 +3,7 @@ import { useUpload } from './useUpload';
 import { filterMediaFiles } from '../utils/mediaFiles';
 import { toast } from 'sonner';
 
-export function useFileUpload() {
+export function useFilePicker() {
     const { addFiles } = useUpload();
 
     const openFilePicker = useCallback((collectionId?: string) => {

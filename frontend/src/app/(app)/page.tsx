@@ -3,9 +3,11 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useShellData } from '@/lib/hooks/useShellData';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
-import { useFileUpload } from '@/lib/hooks/useFileUpload';
+import { useFilePicker } from '@/lib/hooks/useFilePicker';
 import { useSearch } from '@/lib/hooks/useSearch';
 import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
+import { useFavorites } from '@/lib/hooks/useFavorites';
+import { useHidden } from '@/lib/hooks/useHidden';
 import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { SearchInput } from '@/components/ui/SearchInput';
@@ -23,10 +25,29 @@ export default function GalleryPage() {
     const [search, setSearch] = useState('');
     const selection = useMediaSelection();
     const queryClient = useQueryClient();
-    const { openFilePicker, openFolderPicker } = useFileUpload();
+    const { openFilePicker, openFolderPicker } = useFilePicker();
+    const { favoriteIds, addToFavorites, removeFromFavorites } = useFavorites();
+    const { hideItems } = useHidden();
+
+    const handleToggleFavorite = useCallback((id: string, isFavorite: boolean) => {
+        if (isFavorite) {
+            removeFromFavorites([id]);
+        } else {
+            addToFavorites([id]);
+        }
+    }, [addToFavorites, removeFromFavorites]);
 
     const { data: searchData, isLoading: isSearching } = useSearch(search);
     useEscapeKey(selection.clearSelection, selection.isSelecting);
+
+    const handleHide = useCallback(async (ids: string[]) => {
+        try {
+            await hideItems(ids);
+            toast.success(`${pluralize(ids.length, 'item')} hidden`);
+        } catch {
+            toast.error('Failed to hide items');
+        }
+    }, [hideItems]);
 
     const handleBatchDelete = useCallback(async (ids: string[]) => {
         try {
@@ -72,7 +93,7 @@ export default function GalleryPage() {
     return (
         <FileDropZone className="h-screen flex flex-col">
             {/* Toolbar */}
-            <div className="relative flex items-center justify-center gap-2 px-[30px] pt-3 pb-9">
+            <div className="relative flex items-center justify-center gap-2 px-[30px] pt-5 sm:pt-3 pb-9">
                 <div className="sm:flex-1 flex sm:justify-center">
                     <SearchInput
                         value={search}
@@ -86,6 +107,8 @@ export default function GalleryPage() {
                     showAddToCollection
                     showDownload
                     showRetry
+                    showHide
+                    onHide={handleHide}
                     onRetry={handleBatchRetry}
                 />
                 <UploadMenu
@@ -99,6 +122,8 @@ export default function GalleryPage() {
                 items={isSearchActive ? searchItems : (shellData ?? [])}
                 isLoading={isSearchActive ? isSearching : isLoading}
                 selection={selection}
+                favoriteIds={favoriteIds}
+                onToggleFavorite={handleToggleFavorite}
                 emptyMessage={isSearchActive ? 'No results found' : undefined}
             />
         </FileDropZone>

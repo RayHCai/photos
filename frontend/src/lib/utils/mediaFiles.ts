@@ -1,7 +1,4 @@
-const SUPPORTED_EXTENSIONS = new Set([
-    'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'tiff', 'avif',
-    'mp4', 'mov', 'avi', 'webm', 'mkv',
-]);
+import { SUPPORTED_EXTENSIONS } from '../constants/mediaFormats';
 
 function getExtension(name: string): string {
     const dot = name.lastIndexOf('.');

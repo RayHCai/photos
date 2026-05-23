@@ -1,6 +1,5 @@
 import {
     PutObjectCommand,
-    DeleteObjectCommand,
     DeleteObjectsCommand,
     GetObjectCommand,
     HeadObjectCommand,
@@ -34,6 +33,10 @@ export function generateThumbnailKey(ext: string): string {
 
 export function generateCropKey(ext: string): string {
     return buildKey('crops', ext);
+}
+
+export function generateStreamingKey(ext: string): string {
+    return buildKey('streaming', ext);
 }
 
 export async function getPresignedUploadUrl(
@@ -82,16 +85,6 @@ export async function objectExists(key: string): Promise<boolean> {
     } catch {
         return false;
     }
-}
-
-export async function deleteObject(key: string) {
-    await s3Client.send(
-        new DeleteObjectCommand({
-            Bucket: env.S3_BUCKET,
-            Key: key,
-        })
-    );
-    await redisConnection.del(`presigned:${key}`);
 }
 
 export async function deleteObjects(keys: string[]) {

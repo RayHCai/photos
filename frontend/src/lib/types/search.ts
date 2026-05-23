@@ -1,12 +1,9 @@
-export interface SearchResult {
-    id: string;
-    type: 'PHOTO' | 'VIDEO';
-    thumbnailKey: string | null;
-    blurHash: string | null;
-    takenAt: string | null;
-    width: number | null;
-    height: number | null;
-    durationSeconds: number | null;
+import type { MediaShellItem } from './media';
+
+export interface SearchResult extends Pick<
+    MediaShellItem,
+    'id' | 'type' | 'thumbnailKey' | 'blurHash' | 'width' | 'height' | 'durationSeconds' | 'takenAt'
+> {
     similarity?: number;
     rank?: number;
 }

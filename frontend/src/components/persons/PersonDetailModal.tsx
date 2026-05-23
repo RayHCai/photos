@@ -3,12 +3,12 @@
 import { useState, useMemo } from 'react';
 import { X, Edit2, Merge, Trash2, Share2 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
-import { ModalOverlay } from '@/components/ui/ModalOverlay';
+import { Dialog } from '@/components/ui/Dialog';
 import { usePersonMedia, useDeletePerson } from '@/lib/hooks/usePersons';
 import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
 import { useLightboxNavigation } from '@/lib/hooks/useLightboxNavigation';
-import { thumbnailUrl } from '@/lib/api/media';
 import { pluralize } from '@/lib/utils/pluralize';
+import { ThumbnailGrid } from '@/components/ui/ThumbnailGrid';
 import { PersonRenameDialog } from './PersonRenameDialog';
 import { PersonMergeDialog } from './PersonMergeDialog';
 import { PersonShareDialog } from './PersonShareDialog';
@@ -56,102 +56,89 @@ export function PersonDetailModal({ person, onClose }: PersonDetailModalProps) {
         setDeleteOpen(false);
     };
 
+    const customHeader = (
+        <div className="flex items-center justify-between px-6 py-4 border-b border-stone-200">
+            <div>
+                <h2 className="text-lg font-serif text-stone-900">
+                    {person.name || 'Unknown'}
+                </h2>
+                <p className="text-xs text-stone-500">
+                    {pluralize(person._count.faces, 'photo')}
+                </p>
+            </div>
+            <div className="flex items-center gap-1">
+                <IconButton
+                    icon={Edit2}
+                    onClick={() => setRenameOpen(true)}
+                    title="Rename"
+                />
+                <IconButton
+                    icon={Share2}
+                    onClick={() => {
+                        if (!person.name) {
+                            toast.error('Name this person before sharing');
+                            setRenameOpen(true);
+                            return;
+                        }
+                        setShareOpen(true);
+                    }}
+                    title="Share"
+                />
+                <IconButton
+                    icon={Merge}
+                    onClick={() => setMergeOpen(true)}
+                    title="Merge"
+                />
+                <IconButton
+                    icon={Trash2}
+                    danger
+                    onClick={() => setDeleteOpen(true)}
+                    title="Delete"
+                />
+                <IconButton
+                    icon={X}
+                    size="xs"
+                    iconClassName="w-5 h-5"
+                    onClick={onClose}
+                    className="ml-2"
+                />
+            </div>
+        </div>
+    );
+
     return (
         <>
-            <ModalOverlay onClose={onClose} enabled={!renameOpen && !mergeOpen && !deleteOpen && !shareOpen && !lightboxId}>
-                <div className="bg-stone-50 rounded shadow-lg w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col overflow-hidden">
-                    {/* Header */}
-                    <div className="flex items-center justify-between px-6 py-4 border-b border-stone-200">
-                        <div>
-                            <h2 className="text-lg font-serif text-stone-900">
-                                {person.name || 'Unknown'}
-                            </h2>
-                            <p className="text-xs text-stone-500">
-                                {pluralize(person._count.faces, 'photo')}
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <IconButton
-                                icon={Edit2}
-                                onClick={() => setRenameOpen(true)}
-                                title="Rename"
-                            />
-                            <IconButton
-                                icon={Share2}
-                                onClick={() => {
-                                    if (!person.name) {
-                                        toast.error('Name this person before sharing');
-                                        setRenameOpen(true);
-                                        return;
-                                    }
-                                    setShareOpen(true);
-                                }}
-                                title="Share"
-                            />
-                            <IconButton
-                                icon={Merge}
-                                onClick={() => setMergeOpen(true)}
-                                title="Merge"
-                            />
-                            <IconButton
-                                icon={Trash2}
-                                danger
-                                onClick={() => setDeleteOpen(true)}
-                                title="Delete"
-                            />
-                            <IconButton
-                                icon={X}
-                                size="xs"
-                                iconClassName="w-5 h-5"
-                                onClick={onClose}
-                                className="ml-2"
-                            />
-                        </div>
+            <Dialog
+                open
+                onClose={onClose}
+                header={customHeader}
+                maxWidth="max-w-3xl"
+                scrollable
+                overlayEnabled={!renameOpen && !mergeOpen && !deleteOpen && !shareOpen && !lightboxId}
+            >
+                {isLoading ? (
+                    <div className="flex justify-center py-12">
+                        <Spinner className="w-6 h-6" />
                     </div>
-
-                    {/* Media grid */}
-                    <div className="flex-1 min-h-0 overflow-y-auto p-4">
-                        {isLoading ? (
-                            <div className="flex justify-center py-12">
-                                <Spinner className="w-6 h-6" />
+                ) : allItems.length === 0 ? (
+                    <p className="text-center text-sm text-stone-400 py-12">
+                        No photos
+                    </p>
+                ) : (
+                    <>
+                        <ThumbnailGrid
+                            items={allItems}
+                            onItemClick={(id) => setLightboxId(id)}
+                        />
+                        <div ref={sentinelRef} className="h-2" />
+                        {isFetchingNextPage && (
+                            <div className="flex justify-center py-4">
+                                <Spinner className="w-5 h-5" />
                             </div>
-                        ) : allItems.length === 0 ? (
-                            <p className="text-center text-sm text-stone-400 py-12">
-                                No photos
-                            </p>
-                        ) : (
-                            <>
-                                <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-1.5">
-                                    {allItems.map((item) => (
-                                        <button
-                                            key={item.id}
-                                            className="aspect-square rounded overflow-hidden bg-stone-100 hover:ring-1 hover:ring-stone-300 transition-all"
-                                            onClick={() => setLightboxId(item.id)}
-                                        >
-                                            {item.thumbnailKey ? (
-                                                <img
-                                                    src={thumbnailUrl(item.id)}
-                                                    alt=""
-                                                    loading="lazy"
-                                                    className="w-full h-full object-cover"
-                                                />
-                                            ) : (
-                                                <div className="w-full h-full bg-stone-200" />
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                                <div ref={sentinelRef} className="h-2" />
-                                {isFetchingNextPage && (
-                                    <div className="flex justify-center py-4">
-                                        <Spinner className="w-5 h-5" />
-                                    </div>
-                                )}
-                            </>
                         )}
-                    </div>
-                </div>
-            </ModalOverlay>
+                    </>
+                )}
+            </Dialog>
 
             <PersonRenameDialog
                 open={renameOpen}

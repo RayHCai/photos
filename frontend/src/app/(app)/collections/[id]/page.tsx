@@ -9,7 +9,7 @@ import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { CollectionItemPicker } from '@/components/collections/CollectionItemPicker';
 import { CollectionSettingsModal } from '@/components/collections/CollectionSettingsModal';
-import { useFileUpload } from '@/lib/hooks/useFileUpload';
+import { useFilePicker } from '@/lib/hooks/useFilePicker';
 import { CenteredSpinner } from '@/components/ui/CenteredSpinner';
 import { Button } from '@/components/ui/Button';
 import { FileDropZone } from '@/components/upload/UploadDropzone';
@@ -28,7 +28,7 @@ export default function CollectionDetailPage() {
     useEscapeKey(selection.clearSelection, selection.isSelecting);
     const addItems = useAddCollectionItems();
     const removeItems = useRemoveCollectionItems();
-    const { openFilePicker, openFolderPicker } = useFileUpload();
+    const { openFilePicker, openFolderPicker } = useFilePicker();
 
     const handleRemoveItems = useCallback(async (ids: string[]) => {
         await new Promise<void>((resolve, reject) => {

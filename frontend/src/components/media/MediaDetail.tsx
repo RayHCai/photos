@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getMediaById } from '@/lib/api/media';
 import { formatDate, formatFileSize } from '@/lib/utils/format';
 import {
+    type LucideIcon,
     Calendar,
     MapPin,
     Camera,
@@ -12,6 +13,14 @@ import {
     User,
 } from 'lucide-react';
 
+function InfoRow({ icon: Icon, children }: { icon: LucideIcon; children: React.ReactNode }) {
+    return (
+        <div className="flex items-center gap-2">
+            <Icon className="w-4 h-4 text-stone-400" />
+            <span>{children}</span>
+        </div>
+    );
+}
 
 interface MediaDetailProps {
     mediaId: string;
@@ -33,46 +42,27 @@ export function MediaDetail({ mediaId }: MediaDetailProps) {
 
             <div className="space-y-3 text-stone-600">
                 {item.takenAt && (
-                    <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-stone-400" />
-                        <span>{formatDate(item.takenAt)}</span>
-                    </div>
+                    <InfoRow icon={Calendar}>{formatDate(item.takenAt)}</InfoRow>
                 )}
 
                 {(item.city || item.country) && (
-                    <div className="flex items-center gap-2">
-                        <MapPin className="w-4 h-4 text-stone-400" />
-                        <span>
-                            {[item.city, item.country]
-                                .filter(Boolean)
-                                .join(', ')}
-                        </span>
-                    </div>
+                    <InfoRow icon={MapPin}>
+                        {[item.city, item.country].filter(Boolean).join(', ')}
+                    </InfoRow>
                 )}
 
                 {(item.cameraMake || item.cameraModel) && (
-                    <div className="flex items-center gap-2">
-                        <Camera className="w-4 h-4 text-stone-400" />
-                        <span>
-                            {[item.cameraMake, item.cameraModel]
-                                .filter(Boolean)
-                                .join(' ')}
-                        </span>
-                    </div>
+                    <InfoRow icon={Camera}>
+                        {[item.cameraMake, item.cameraModel].filter(Boolean).join(' ')}
+                    </InfoRow>
                 )}
 
-                <div className="flex items-center gap-2">
-                    <HardDrive className="w-4 h-4 text-stone-400" />
-                    <span>{formatFileSize(item.fileSize)}</span>
-                </div>
+                <InfoRow icon={HardDrive}>{formatFileSize(item.fileSize)}</InfoRow>
 
                 {item.width && item.height && (
-                    <div className="flex items-center gap-2">
-                        <Image className="w-4 h-4 text-stone-400" />
-                        <span>
-                            {item.width} x {item.height}
-                        </span>
-                    </div>
+                    <InfoRow icon={Image}>
+                        {item.width} x {item.height}
+                    </InfoRow>
                 )}
             </div>
 

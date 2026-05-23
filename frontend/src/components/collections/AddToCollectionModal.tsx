@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, Plus, FolderOpen, Check, Loader2 } from 'lucide-react';
+import { Spinner } from '@/components/ui/Spinner';
 import { IconButton } from '@/components/ui/IconButton';
 import { ModalOverlay } from '@/components/ui/ModalOverlay';
 import { useCollections, useCreateCollection, useAddCollectionItems } from '@/lib/hooks/useCollections';
@@ -72,7 +73,7 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
     };
 
     return (
-        <ModalOverlay onClose={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <ModalOverlay onClose={onClose}>
             <div
                 className="bg-white rounded-lg shadow-xl w-full max-w-xs mx-4 overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
@@ -163,7 +164,7 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
                                     </p>
                                 </div>
                                 {addItems.isPending && addItems.variables?.collectionId === c.id && (
-                                    <Loader2 className="w-3 h-3 text-stone-400 animate-spin flex-shrink-0" />
+                                    <Spinner className="w-3 h-3 flex-shrink-0" />
                                 )}
                             </button>
                         ))}

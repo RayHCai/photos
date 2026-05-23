@@ -3,6 +3,7 @@
 import { useMemo, type RefObject } from 'react';
 import { useTimeline } from '@/lib/hooks/useTimeline';
 import { useTimelineScrollbar } from '@/lib/hooks/useTimelineScrollbar';
+import { computeAdaptiveLabels } from '@/lib/utils/timelineMarkers';
 import type { VirtualRow } from './GalleryGrid';
 
 interface TimelineScrollbarProps {
@@ -24,25 +25,10 @@ export function TimelineScrollbar({ containerRef, virtualRows }: TimelineScrollb
         wrapperHeight,
     } = useTimelineScrollbar(containerRef, virtualRows, timeline);
 
-    // Position labels along the track using their fraction, with collision avoidance
-    const visibleLabels = useMemo(() => {
-        if (markers.length === 0 || wrapperHeight <= 0) return [];
-
-        const trackHeight = wrapperHeight - 32;
-        const minGap = 28;
-        const result: Array<{ label: string; top: number }> = [];
-        let lastY = -Infinity;
-
-        for (const marker of markers) {
-            const y = marker.fraction * trackHeight;
-            if (y - lastY >= minGap) {
-                result.push({ label: marker.label, top: y });
-                lastY = y;
-            }
-        }
-
-        return result;
-    }, [markers, wrapperHeight]);
+    const visibleLabels = useMemo(
+        () => computeAdaptiveLabels(markers, wrapperHeight - 32),
+        [markers, wrapperHeight],
+    );
 
     if (wrapperHeight <= 0) return null;
 

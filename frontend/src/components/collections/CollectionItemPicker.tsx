@@ -5,8 +5,7 @@ import { useMediaList } from '@/lib/hooks/useMediaList';
 import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
 import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
-import { thumbnailUrl } from '@/lib/api/media';
-import { Check } from 'lucide-react';
+import { ThumbnailGrid } from '@/components/ui/ThumbnailGrid';
 
 interface CollectionItemPickerProps {
     open: boolean;
@@ -73,33 +72,13 @@ export function CollectionItemPicker({
     return (
         <Dialog open={open} onClose={onClose} title="Add items">
             <div className="max-h-80 overflow-y-auto -mx-6 px-6">
-                <div className="grid grid-cols-4 gap-1">
-                    {items.map((item) => (
-                        <div
-                            key={item.id}
-                            className="relative aspect-square cursor-pointer overflow-hidden bg-stone-100 rounded-sm"
-                            onClick={(e) => handleSelect(item.id, e)}
-                        >
-                            {item.thumbnailKey ? (
-                                <img
-                                    src={thumbnailUrl(item.id)}
-                                    alt=""
-                                    loading="lazy"
-                                    className="w-full h-full object-cover"
-                                />
-                            ) : (
-                                <div className="w-full h-full" />
-                            )}
-                            {selected.has(item.id) && (
-                                <div className="absolute inset-0 bg-stone-900/30 flex items-center justify-center">
-                                    <div className="w-6 h-6 rounded-full bg-stone-900 flex items-center justify-center">
-                                        <Check className="w-4 h-4 text-white" />
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                </div>
+                <ThumbnailGrid
+                    items={items}
+                    selectedIds={selected}
+                    onItemClick={handleSelect}
+                    columns="grid-cols-4"
+                    gap="gap-1"
+                />
                 <div ref={sentinelRef} className="h-2" />
             </div>
             <div className="flex justify-end gap-2 mt-4">

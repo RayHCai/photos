@@ -21,6 +21,9 @@ router.post(
     collectionsController.create
 );
 
+router.get('/hidden', collectionsController.getHidden);
+router.get('/favorites', collectionsController.getFavorites);
+
 router.get('/:id', collectionsController.getById);
 
 router.patch(

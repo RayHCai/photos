@@ -1,6 +1,14 @@
 import { apiFetch } from './client';
 import type { Collection, CollectionWithItems } from '../types/collections';
 
+export function getHiddenCollection(): Promise<CollectionWithItems> {
+    return apiFetch('/collections/hidden');
+}
+
+export function getFavoritesCollection(): Promise<CollectionWithItems> {
+    return apiFetch('/collections/favorites');
+}
+
 export function listCollections(): Promise<Collection[]> {
     return apiFetch('/collections');
 }
@@ -35,7 +43,7 @@ export function deleteCollection(id: string): Promise<void> {
 export function addItems(
     collectionId: string,
     mediaItemIds: string[]
-): Promise<{ added: number }> {
+): Promise<{ message: string }> {
     return apiFetch(`/collections/${collectionId}/items`, {
         method: 'POST',
         body: JSON.stringify({ mediaItemIds }),

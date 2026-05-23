@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { deleteMedia, originalUrl } from '@/lib/api/media';
+import { batchDeleteMedia, originalUrl } from '@/lib/api/media';
 import { Download, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -20,7 +20,7 @@ export function MediaActions({ mediaId, onDelete }: MediaActionsProps) {
     const [confirmOpen, setConfirmOpen] = useState(false);
 
     const deleteMutation = useMutation({
-        mutationFn: () => deleteMedia(mediaId),
+        mutationFn: () => batchDeleteMedia([mediaId]),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['media'] });
             toast.success('Deleted');

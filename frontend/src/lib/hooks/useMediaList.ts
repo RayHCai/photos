@@ -2,9 +2,10 @@
 
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { listMedia } from '../api/media';
+import type { MediaType } from '../types/media';
 
 export function useMediaList(params?: {
-    type?: 'PHOTO' | 'VIDEO';
+    type?: MediaType;
     sort?: 'date_asc' | 'date_desc';
 }) {
     return useInfiniteQuery({

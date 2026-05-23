@@ -3,12 +3,13 @@
 import { useState, useCallback, useEffect, useRef, useMemo, type RefObject } from 'react';
 import {
     buildTimelineMarkers,
-    findCurrentDate,
+    buildDateIndex,
+    findCurrentDateBinary,
     findMarkerAtFraction,
-    formatDateLabel,
     type TimelineMarker,
 } from '@/lib/utils/timelineMarkers';
-import type { TimelineMonth } from '@/lib/api/media';
+import { formatDate } from '@/lib/utils/format';
+import type { TimelineMonth } from '@/lib/types/media';
 import type { VirtualRow } from '@/components/gallery/GalleryGrid';
 
 interface UseTimelineScrollbarResult {
@@ -47,6 +48,37 @@ export function useTimelineScrollbar(
         [timeline],
     );
 
+    const dateIndex = useMemo(
+        () => buildDateIndex(virtualRows),
+        [virtualRows],
+    );
+
+    // Correct marker fractions to use actual scroll positions instead of item-count ratios.
+    // Item-count fractions drift from scroll fractions because date-headers (40px each)
+    // add height that isn't proportional to item counts.
+    const correctedMarkers = useMemo(() => {
+        if (markers.length === 0 || dateIndex.length === 0) return markers;
+
+        // Map each month to its first scroll position
+        const monthScrollMap = new Map<string, number>();
+        for (const entry of dateIndex) {
+            const monthKey = entry.date.substring(0, 7);
+            if (!monthScrollMap.has(monthKey)) {
+                monthScrollMap.set(monthKey, entry.scrollTop);
+            }
+        }
+
+        const totalHeight = virtualRows.reduce((sum, r) => sum + r.height, 0);
+        const maxScroll = totalHeight - wrapperHeight;
+        if (maxScroll <= 0) return markers;
+
+        return markers.map(marker => {
+            const scrollTop = monthScrollMap.get(marker.monthKey);
+            if (scrollTop === undefined) return marker;
+            return { ...marker, fraction: Math.max(0, Math.min(1, scrollTop / maxScroll)) };
+        });
+    }, [markers, dateIndex, virtualRows, wrapperHeight]);
+
     // Measure container height
     useEffect(() => {
         const container = containerRef.current;
@@ -75,9 +107,9 @@ export function useTimelineScrollbar(
             const fraction = container.scrollTop / maxScroll;
             setThumbFraction(Math.max(0, Math.min(1, fraction)));
 
-            const currentDate = findCurrentDate(virtualRows, container.scrollTop);
+            const currentDate = findCurrentDateBinary(dateIndex, container.scrollTop);
             if (currentDate) {
-                setActiveLabel(formatDateLabel(currentDate));
+                setActiveLabel(formatDate(currentDate));
             }
         };
 
@@ -102,7 +134,7 @@ export function useTimelineScrollbar(
             if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
             if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
         };
-    }, [containerRef, markers, virtualRows]);
+    }, [containerRef, markers, dateIndex]);
 
     // Hover detection
     useEffect(() => {
@@ -161,15 +193,15 @@ export function useTimelineScrollbar(
         setThumbFraction(fraction);
 
         // Show day-level label during drag
-        const currentDate = findCurrentDate(virtualRows, container.scrollTop);
+        const currentDate = findCurrentDateBinary(dateIndex, container.scrollTop);
         if (currentDate) {
-            setActiveLabel(formatDateLabel(currentDate));
+            setActiveLabel(formatDate(currentDate));
         }
         else {
-            const marker = findMarkerAtFraction(markers, fraction);
+            const marker = findMarkerAtFraction(correctedMarkers, fraction);
             setActiveLabel(marker?.label ?? null);
         }
-    }, [containerRef, markers, virtualRows]);
+    }, [containerRef, correctedMarkers, dateIndex]);
 
     // Drag handling
     const onTrackPointerDown = useCallback((e: React.PointerEvent) => {
@@ -211,7 +243,7 @@ export function useTimelineScrollbar(
         isDragging,
         thumbFraction,
         activeLabel,
-        markers,
+        markers: correctedMarkers,
         trackRef,
         onTrackPointerDown,
         canShow,

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-export function useSearchFilter<T>(
+export function useLocalFilter<T>(
     items: T[] | undefined,
     query: string,
     getField: (item: T) => string | null | undefined

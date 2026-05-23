@@ -1,5 +1,10 @@
-type MediaType = 'PHOTO' | 'VIDEO';
-type ProcessingStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export type MediaType = 'PHOTO' | 'VIDEO';
+export type ProcessingStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+export interface TimelineMonth {
+    month: string; // yyyy-MM
+    count: number;
+}
 
 export interface MediaShellItem {
     id: string;

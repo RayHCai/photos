@@ -3,7 +3,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { usePersons, useDeletePerson } from '@/lib/hooks/usePersons';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
-import { useSearchFilter } from '@/lib/hooks/useSearchFilter';
+import { useLocalFilter } from '@/lib/hooks/useLocalFilter';
 import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { PersonCard } from '@/components/persons/PersonCard';
 import { PersonDetailModal } from '@/components/persons/PersonDetailModal';
@@ -22,7 +22,7 @@ export default function PersonsPage() {
     const deletePerson = useDeletePerson();
 
     useEscapeKey(selection.clearSelection, selection.isSelecting);
-    const filteredPersons = useSearchFilter(persons, search, useCallback((p) => p.name, []));
+    const filteredPersons = useLocalFilter(persons, search, useCallback((p) => p.name, []));
     const personIds = useMemo(() => filteredPersons.map((p) => p.id), [filteredPersons]);
 
     // Keep selected person in sync with latest data

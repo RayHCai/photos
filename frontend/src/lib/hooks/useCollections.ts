@@ -1,6 +1,7 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useMutationWithInvalidation } from './useMutationWithInvalidation';
 import * as collectionsApi from '../api/collections';
 
 export function useCollections() {
@@ -10,64 +11,42 @@ export function useCollections() {
     });
 }
 
-export function useCollection(id: string) {
+export function useCollection(id: string | undefined) {
     return useQuery({
         queryKey: ['collections', id],
-        queryFn: () => collectionsApi.getCollection(id),
+        queryFn: () => collectionsApi.getCollection(id!),
         enabled: !!id,
     });
 }
 
 export function useCreateCollection() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: collectionsApi.createCollection,
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['collections'] });
-        },
-    });
+    return useMutationWithInvalidation(collectionsApi.createCollection, [['collections']]);
 }
 
 export function useUpdateCollection() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: ({ id, data }: { id: string; data: { name?: string } }) =>
+    return useMutationWithInvalidation(
+        ({ id, data }: { id: string; data: { name?: string } }) =>
             collectionsApi.updateCollection(id, data),
-        onSuccess: (_data, vars) => {
-            queryClient.invalidateQueries({ queryKey: ['collections'] });
-            queryClient.invalidateQueries({ queryKey: ['collections', vars.id] });
-        },
-    });
+        (_data, vars) => [['collections'], ['collections', vars.id]]
+    );
 }
 
 export function useDeleteCollection() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: collectionsApi.deleteCollection,
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['collections'] });
-        },
-    });
+    return useMutationWithInvalidation(collectionsApi.deleteCollection, [['collections']]);
 }
 
 export function useAddCollectionItems() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: ({ collectionId, mediaItemIds }: { collectionId: string; mediaItemIds: string[] }) =>
+    return useMutationWithInvalidation(
+        ({ collectionId, mediaItemIds }: { collectionId: string; mediaItemIds: string[] }) =>
             collectionsApi.addItems(collectionId, mediaItemIds),
-        onSuccess: (_data, vars) => {
-            queryClient.invalidateQueries({ queryKey: ['collections', vars.collectionId] });
-        },
-    });
+        (_data, vars) => [['collections'], ['collections', vars.collectionId]]
+    );
 }
 
 export function useRemoveCollectionItems() {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: ({ collectionId, mediaItemIds }: { collectionId: string; mediaItemIds: string[] }) =>
+    return useMutationWithInvalidation(
+        ({ collectionId, mediaItemIds }: { collectionId: string; mediaItemIds: string[] }) =>
             collectionsApi.removeItems(collectionId, mediaItemIds),
-        onSuccess: (_data, vars) => {
-            queryClient.invalidateQueries({ queryKey: ['collections', vars.collectionId] });
-        },
-    });
+        (_data, vars) => [['collections'], ['collections', vars.collectionId]]
+    );
 }

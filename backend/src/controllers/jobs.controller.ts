@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as queueService from '../services/queue.service.js';
 import * as mediaService from '../services/media.service.js';
+import { prisma } from '../config/prisma.js';
 import { asyncHandler } from '../utils/async.js';
 import { logger } from '../utils/logger.js';
 
@@ -55,4 +56,36 @@ export const fixOrphanedProcessing = asyncHandler(async (_req: Request, res: Res
     const count = await mediaService.fixOrphanedProcessing();
     logger.info({ count }, 'orphaned PROCESSING items fixed');
     res.json({ count });
+});
+
+export const triggerRecluster = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('manual recluster requested');
+    await queueService.maintenanceQueue.add('recluster', { triggeredBy: 'manual' as const });
+    logger.info('manual recluster job enqueued');
+    res.json({ status: 'enqueued' });
+});
+
+export const rerunMissingFaces = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('rerun missing faces requested');
+    const count = await mediaService.rerunMissingFaces();
+    logger.info({ count }, 'rerun missing faces enqueued');
+    res.json({ count });
+});
+
+export const backfillTranscoding = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('transcode backfill requested');
+    const count = await mediaService.backfillTranscoding();
+    logger.info({ count }, 'transcode backfill enqueued');
+    res.json({ count });
+});
+
+export const getStorageStats = asyncHandler(async (_req: Request, res: Response) => {
+    const result = await prisma.mediaItem.aggregate({
+        _sum: { fileSize: true },
+        _count: { id: true },
+    });
+    res.json({
+        totalBytes: (result._sum.fileSize ?? BigInt(0)).toString(),
+        totalItems: result._count.id,
+    });
 });

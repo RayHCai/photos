@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { Spinner } from '@/components/ui/Spinner';
+import { EmptyState } from '@/components/ui/EmptyState';
 
 interface PageContainerProps {
     toolbar: ReactNode;
@@ -24,14 +24,8 @@ export function PageContainer({
             </div>
 
             {/* Content */}
-            {isLoading ? (
-                <div className="flex-1 flex items-center justify-center">
-                    <Spinner className="w-6 h-6" />
-                </div>
-            ) : isEmpty ? (
-                <div className="flex-1 flex items-center justify-center">
-                    <p className="font-serif text-stone-400">{emptyMessage}</p>
-                </div>
+            {isLoading || isEmpty ? (
+                <EmptyState isLoading={isLoading} message={emptyMessage} />
             ) : (
                 <div className="flex-1 min-h-0 overflow-y-auto">
                     {children}
