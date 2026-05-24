@@ -72,8 +72,8 @@ export default function CollectionDetailPage() {
             {/* Toolbar */}
             <div className="relative flex items-center justify-between px-[30px] pt-3 pb-9">
                 <div className="flex-1" />
-                <div>
-                    <h1 className="text-xl font-serif text-stone-900">
+                <div className="max-w-[60%] text-center">
+                    <h1 className="text-xl font-serif text-stone-900 truncate">
                         {collection.name}
                     </h1>
                     <p className="text-xs text-stone-400 mt-0.5">
