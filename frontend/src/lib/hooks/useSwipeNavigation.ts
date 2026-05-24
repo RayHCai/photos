@@ -101,7 +101,8 @@ export function useSwipeNavigation(
                     animating = false;
                     setTransform(0, false);
                 }, 300);
-            } else if ((pastThreshold || isFlick) && currentOffset > 0 && right) {
+            }
+            else if ((pastThreshold || isFlick) && currentOffset > 0 && right) {
                 // Slide out to show prev
                 setTransform(containerW, true);
                 setTimeout(() => {
@@ -109,7 +110,8 @@ export function useSwipeNavigation(
                     animating = false;
                     setTransform(0, false);
                 }, 300);
-            } else {
+            }
+            else {
                 // Spring back to center
                 setTransform(0, true);
                 setTimeout(() => {
