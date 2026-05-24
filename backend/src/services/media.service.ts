@@ -42,7 +42,7 @@ export function validateMimeType(mimeType: string) {
     }
 }
 
-type StartStage = 'full' | 'clip' | 'faces' | 'blurhash' | 'transcode' | 'web';
+type StartStage = 'full' | 'clip' | 'faces' | 'blurhash' | 'transcode' | 'web' | 'metadata';
 
 async function _createTaskAndEnqueue(
     mediaItemId: string,
@@ -426,4 +426,12 @@ export async function backfillTranscoding() {
 
 export async function backfillWebOptimized() {
     return _queryAndEnqueue({ type: 'PHOTO', webKey: null, processingStatus: 'COMPLETED' }, 'web', 'web-optimized backfill enqueued');
+}
+
+export async function backfillMetadata() {
+    return _queryAndEnqueue(
+        { processingStatus: 'COMPLETED', latitude: null },
+        'metadata',
+        'metadata backfill enqueued',
+    );
 }

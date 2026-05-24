@@ -15,6 +15,7 @@ import {
     backfillTranscoding,
     backfillWebOptimized,
     backfillGeocoding,
+    backfillMetadata,
 } from '@/lib/api/jobs';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
@@ -138,6 +139,14 @@ export default function SettingsPage() {
             onClick: async () => {
                 const { count } = await backfillTranscoding();
                 toast.success(`Enqueued ${count} videos for transcoding`);
+            },
+        },
+        {
+            label: 'Re-extract Metadata',
+            description: 'Re-extract EXIF metadata (GPS, camera, dates) from originals for items missing location data',
+            onClick: async () => {
+                const { count } = await backfillMetadata();
+                toast.success(`Enqueued ${count} items for metadata extraction`);
             },
         },
         {

@@ -24,6 +24,7 @@ router.post('/backfill-web', eitherAuth, jobsController.backfillWebOptimized);
 router.post('/recluster', eitherAuth, jobsController.triggerRecluster);
 router.post('/rerun-missing-faces', eitherAuth, jobsController.rerunMissingFaces);
 router.post('/backfill-geocode', eitherAuth, jobsController.backfillGeocoding);
+router.post('/backfill-metadata', eitherAuth, jobsController.backfillMetadata);
 
 router.post('/retry-failed', eitherAuth, jobsController.retryFailed);
 router.post('/retry', eitherAuth, jobsController.batchRetry);
