@@ -8,6 +8,10 @@ export function getStorageStats(): Promise<{ totalBytes: string; totalItems: num
     return apiFetch('/jobs/storage-stats');
 }
 
+export function getProcessingStats(): Promise<{ pending: number; processing: number; failed: number }> {
+    return apiFetch('/jobs/processing-stats');
+}
+
 function postJob<T = { count: number }>(path: string): () => Promise<T> {
     return () => apiFetch(`/jobs/${path}`, { method: 'POST' });
 }
@@ -21,3 +25,4 @@ export const triggerRecluster = postJob<{ status: string }>('recluster');
 export const rerunMissingFaces = postJob('rerun-missing-faces');
 export const backfillTranscoding = postJob('backfill-transcode');
 export const backfillWebOptimized = postJob('backfill-web');
+export const backfillGeocoding = postJob<{ status: string }>('backfill-geocode');

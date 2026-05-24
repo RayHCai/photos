@@ -8,13 +8,6 @@ export function login(password: string): Promise<LoginResponse> {
     });
 }
 
-export function setup(password: string): Promise<{ message: string }> {
-    return apiFetch('/auth/setup', {
-        method: 'POST',
-        body: JSON.stringify({ password }),
-    });
-}
-
 export function getStatus(): Promise<SessionStatus> {
     return apiFetch('/auth/status');
 }

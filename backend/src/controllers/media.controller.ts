@@ -1,12 +1,13 @@
 import { Request, Response } from 'express';
 import * as mediaService from '../services/media.service.js';
 import { asyncHandler } from '../utils/async.js';
+import { extractPagination } from '../utils/db.js';
+import { cachedRedirect } from '../utils/response.js';
 import { logger } from '../utils/logger.js';
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
     const params = {
-        cursor: req.query.cursor as string | undefined,
-        limit: Number(req.query.limit) || 50,
+        ...extractPagination(req),
         type: req.query.type as 'PHOTO' | 'VIDEO' | undefined,
         sort: req.query.sort as 'date_asc' | 'date_desc' | undefined,
     };
@@ -106,26 +107,22 @@ export const batchThumbnails = asyncHandler(async (req: Request, res: Response) 
 
 export const getThumbnail = asyncHandler(async (req: Request, res: Response) => {
     const url = await mediaService.getThumbnailUrl(req.params.id as string);
-    res.set('Cache-Control', 'private, max-age=3300');
-    res.redirect(url);
+    cachedRedirect(res, url);
 });
 
 export const getOriginal = asyncHandler(async (req: Request, res: Response) => {
     const url = await mediaService.getOriginalUrl(req.params.id as string);
-    res.set('Cache-Control', 'private, max-age=3300');
-    res.redirect(url);
+    cachedRedirect(res, url);
 });
 
 export const getWeb = asyncHandler(async (req: Request, res: Response) => {
     const url = await mediaService.getWebUrl(req.params.id as string);
-    res.set('Cache-Control', 'private, max-age=3300');
-    res.redirect(url);
+    cachedRedirect(res, url);
 });
 
 export const download = asyncHandler(async (req: Request, res: Response) => {
     const url = await mediaService.getDownloadUrl(req.params.id as string);
-    res.set('Cache-Control', 'private, max-age=3300');
-    res.redirect(url);
+    cachedRedirect(res, url);
 });
 
 export const checkDuplicates = asyncHandler(async (req: Request, res: Response) => {

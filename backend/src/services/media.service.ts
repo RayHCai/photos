@@ -5,10 +5,11 @@ import { AppError } from '../middleware/errorHandler.js';
 import * as personsService from './persons.service.js';
 import * as s3Service from './s3.service.js';
 import * as queueService from './queue.service.js';
-import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
+import { HIDDEN_EXCLUSION, HIDDEN_NOT_EXISTS } from '../utils/filters.js';
+import { collectS3Keys } from '../utils/s3.js';
 
 
 const SUPPORTED_MIMES = new Set([
@@ -33,10 +34,6 @@ function getMediaType(mimeType: string): 'PHOTO' | 'VIDEO' {
 function getExtension(fileName: string): string {
     const parts = fileName.split('.');
     return parts.length > 1 ? parts.pop()! : 'bin';
-}
-
-function collectS3Keys(item: { originalKey: string; thumbnailKey?: string | null; streamingKey?: string | null; webKey?: string | null }): string[] {
-    return [item.originalKey, item.thumbnailKey, item.streamingKey, item.webKey].filter((k): k is string => k != null);
 }
 
 export function validateMimeType(mimeType: string) {
@@ -173,10 +170,6 @@ export async function completeMultipartUpload(
     return item;
 }
 
-const HIDDEN_EXCLUSION: Prisma.MediaItemWhereInput = {
-    collectionItems: { none: { collection: { systemType: 'HIDDEN' } } },
-};
-
 export async function listMedia(params: {
     cursor?: string;
     limit: number;
@@ -217,11 +210,7 @@ export async function getTimeline() {
         SELECT to_char(COALESCE("taken_at", "created_at"), 'YYYY-MM') AS month,
                COUNT(*)::bigint AS count
         FROM "media_items" m
-        WHERE m.id NOT IN (
-            SELECT ci.media_item_id FROM collection_items ci
-            JOIN collections c ON c.id = ci.collection_id
-            WHERE c.system_type = 'HIDDEN'
-        )
+        WHERE ${HIDDEN_NOT_EXISTS}
         GROUP BY month
         ORDER BY month DESC
     `;
@@ -295,9 +284,7 @@ export async function getThumbnailUrl(id: string) {
         throw new AppError(404, 'Thumbnail not yet available');
     }
 
-    return env.CDN_BASE_URL
-        ? s3Service.getCdnUrl(item.thumbnailKey)
-        : await s3Service.getPresignedDownloadUrl(item.thumbnailKey);
+    return s3Service.getMediaUrl(item.thumbnailKey);
 }
 
 export async function getBatchThumbnailUrls(ids: string[]) {
@@ -308,9 +295,7 @@ export async function getBatchThumbnailUrls(ids: string[]) {
 
     const entries = await Promise.all(
         items.map(async (item) => {
-            const url = env.CDN_BASE_URL
-                ? s3Service.getCdnUrl(item.thumbnailKey!)
-                : await s3Service.getPresignedDownloadUrl(item.thumbnailKey!);
+            const url = await s3Service.getMediaUrl(item.thumbnailKey!);
             return [item.id, url] as const;
         })
     );
@@ -343,12 +328,11 @@ export async function getWebUrl(id: string) {
         const key = item.streamingKey ?? item.originalKey;
         return s3Service.getPresignedDownloadUrl(key);
     }
-    const key = item.webKey ?? item.originalKey;
-    // Serve web-optimized photos via CDN when available (web/ prefix is in CDN bucket policy)
-    if (env.CDN_BASE_URL && item.webKey) {
-        return s3Service.getCdnUrl(item.webKey);
+    // Serve web-optimized photos via CDN when available
+    if (item.webKey) {
+        return s3Service.getMediaUrl(item.webKey);
     }
-    return s3Service.getPresignedDownloadUrl(key);
+    return s3Service.getPresignedDownloadUrl(item.originalKey);
 }
 
 export async function getDownloadUrl(id: string) {

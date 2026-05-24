@@ -17,6 +17,7 @@ from worker import backend_client as api, s3
 from worker.clip_encoder import encode_image, encode_images
 from worker.config import settings
 from worker.face_assign import assign_or_create
+from worker.geocode import reverse_geocode
 from worker.face_detect import detect_faces
 from worker.log import get_logger
 from worker.metadata import MediaMetadata, extract_photo_metadata, extract_video_metadata
@@ -166,6 +167,10 @@ async def _stage_content_photo(
     logger.info("step_extract_metadata", media_item_id=media_item_id)
     meta = extract_photo_metadata(image)
 
+    if meta.latitude is not None and meta.longitude is not None:
+        logger.info("step_reverse_geocode", media_item_id=media_item_id)
+        meta.city, meta.country = await reverse_geocode(meta.latitude, meta.longitude)
+
     logger.info("step_generate_thumbnail", media_item_id=media_item_id, width=image.width, height=image.height)
     thumb_bytes = generate_photo_thumbnail(image)
 
@@ -222,6 +227,10 @@ async def _stage_content_video(
 ) -> None:
     logger.info("step_extract_metadata", media_item_id=media_item_id)
     meta = extract_video_metadata(tmp_path)
+
+    if meta.latitude is not None and meta.longitude is not None:
+        logger.info("step_reverse_geocode", media_item_id=media_item_id)
+        meta.city, meta.country = await reverse_geocode(meta.latitude, meta.longitude)
 
     logger.info(
         "step_generate_thumbnail",

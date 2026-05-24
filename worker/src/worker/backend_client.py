@@ -279,6 +279,26 @@ async def query_media_items_for_retry(filter_type: str) -> list[dict[str, str]]:
     return data["items"]
 
 
+# ─── Geocoding ───────────────────────────────────────────────
+
+
+async def query_media_for_geocoding() -> list[dict[str, Any]]:
+    """Returns list of {id, latitude, longitude} for items needing geocoding."""
+    data = await _request("GET", "/media/needs-geocoding")
+    return data["items"]
+
+
+async def persist_geocoding(
+    media_item_id: str,
+    city: str | None,
+    country: str | None,
+) -> None:
+    await _request("PUT", f"/media/{media_item_id}/geocoding", json={
+        "city": city,
+        "country": country,
+    })
+
+
 # ─── Sessions ────────────────────────────────────────────────
 
 

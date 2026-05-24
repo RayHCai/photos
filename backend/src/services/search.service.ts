@@ -1,9 +1,11 @@
 import * as chrono from 'chrono-node';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { toVectorLiteral } from '../utils/embeddings.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
+import { HIDDEN_EXCLUSION, HIDDEN_NOT_EXISTS } from '../utils/filters.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -203,60 +205,38 @@ async function parseSearchQuery(rawQuery: string): Promise<ParsedQuery> {
     return { personIds, dateRange, locations, mediaType, clipText };
 }
 
-const HIDDEN_EXCLUSION_SQL = `AND m.id NOT IN (
-        SELECT ci.media_item_id FROM collection_items ci
-        JOIN collections c ON c.id = ci.collection_id
-        WHERE c.system_type = 'HIDDEN'
-    )`;
-
-const HIDDEN_EXCLUSION_WHERE = `WHERE m.id NOT IN (
-        SELECT ci.media_item_id FROM collection_items ci
-        JOIN collections c ON c.id = ci.collection_id
-        WHERE c.system_type = 'HIDDEN'
-    )`;
-
 // ── SQL Helpers ────────────────────────────────────────────────────────
 
-function buildFilterClauses(parsed: ParsedQuery, paramOffset: number) {
-    const clauses: string[] = [];
-    const params: unknown[] = [];
-    let idx = paramOffset;
+function buildFilterConditions(parsed: ParsedQuery): Prisma.Sql[] {
+    const conditions: Prisma.Sql[] = [];
 
     if (parsed.personIds.length > 0) {
-        const placeholders = parsed.personIds.map(() => `$${idx++}`).join(',');
-        clauses.push(`m.id IN (
+        conditions.push(Prisma.sql`m.id IN (
             SELECT DISTINCT f.media_item_id FROM faces f
-            WHERE f.person_id IN (${placeholders})
+            WHERE f.person_id IN (${Prisma.join(parsed.personIds)})
         )`);
-        params.push(...parsed.personIds);
     }
 
     if (parsed.dateRange) {
-        clauses.push(`m.taken_at >= $${idx++} AND m.taken_at < $${idx++}`);
-        params.push(parsed.dateRange.start, parsed.dateRange.end);
+        conditions.push(Prisma.sql`m.taken_at >= ${parsed.dateRange.start} AND m.taken_at < ${parsed.dateRange.end}`);
     }
 
-    const locParts: string[] = [];
+    const locParts: Prisma.Sql[] = [];
     if (parsed.locations.cities.length > 0) {
-        const placeholders = parsed.locations.cities.map(() => `$${idx++}`).join(',');
-        locParts.push(`m.city IN (${placeholders})`);
-        params.push(...parsed.locations.cities);
+        locParts.push(Prisma.sql`m.city IN (${Prisma.join(parsed.locations.cities)})`);
     }
     if (parsed.locations.countries.length > 0) {
-        const placeholders = parsed.locations.countries.map(() => `$${idx++}`).join(',');
-        locParts.push(`m.country IN (${placeholders})`);
-        params.push(...parsed.locations.countries);
+        locParts.push(Prisma.sql`m.country IN (${Prisma.join(parsed.locations.countries)})`);
     }
     if (locParts.length > 0) {
-        clauses.push(`(${locParts.join(' OR ')})`);
+        conditions.push(Prisma.sql`(${Prisma.join(locParts, ' OR ')})`);
     }
 
     if (parsed.mediaType) {
-        clauses.push(`m.type = $${idx++}::"MediaType"`);
-        params.push(parsed.mediaType);
+        conditions.push(Prisma.sql`m.type = ${parsed.mediaType}::"MediaType"`);
     }
 
-    return { clauses, params };
+    return conditions;
 }
 
 function mapSearchResult(r: SearchResult) {
@@ -333,24 +313,24 @@ async function searchWithClipAndFilters(
     page: number,
 ) {
     const embeddingStr = toVectorLiteral(embedding);
-    // $1 = embedding, $2 = limit, $3 = offset, filters start at $4
-    const { clauses, params: filterParams } = buildFilterClauses(parsed, 4);
-    const whereExtra = clauses.length > 0 ? `AND ${clauses.join(' AND ')}` : '';
+    const conditions = buildFilterConditions(parsed);
+    const filterSql = conditions.length > 0
+        ? Prisma.sql`AND ${Prisma.join(conditions, ' AND ')}`
+        : Prisma.empty;
 
     await prisma.$executeRaw`SELECT set_config('hnsw.ef_search', ${String(env.HNSW_EF_SEARCH)}, true)`;
 
-    const results = await prisma.$queryRawUnsafe<SearchResult[]>(
-        `SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
-                m.taken_at, m.width, m.height, m.duration_seconds,
-                1 - (m.clip_embedding <=> $1::vector) AS similarity
-         FROM media_items m
-         WHERE m.clip_embedding IS NOT NULL
-           ${whereExtra}
-           ${HIDDEN_EXCLUSION_SQL}
-         ORDER BY m.clip_embedding <=> $1::vector
-         LIMIT $2 OFFSET $3`,
-        embeddingStr, limit, offset, ...filterParams,
-    );
+    const results = await prisma.$queryRaw<SearchResult[]>`
+        SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
+               m.taken_at, m.width, m.height, m.duration_seconds,
+               1 - (m.clip_embedding <=> ${embeddingStr}::vector) AS similarity
+        FROM media_items m
+        WHERE m.clip_embedding IS NOT NULL
+          ${filterSql}
+          AND ${HIDDEN_NOT_EXISTS}
+        ORDER BY m.clip_embedding <=> ${embeddingStr}::vector
+        LIMIT ${limit} OFFSET ${offset}
+    `;
 
     return {
         items: results.map(mapSearchResult),
@@ -367,22 +347,22 @@ async function searchWithFtsAndFilters(
     offset: number,
     page: number,
 ) {
-    // $1 = ftsQuery, $2 = limit, $3 = offset, filters start at $4
-    const { clauses, params: filterParams } = buildFilterClauses(parsed, 4);
-    const whereExtra = clauses.length > 0 ? `AND ${clauses.join(' AND ')}` : '';
+    const conditions = buildFilterConditions(parsed);
+    const filterSql = conditions.length > 0
+        ? Prisma.sql`AND ${Prisma.join(conditions, ' AND ')}`
+        : Prisma.empty;
 
-    const results = await prisma.$queryRawUnsafe<SearchResult[]>(
-        `SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
-                m.taken_at, m.width, m.height, m.duration_seconds,
-                ts_rank(m.fts_vector, plainto_tsquery('english', $1)) AS rank
-         FROM media_items m
-         WHERE m.fts_vector @@ plainto_tsquery('english', $1)
-           ${whereExtra}
-           ${HIDDEN_EXCLUSION_SQL}
-         ORDER BY rank DESC
-         LIMIT $2 OFFSET $3`,
-        parsed.clipText, limit, offset, ...filterParams,
-    );
+    const results = await prisma.$queryRaw<SearchResult[]>`
+        SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
+               m.taken_at, m.width, m.height, m.duration_seconds,
+               ts_rank(m.fts_vector, plainto_tsquery('english', ${parsed.clipText})) AS rank
+        FROM media_items m
+        WHERE m.fts_vector @@ plainto_tsquery('english', ${parsed.clipText})
+          ${filterSql}
+          AND ${HIDDEN_NOT_EXISTS}
+        ORDER BY rank DESC
+        LIMIT ${limit} OFFSET ${offset}
+    `;
 
     return {
         items: results.map(mapSearchResult),
@@ -399,32 +379,24 @@ async function searchWithFiltersOnly(
     offset: number,
     page: number,
 ) {
-    // Main query: $1 = limit, $2 = offset, filters start at $3
-    const { clauses: mainClauses, params: mainParams } = buildFilterClauses(parsed, 3);
-    const mainWhere = mainClauses.length > 0
-        ? `WHERE ${mainClauses.join(' AND ')} ${HIDDEN_EXCLUSION_SQL}`
-        : HIDDEN_EXCLUSION_WHERE;
-
-    // Count query: filters start at $1
-    const { clauses: countClauses, params: countParams } = buildFilterClauses(parsed, 1);
-    const countWhere = countClauses.length > 0
-        ? `WHERE ${countClauses.join(' AND ')} ${HIDDEN_EXCLUSION_SQL}`
-        : HIDDEN_EXCLUSION_WHERE;
+    const conditions = buildFilterConditions(parsed);
+    const mainWhere = conditions.length > 0
+        ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')} AND ${HIDDEN_NOT_EXISTS}`
+        : Prisma.sql`WHERE ${HIDDEN_NOT_EXISTS}`;
 
     const [results, countResult] = await Promise.all([
-        prisma.$queryRawUnsafe<SearchResult[]>(
-            `SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
-                    m.taken_at, m.width, m.height, m.duration_seconds
-             FROM media_items m
-             ${mainWhere}
-             ORDER BY m.taken_at DESC NULLS LAST, m.created_at DESC
-             LIMIT $1 OFFSET $2`,
-            limit, offset, ...mainParams,
-        ),
-        prisma.$queryRawUnsafe<[{ count: bigint }]>(
-            `SELECT COUNT(*) AS count FROM media_items m ${countWhere}`,
-            ...countParams,
-        ),
+        prisma.$queryRaw<SearchResult[]>`
+            SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
+                   m.taken_at, m.width, m.height, m.duration_seconds
+            FROM media_items m
+            ${mainWhere}
+            ORDER BY m.taken_at DESC NULLS LAST, m.created_at DESC
+            LIMIT ${limit} OFFSET ${offset}
+        `,
+        prisma.$queryRaw<[{ count: bigint }]>`
+            SELECT COUNT(*) AS count FROM media_items m
+            ${mainWhere}
+        `,
     ]);
 
     return {
@@ -443,18 +415,15 @@ export async function search(params: SearchParams) {
     const offset = (page - 1) * limit;
 
     if (!q || q.trim().length === 0) {
-        const hiddenFilter = {
-            collectionItems: { none: { collection: { systemType: 'HIDDEN' } } },
-        };
         const [items, total] = await Promise.all([
             prisma.mediaItem.findMany({
-                where: hiddenFilter,
+                where: HIDDEN_EXCLUSION,
                 orderBy: [{ takenAt: 'desc' }, { createdAt: 'desc' }],
                 take: limit,
                 skip: offset,
                 select: MEDIA_ITEM_SUMMARY_SELECT,
             }),
-            prisma.mediaItem.count({ where: hiddenFilter }),
+            prisma.mediaItem.count({ where: HIDDEN_EXCLUSION }),
         ]);
 
         return { items, total, page, limit, searchType: 'filter' as const };
@@ -500,17 +469,16 @@ export async function search(params: SearchParams) {
     }
 
     // Path 3: Nothing parsed — last-resort FTS on the original query
-    const results = await prisma.$queryRawUnsafe<SearchResult[]>(
-        `SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
-                m.taken_at, m.width, m.height, m.duration_seconds,
-                ts_rank(m.fts_vector, plainto_tsquery('english', $1)) AS rank
-         FROM media_items m
-         WHERE m.fts_vector @@ plainto_tsquery('english', $1)
-           ${HIDDEN_EXCLUSION_SQL}
-         ORDER BY rank DESC
-         LIMIT $2 OFFSET $3`,
-        q, limit, offset,
-    );
+    const results = await prisma.$queryRaw<SearchResult[]>`
+        SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
+               m.taken_at, m.width, m.height, m.duration_seconds,
+               ts_rank(m.fts_vector, plainto_tsquery('english', ${q})) AS rank
+        FROM media_items m
+        WHERE m.fts_vector @@ plainto_tsquery('english', ${q})
+          AND ${HIDDEN_NOT_EXISTS}
+        ORDER BY rank DESC
+        LIMIT ${limit} OFFSET ${offset}
+    `;
 
     return {
         items: results.map(mapSearchResult),

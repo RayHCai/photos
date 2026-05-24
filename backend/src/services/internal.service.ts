@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
 import * as personsService from './persons.service.js';
 import * as s3Service from './s3.service.js';
@@ -33,13 +34,11 @@ export async function setProcessingStatus(
 }
 
 export async function claimTask(mediaItemId: string, taskId: string): Promise<boolean> {
-    const result = await prisma.$executeRawUnsafe(
-        `UPDATE media_items
-         SET processing_status = 'PROCESSING', processing_error = NULL, updated_at = now()
-         WHERE id = $1 AND current_task_id = $2`,
-        mediaItemId,
-        taskId,
-    );
+    const result = await prisma.$executeRaw`
+        UPDATE media_items
+        SET processing_status = 'PROCESSING', processing_error = NULL, updated_at = now()
+        WHERE id = ${mediaItemId} AND current_task_id = ${taskId}
+    `;
     return result > 0;
 }
 
@@ -79,45 +78,29 @@ export async function persistContent(mediaItemId: string, data: PersistContentDa
 
     const takenAt = data.takenAt ? new Date(data.takenAt) : null;
 
-    await prisma.$executeRawUnsafe(
-        `UPDATE media_items SET
-            width = COALESCE($2::int, width),
-            height = COALESCE($3::int, height),
-            duration_seconds = COALESCE($4::double precision, duration_seconds),
-            taken_at = COALESCE($5::timestamptz, taken_at),
-            latitude = COALESCE($6::double precision, latitude),
-            longitude = COALESCE($7::double precision, longitude),
-            camera_make = COALESCE($8, camera_make),
-            camera_model = COALESCE($9, camera_model),
-            city = COALESCE($10, city),
-            country = COALESCE($11, country),
-            fts_document = $12,
-            thumbnail_key = COALESCE($13, thumbnail_key),
-            clip_embedding = CASE WHEN $14::text IS NOT NULL
-                THEN $14::vector ELSE clip_embedding END,
-            blur_hash = COALESCE($15, blur_hash),
-            web_key = COALESCE($16, web_key),
+    await prisma.$executeRaw`
+        UPDATE media_items SET
+            width = COALESCE(${data.width ?? null}::int, width),
+            height = COALESCE(${data.height ?? null}::int, height),
+            duration_seconds = COALESCE(${data.durationSeconds ?? null}::double precision, duration_seconds),
+            taken_at = COALESCE(${takenAt}::timestamptz, taken_at),
+            latitude = COALESCE(${data.latitude ?? null}::double precision, latitude),
+            longitude = COALESCE(${data.longitude ?? null}::double precision, longitude),
+            camera_make = COALESCE(${data.cameraMake ?? null}, camera_make),
+            camera_model = COALESCE(${data.cameraModel ?? null}, camera_model),
+            city = COALESCE(${data.city ?? null}, city),
+            country = COALESCE(${data.country ?? null}, country),
+            fts_document = ${data.ftsDocument},
+            thumbnail_key = COALESCE(${data.thumbnailKey ?? null}, thumbnail_key),
+            clip_embedding = CASE WHEN ${embeddingStr}::text IS NOT NULL
+                THEN ${embeddingStr}::vector ELSE clip_embedding END,
+            blur_hash = COALESCE(${data.blurHash ?? null}, blur_hash),
+            web_key = COALESCE(${data.webKey ?? null}, web_key),
             processing_status = 'COMPLETED',
             processing_error = NULL,
             updated_at = now()
-        WHERE id = $1`,
-        mediaItemId,
-        data.width ?? null,
-        data.height ?? null,
-        data.durationSeconds ?? null,
-        takenAt,
-        data.latitude ?? null,
-        data.longitude ?? null,
-        data.cameraMake ?? null,
-        data.cameraModel ?? null,
-        data.city ?? null,
-        data.country ?? null,
-        data.ftsDocument,
-        data.thumbnailKey ?? null,
-        embeddingStr,
-        data.blurHash ?? null,
-        data.webKey ?? null,
-    );
+        WHERE id = ${mediaItemId}
+    `;
 }
 
 export async function persistBlurHashOnly(mediaItemId: string, blurHash: string) {
@@ -140,16 +123,14 @@ export async function getThumbnailKey(mediaItemId: string) {
 
 export async function persistClipOnly(mediaItemId: string, embedding: number[]) {
     const embeddingStr = toVectorLiteral(embedding);
-    await prisma.$executeRawUnsafe(
-        `UPDATE media_items SET
-            clip_embedding = $2::vector,
+    await prisma.$executeRaw`
+        UPDATE media_items SET
+            clip_embedding = ${embeddingStr}::vector,
             processing_status = 'COMPLETED',
             processing_error = NULL,
             updated_at = now()
-        WHERE id = $1`,
-        mediaItemId,
-        embeddingStr,
-    );
+        WHERE id = ${mediaItemId}
+    `;
 }
 
 export async function persistStreamingKey(mediaItemId: string, streamingKey: string) {
@@ -191,16 +172,14 @@ export async function findNearestExisting(
     threshold: number
 ): Promise<{ faceId: string | null }> {
     const embeddingStr = toVectorLiteral(embedding);
-    const rows = await prisma.$queryRawUnsafe<Array<{ id: string; distance: number }>>(
-        `SELECT id, face_embedding <=> $1::vector AS distance
-         FROM faces
-         WHERE media_item_id = $2
-           AND face_embedding IS NOT NULL
-         ORDER BY face_embedding <=> $1::vector
-         LIMIT 1`,
-        embeddingStr,
-        mediaItemId
-    );
+    const rows = await prisma.$queryRaw<Array<{ id: string; distance: number }>>`
+        SELECT id, face_embedding <=> ${embeddingStr}::vector AS distance
+        FROM faces
+        WHERE media_item_id = ${mediaItemId}
+          AND face_embedding IS NOT NULL
+        ORDER BY face_embedding <=> ${embeddingStr}::vector
+        LIMIT 1
+    `;
 
     if (rows.length > 0 && rows[0].distance < threshold) {
         return { faceId: rows[0].id };
@@ -213,15 +192,14 @@ export async function findNearestPerson(
     threshold: number
 ): Promise<{ personId: string | null; distance: number | null }> {
     const embeddingStr = toVectorLiteral(embedding);
-    const rows = await prisma.$queryRawUnsafe<Array<{ person_id: string; distance: number }>>(
-        `SELECT f.person_id, f.face_embedding <=> $1::vector AS distance
-         FROM faces f
-         WHERE f.person_id IS NOT NULL
-           AND f.face_embedding IS NOT NULL
-         ORDER BY f.face_embedding <=> $1::vector
-         LIMIT 1`,
-        embeddingStr
-    );
+    const rows = await prisma.$queryRaw<Array<{ person_id: string; distance: number }>>`
+        SELECT f.person_id, f.face_embedding <=> ${embeddingStr}::vector AS distance
+        FROM faces f
+        WHERE f.person_id IS NOT NULL
+          AND f.face_embedding IS NOT NULL
+        ORDER BY f.face_embedding <=> ${embeddingStr}::vector
+        LIMIT 1
+    `;
 
     if (rows.length > 0 && rows[0].distance < threshold) {
         return { personId: rows[0].person_id, distance: rows[0].distance };
@@ -243,26 +221,17 @@ interface InsertFaceData {
 
 export async function insertFace(data: InsertFaceData): Promise<{ id: string }> {
     const embeddingStr = toVectorLiteral(data.embedding);
-    const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-        `INSERT INTO faces (
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+        INSERT INTO faces (
             id, media_item_id, person_id,
             box_x, box_y, box_width, box_height,
             confidence, crop_key, face_embedding, created_at
         ) VALUES (
-            gen_random_uuid(), $1, $2,
-            $3, $4, $5, $6,
-            $7, $8, $9::vector, now()
-        ) RETURNING id`,
-        data.mediaItemId,
-        data.personId,
-        data.boxX,
-        data.boxY,
-        data.boxWidth,
-        data.boxHeight,
-        data.confidence,
-        data.cropKey ?? null,
-        embeddingStr
-    );
+            gen_random_uuid(), ${data.mediaItemId}, ${data.personId},
+            ${data.boxX}, ${data.boxY}, ${data.boxWidth}, ${data.boxHeight},
+            ${data.confidence}, ${data.cropKey ?? null}, ${embeddingStr}::vector, now()
+        ) RETURNING id
+    `;
 
     // Auto-set person avatar if they don't have one yet
     if (data.cropKey && data.personId) {
@@ -283,14 +252,14 @@ export async function insertFace(data: InsertFaceData): Promise<{ id: string }> 
 export async function getAllFaceEmbeddings(): Promise<{
     faces: Array<{ id: string; personId: string | null; embedding: number[] }>;
 }> {
-    const rows = await prisma.$queryRawUnsafe<
+    const rows = await prisma.$queryRaw<
         Array<{ id: string; person_id: string | null; embedding: string }>
-    >(
-        `SELECT id, person_id, face_embedding::text AS embedding
-         FROM faces
-         WHERE face_embedding IS NOT NULL
-         ORDER BY created_at`
-    );
+    >`
+        SELECT id, person_id, face_embedding::text AS embedding
+        FROM faces
+        WHERE face_embedding IS NOT NULL
+        ORDER BY created_at
+    `;
 
     const faces = rows.map((row) => ({
         id: row.id,
@@ -342,13 +311,12 @@ export async function createPerson(): Promise<{ id: string }> {
 export async function batchCreatePersons(count: number): Promise<{ ids: string[] }> {
     if (count === 0) return { ids: [] };
 
-    const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-        `INSERT INTO persons (id, created_at, updated_at)
-         SELECT gen_random_uuid(), now(), now()
-         FROM generate_series(1, $1)
-         RETURNING id`,
-        count,
-    );
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+        INSERT INTO persons (id, created_at, updated_at)
+        SELECT gen_random_uuid(), now(), now()
+        FROM generate_series(1, ${count})
+        RETURNING id
+    `;
 
     return { ids: rows.map((r) => r.id) };
 }
@@ -385,11 +353,11 @@ export async function queryMediaItemsForRetry(filter: RetryFilter) {
             break;
     }
 
-    const rows = await prisma.$queryRawUnsafe<
+    const rows = await prisma.$queryRaw<
         Array<{ id: string; original_key: string; mime_type: string; type: string }>
-    >(
-        `SELECT id, original_key, mime_type, type FROM media_items WHERE ${whereClause}`
-    );
+    >`
+        SELECT id, original_key, mime_type, type FROM media_items WHERE ${Prisma.raw(whereClause)}
+    `;
 
     return rows.map((r) => ({
         id: r.id,
@@ -397,6 +365,40 @@ export async function queryMediaItemsForRetry(filter: RetryFilter) {
         mimeType: r.mime_type,
         type: r.type,
     }));
+}
+
+// ─── Geocoding ──────────────────────────────────────────────
+
+export async function queryMediaForGeocoding() {
+    const items = await prisma.mediaItem.findMany({
+        where: {
+            latitude: { not: null },
+            longitude: { not: null },
+            city: null,
+        },
+        select: { id: true, latitude: true, longitude: true },
+    });
+    return items;
+}
+
+export async function persistGeocoding(
+    mediaItemId: string,
+    city: string | null,
+    country: string | null,
+) {
+    await prisma.$executeRaw`
+        UPDATE media_items SET
+            city = COALESCE(${city}, city),
+            country = COALESCE(${country}, country),
+            fts_document = CASE
+                WHEN fts_document IS NOT NULL THEN
+                    TRIM(fts_document || ' ' || COALESCE(${city}, '') || ' ' || COALESCE(${country}, ''))
+                ELSE
+                    TRIM(COALESCE(${city}, '') || ' ' || COALESCE(${country}, ''))
+            END,
+            updated_at = NOW()
+        WHERE id = ${mediaItemId}
+    `;
 }
 
 // ─── S3 Operations ───────────────────────────────────────────

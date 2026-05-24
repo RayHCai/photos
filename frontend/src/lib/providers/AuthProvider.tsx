@@ -7,7 +7,6 @@ interface AuthContextValue {
     isAuthenticated: boolean;
     isLoading: boolean;
     login: (password: string) => Promise<void>;
-    setup: (password: string) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
@@ -35,15 +34,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAuthenticated(true);
     }, []);
 
-    const setup = useCallback(async (password: string) => {
-        await authApi.setup(password);
-        await authApi.login(password);
-        setIsAuthenticated(true);
-    }, []);
-
     return (
         <AuthContext.Provider
-            value={{ isAuthenticated, isLoading, login, setup }}
+            value={{ isAuthenticated, isLoading, login }}
         >
             {children}
         </AuthContext.Provider>

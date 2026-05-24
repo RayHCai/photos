@@ -84,6 +84,16 @@ export async function getPresignedDownloadUrl(key: string, fileName?: string) {
     return url;
 }
 
+/**
+ * Returns a CDN URL if CDN is configured, otherwise a presigned download URL.
+ */
+export async function getMediaUrl(key: string, preferCdn = true): Promise<string> {
+    if (preferCdn && env.CDN_BASE_URL) {
+        return getCdnUrl(key);
+    }
+    return getPresignedDownloadUrl(key);
+}
+
 export async function objectExists(key: string): Promise<boolean> {
     try {
         await s3Client.send(
