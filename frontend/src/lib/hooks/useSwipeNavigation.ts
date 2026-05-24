@@ -6,53 +6,141 @@ interface UseSwipeNavigationOptions {
     threshold?: number;
 }
 
-export function useSwipeNavigation<T extends HTMLElement>(
-    ref: RefObject<T | null>,
-    { onSwipeLeft, onSwipeRight, threshold = 50 }: UseSwipeNavigationOptions
+/**
+ * Native gallery-style swipe navigation.
+ * Directly manipulates the track element's transform for 60fps performance.
+ * The track must be a 3-panel carousel (width: 300%) with default
+ * transform: translateX(-33.333%) to center on the middle panel.
+ */
+export function useSwipeNavigation(
+    trackRef: RefObject<HTMLElement | null>,
+    { onSwipeLeft, onSwipeRight, threshold = 0.25 }: UseSwipeNavigationOptions
 ) {
-    const touchStart = useRef<{ x: number; y: number } | null>(null);
-    const swiped = useRef(false);
+    const callbacksRef = useRef({ onSwipeLeft, onSwipeRight });
+    callbacksRef.current = { onSwipeLeft, onSwipeRight };
 
     useEffect(() => {
-        const el = ref.current;
-        if (!el) return;
+        const track = trackRef.current;
+        if (!track) return;
+
+        let startX = 0;
+        let startY = 0;
+        let startTime = 0;
+        let direction: 'h' | 'v' | null = null;
+        let currentOffset = 0;
+        let animating = false;
+
+        function setTransform(offsetPx: number, animate: boolean) {
+            track!.style.transition = animate
+                ? 'transform 300ms cubic-bezier(0.2, 0, 0, 1)'
+                : 'none';
+            track!.style.transform = `translateX(calc(-33.333% + ${offsetPx}px))`;
+        }
 
         function handleTouchStart(e: TouchEvent) {
-            if (e.touches.length !== 1) return;
-            touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            swiped.current = false;
+            if (e.touches.length !== 1 || animating) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            startTime = Date.now();
+            direction = null;
+            currentOffset = 0;
+            setTransform(0, false);
         }
 
         function handleTouchMove(e: TouchEvent) {
-            if (!touchStart.current || e.touches.length !== 1 || swiped.current) return;
+            if (e.touches.length !== 1 || animating || startTime === 0) return;
 
-            const dx = e.touches[0].clientX - touchStart.current.x;
-            const dy = e.touches[0].clientY - touchStart.current.y;
+            const dx = e.touches[0].clientX - startX;
+            const dy = e.touches[0].clientY - startY;
 
-            // Only trigger if horizontal movement is dominant
-            if (Math.abs(dx) < threshold || Math.abs(dy) > Math.abs(dx)) return;
-
-            swiped.current = true;
-            if (dx < 0) {
-                onSwipeLeft?.();
+            // Lock direction after 8px of movement
+            if (!direction) {
+                if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+                    direction = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+                }
             }
-            else {
-                onSwipeRight?.();
+            if (direction !== 'h') return;
+
+            e.preventDefault();
+
+            let offset = dx;
+            const { onSwipeLeft: left, onSwipeRight: right } = callbacksRef.current;
+
+            // Rubber-band effect at edges (no prev/next available)
+            if ((offset > 0 && !right) || (offset < 0 && !left)) {
+                offset *= 0.2;
             }
+
+            currentOffset = offset;
+            setTransform(offset, false);
         }
 
         function handleTouchEnd() {
-            touchStart.current = null;
+            if (direction !== 'h' || animating) {
+                direction = null;
+                startTime = 0;
+                return;
+            }
+
+            const elapsed = Date.now() - startTime;
+            const velocity = Math.abs(currentOffset) / Math.max(elapsed, 1);
+            const containerW = track!.parentElement?.clientWidth ?? window.innerWidth;
+            const pastThreshold = Math.abs(currentOffset) > containerW * threshold;
+            const isFlick = velocity > 0.4 && Math.abs(currentOffset) > 30;
+            const { onSwipeLeft: left, onSwipeRight: right } = callbacksRef.current;
+
+            direction = null;
+            startTime = 0;
+            animating = true;
+
+            if ((pastThreshold || isFlick) && currentOffset < 0 && left) {
+                // Slide out to show next
+                setTransform(-containerW, true);
+                setTimeout(() => {
+                    left();
+                    animating = false;
+                    setTransform(0, false);
+                }, 300);
+            } else if ((pastThreshold || isFlick) && currentOffset > 0 && right) {
+                // Slide out to show prev
+                setTransform(containerW, true);
+                setTimeout(() => {
+                    right();
+                    animating = false;
+                    setTransform(0, false);
+                }, 300);
+            } else {
+                // Spring back to center
+                setTransform(0, true);
+                setTimeout(() => {
+                    animating = false;
+                }, 300);
+            }
+
+            currentOffset = 0;
         }
 
-        el.addEventListener('touchstart', handleTouchStart, { passive: true });
-        el.addEventListener('touchmove', handleTouchMove, { passive: true });
-        el.addEventListener('touchend', handleTouchEnd, { passive: true });
+        function handleTouchCancel() {
+            direction = null;
+            startTime = 0;
+            currentOffset = 0;
+            animating = true;
+            setTransform(0, true);
+            setTimeout(() => {
+                animating = false;
+            }, 300);
+        }
+
+        track.addEventListener('touchstart', handleTouchStart, { passive: true });
+        track.addEventListener('touchmove', handleTouchMove, { passive: false });
+        track.addEventListener('touchend', handleTouchEnd, { passive: true });
+        track.addEventListener('touchcancel', handleTouchCancel, { passive: true });
 
         return () => {
-            el.removeEventListener('touchstart', handleTouchStart);
-            el.removeEventListener('touchmove', handleTouchMove);
-            el.removeEventListener('touchend', handleTouchEnd);
+            track.removeEventListener('touchstart', handleTouchStart);
+            track.removeEventListener('touchmove', handleTouchMove);
+            track.removeEventListener('touchend', handleTouchEnd);
+            track.removeEventListener('touchcancel', handleTouchCancel);
         };
-    }, [ref, onSwipeLeft, onSwipeRight, threshold]);
+    }, [trackRef, threshold]);
 }
