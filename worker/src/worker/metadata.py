@@ -42,7 +42,7 @@ class MediaMetadata:
 
 
 def _dms_to_decimal(dms: tuple[float, ...], ref: str) -> float:
-    degrees, minutes, seconds = dms[0], dms[1], dms[2]
+    degrees, minutes, seconds = float(dms[0]), float(dms[1]), float(dms[2])
     decimal = degrees + minutes / 60 + seconds / 3600
     if ref in ("S", "W"):
         decimal = -decimal
