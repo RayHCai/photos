@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useState, useRef } from 'react';
+import { useEffect, useCallback, useState, useRef, useLayoutEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getMediaById, originalUrl, thumbnailUrl, webUrl } from '@/lib/api/media';
 import { VideoPlayer } from './VideoPlayer';
@@ -30,12 +30,20 @@ export function MediaLightbox({
     const [showInfo, setShowInfo] = useState(false);
     const [originalLoaded, setOriginalLoaded] = useState(false);
     const preloadedRef = useRef(new Set<string>());
-    const containerRef = useRef<HTMLDivElement>(null);
+    const trackRef = useRef<HTMLDivElement>(null);
 
-    useSwipeNavigation(containerRef, {
+    useSwipeNavigation(trackRef, {
         onSwipeLeft: onNext,
         onSwipeRight: onPrev,
     });
+
+    // Reset track transform after navigation (before paint) to avoid flash
+    useLayoutEffect(() => {
+        if (trackRef.current) {
+            trackRef.current.style.transition = 'none';
+            trackRef.current.style.transform = 'translateX(-33.333%)';
+        }
+    }, [mediaId]);
 
     const { data: item } = useQuery({
         queryKey: ['media', mediaId],
@@ -89,8 +97,10 @@ export function MediaLightbox({
     }, [handleKeyDown]);
 
     return (
-        <div ref={containerRef} className="fixed inset-0 z-50 bg-stone-950 flex select-none">
-            <div className="flex-1 flex items-center justify-center relative">
+        <div className="fixed inset-0 z-50 bg-stone-950 flex select-none">
+            {/* Main media area */}
+            <div className="flex-1 relative overflow-hidden">
+                {/* Controls overlay */}
                 <IconButton
                     icon={X}
                     size="sm"
@@ -117,7 +127,7 @@ export function MediaLightbox({
                         variant="overlay"
                         iconClassName="w-5 h-5"
                         onClick={onPrev}
-                        className="absolute left-3 top-1/2 -translate-y-1/2"
+                        className="absolute left-3 top-1/2 -translate-y-1/2 z-10"
                     />
                 )}
 
@@ -128,46 +138,83 @@ export function MediaLightbox({
                         variant="overlay"
                         iconClassName="w-5 h-5"
                         onClick={onNext}
-                        className="absolute right-3 top-1/2 -translate-y-1/2"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 z-10"
                     />
                 )}
 
-                {item && (
-                    <div className="max-w-[90vw] max-h-[90vh] relative">
-                        {item.type === 'VIDEO' ? (
-                            <VideoPlayer src={originalUrl(item.id)} />
-                        ) : (
-                            <>
-                                {/* Thumbnail placeholder — shown instantly */}
-                                <img
-                                    src={thumbnailUrl(item.id)}
-                                    alt=""
-                                    className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
-                                        originalLoaded ? 'opacity-0 absolute inset-0' : 'opacity-100'
-                                    }`}
-                                    draggable={false}
-                                />
-                                {/* Web-optimized image — fades in on top */}
-                                <img
-                                    key={item.id}
-                                    src={webUrl(item.id)}
-                                    alt={item.fileName}
-                                    className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
-                                        originalLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0'
-                                    }`}
-                                    draggable={false}
-                                    onLoad={() => setOriginalLoaded(true)}
-                                />
-                                {/* Loading spinner */}
-                                {!originalLoaded && (
-                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                        <Loader2 className="w-8 h-8 text-white/50 animate-spin" />
-                                    </div>
-                                )}
-                            </>
+                {/* 3-slide carousel track */}
+                <div
+                    ref={trackRef}
+                    className="flex h-full will-change-transform"
+                    style={{
+                        width: '300%',
+                        transform: 'translateX(-33.333%)',
+                    }}
+                >
+                    {/* Previous slide */}
+                    <div className="h-full flex items-center justify-center" style={{ width: '33.333%' }}>
+                        {prevMediaId && (
+                            <img
+                                src={webUrl(prevMediaId)}
+                                alt=""
+                                className="max-w-[90%] max-h-[90vh] object-contain"
+                                draggable={false}
+                            />
                         )}
                     </div>
-                )}
+
+                    {/* Current slide */}
+                    <div className="h-full flex items-center justify-center" style={{ width: '33.333%' }}>
+                        {item && (
+                            <div className="max-w-[90%] max-h-[90vh] relative">
+                                {item.type === 'VIDEO' ? (
+                                    <VideoPlayer src={originalUrl(item.id)} />
+                                ) : (
+                                    <>
+                                        {/* Thumbnail placeholder — shown instantly */}
+                                        <img
+                                            src={thumbnailUrl(item.id)}
+                                            alt=""
+                                            className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
+                                                originalLoaded ? 'opacity-0 absolute inset-0' : 'opacity-100'
+                                            }`}
+                                            draggable={false}
+                                        />
+                                        {/* Web-optimized image — fades in on top */}
+                                        <img
+                                            key={item.id}
+                                            src={webUrl(item.id)}
+                                            alt={item.fileName}
+                                            className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
+                                                originalLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0'
+                                            }`}
+                                            draggable={false}
+                                            onLoad={() => setOriginalLoaded(true)}
+                                        />
+                                        {/* Loading spinner */}
+                                        {!originalLoaded && (
+                                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                <Loader2 className="w-8 h-8 text-white/50 animate-spin" />
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Next slide */}
+                    <div className="h-full flex items-center justify-center" style={{ width: '33.333%' }}>
+                        {nextMediaId && (
+                            <img
+                                src={webUrl(nextMediaId)}
+                                alt=""
+                                className="max-w-[90%] max-h-[90vh] object-contain"
+                                draggable={false}
+                            />
+                        )}
+                    </div>
+                </div>
             </div>
 
             {showInfo && (
