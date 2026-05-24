@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from PIL import Image
-from PIL.ExifTags import GPS, GPSTAGS, TAGS
+from PIL.ExifTags import GPSTAGS, IFD, TAGS
 
 from worker.log import get_logger
 
@@ -85,7 +85,7 @@ def extract_photo_metadata(image: Image.Image) -> MediaMetadata:
                 break
 
     # GPS coordinates
-    gps_info = exif_data.get_ifd(GPS)
+    gps_info = exif_data.get_ifd(IFD.GPSInfo)
     if gps_info:
         gps_decoded: dict[str, object] = {}
         for tag_id, value in gps_info.items():
