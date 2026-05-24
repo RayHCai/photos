@@ -8,10 +8,7 @@ import * as shareService from './share.service.js';
 import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
 import { logger } from '../utils/logger.js';
-
-const HIDDEN_EXCLUSION: Prisma.MediaItemWhereInput = {
-    collectionItems: { none: { collection: { systemType: 'HIDDEN' } } },
-};
+import { HIDDEN_EXCLUSION } from '../utils/filters.js';
 
 export async function listPersons() {
     const persons = await prisma.person.findMany({

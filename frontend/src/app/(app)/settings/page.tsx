@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
     getStorageStats,
+    getProcessingStats,
     enqueuePending,
     retryFailed,
     backfillBlurHashes,
@@ -13,6 +14,7 @@ import {
     rerunMissingFaces,
     backfillTranscoding,
     backfillWebOptimized,
+    backfillGeocoding,
 } from '@/lib/api/jobs';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
@@ -65,6 +67,12 @@ export default function SettingsPage() {
     const { data: storageStats, isLoading: storageLoading } = useQuery({
         queryKey: ['storage-stats'],
         queryFn: getStorageStats,
+    });
+
+    const { data: processingStats } = useQuery({
+        queryKey: ['processing-stats'],
+        queryFn: getProcessingStats,
+        refetchInterval: 10_000,
     });
 
     const actions: ActionButtonProps[] = [
@@ -133,6 +141,14 @@ export default function SettingsPage() {
             },
         },
         {
+            label: 'Backfill Location Data',
+            description: 'Reverse geocode all media with GPS coordinates but no city/country',
+            onClick: async () => {
+                await backfillGeocoding();
+                toast.success('Geocoding backfill job enqueued');
+            },
+        },
+        {
             label: 'Recluster Faces',
             description: 'Run HDBSCAN clustering to merge and reassign face groups',
             onClick: async () => {
@@ -170,6 +186,30 @@ export default function SettingsPage() {
                                     </p>
                                     <p className="text-xs text-stone-400 mt-1">Total items</p>
                                 </div>
+                                {!!processingStats?.pending && (
+                                    <div className="p-4 rounded-xl bg-blue-50 border border-blue-200">
+                                        <p className="text-2xl font-light text-blue-700 tracking-tight">
+                                            {processingStats.pending.toLocaleString()}
+                                        </p>
+                                        <p className="text-xs text-blue-500 mt-1">Pending</p>
+                                    </div>
+                                )}
+                                {!!processingStats?.processing && (
+                                    <div className="p-4 rounded-xl bg-amber-50 border border-amber-200">
+                                        <p className="text-2xl font-light text-amber-700 tracking-tight">
+                                            {processingStats.processing.toLocaleString()}
+                                        </p>
+                                        <p className="text-xs text-amber-500 mt-1">Processing</p>
+                                    </div>
+                                )}
+                                {!!processingStats?.failed && (
+                                    <div className="p-4 rounded-xl bg-red-50 border border-red-200">
+                                        <p className="text-2xl font-light text-red-700 tracking-tight">
+                                            {processingStats.failed.toLocaleString()}
+                                        </p>
+                                        <p className="text-xs text-red-500 mt-1">Failed</p>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </section>

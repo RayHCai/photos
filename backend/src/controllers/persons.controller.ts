@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import * as personsService from '../services/persons.service.js';
 import { asyncHandler } from '../utils/async.js';
+import { extractPagination } from '../utils/db.js';
+import { cachedRedirect } from '../utils/response.js';
 import { logger } from '../utils/logger.js';
 
 export const list = asyncHandler(async (_req: Request, res: Response) => {
@@ -41,18 +43,18 @@ export const deleteOne = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getMedia = asyncHandler(async (req: Request, res: Response) => {
+    const { limit, cursor } = extractPagination(req);
     const result = await personsService.getPersonMedia(
         req.params.id as string,
-        Number(req.query.limit) || 50,
-        req.query.cursor as string | undefined
+        limit,
+        cursor
     );
     res.json(result);
 });
 
 export const getAvatar = asyncHandler(async (req: Request, res: Response) => {
     const url = await personsService.getPersonAvatarUrl(req.params.id as string);
-    res.set('Cache-Control', 'private, max-age=3300');
-    res.redirect(url);
+    cachedRedirect(res, url);
 });
 
 export const share = asyncHandler(async (req: Request, res: Response) => {

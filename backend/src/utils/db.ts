@@ -1,4 +1,12 @@
+import { Request } from 'express';
 import { AppError } from '../middleware/errorHandler.js';
+
+export function extractPagination(req: Request, defaultLimit = 50) {
+    return {
+        cursor: req.query.cursor as string | undefined,
+        limit: Number(req.query.limit) || defaultLimit,
+    };
+}
 
 export async function findOrThrow<T>(
     queryFn: () => Promise<T | null>,

@@ -173,6 +173,19 @@ export const deleteOrphanPersons = asyncHandler(async (_req: Request, res: Respo
     res.json({ deleted: count });
 });
 
+export const queryMediaForGeocoding = asyncHandler(async (_req: Request, res: Response) => {
+    const items = await internalService.queryMediaForGeocoding();
+    logger.info({ count: items.length }, 'queried media for geocoding');
+    res.json({ items });
+});
+
+export const persistGeocoding = asyncHandler(async (req: Request, res: Response) => {
+    const mediaId = req.params.id as string;
+    logger.info({ mediaId, city: req.body.city, country: req.body.country }, 'persisting geocoding');
+    await internalService.persistGeocoding(mediaId, req.body.city ?? null, req.body.country ?? null);
+    res.status(204).send();
+});
+
 export const deleteExpiredSessions = asyncHandler(async (_req: Request, res: Response) => {
     logger.info('cleaning up expired sessions');
     const count = await internalService.deleteExpiredSessions();

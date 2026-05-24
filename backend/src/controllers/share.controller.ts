@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as shareService from '../services/share.service.js';
 import { asyncHandler } from '../utils/async.js';
+import { cachedRedirect } from '../utils/response.js';
 import { logger } from '../utils/logger.js';
 
 export const createLink = asyncHandler(async (req: Request, res: Response) => {
@@ -42,8 +43,7 @@ export const sharedThumbnail = asyncHandler(async (req: Request, res: Response) 
         req.params.mediaId as string,
         'thumbnail'
     );
-    res.set('Cache-Control', 'private, max-age=3300');
-    res.redirect(url);
+    cachedRedirect(res, url);
 });
 
 export const sharedOriginal = asyncHandler(async (req: Request, res: Response) => {
@@ -52,6 +52,5 @@ export const sharedOriginal = asyncHandler(async (req: Request, res: Response) =
         req.params.mediaId as string,
         'original'
     );
-    res.set('Cache-Control', 'private, max-age=3300');
-    res.redirect(url);
+    cachedRedirect(res, url);
 });

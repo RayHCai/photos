@@ -8,6 +8,22 @@ const router = Router();
 
 router.use(serviceAuthMiddleware);
 
+// ─── Geocoding ──────────────────────────────────────────────
+// Must be before :id routes to avoid matching "needs-geocoding" as an id
+
+router.get('/media/needs-geocoding', internalController.queryMediaForGeocoding);
+
+router.put(
+    '/media/:id/geocoding',
+    validate({
+        body: z.object({
+            city: z.string().nullable().optional(),
+            country: z.string().nullable().optional(),
+        }),
+    }),
+    internalController.persistGeocoding
+);
+
 // ─── Media Items ─────────────────────────────────────────────
 
 router.get('/media/:id/file-name', internalController.getFileName);

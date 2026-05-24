@@ -7,6 +7,7 @@ from bullmq import Worker as BullWorker
 
 from worker import backend_client as api
 from worker.config import settings
+from worker.geocode import run_geocode_backfill
 from worker.log import get_logger
 from worker.pipeline import process_media
 from worker.recluster import run_recluster
@@ -80,6 +81,11 @@ async def _handle_maintenance(job: Any, token: str | None = None) -> str:
     if job.name == "cleanup-sessions":
         deleted = await api.delete_expired_sessions()
         logger.info("sessions_cleaned", deleted=deleted)
+        return "done"
+
+    if job.name == "geocode-backfill":
+        stats = await run_geocode_backfill()
+        logger.info("geocode_backfill_done", **stats)
         return "done"
 
     logger.warning("unknown_maintenance_job", job_name=job.name)

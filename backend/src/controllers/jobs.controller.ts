@@ -5,18 +5,25 @@ import { prisma } from '../config/prisma.js';
 import { asyncHandler } from '../utils/async.js';
 import { logger } from '../utils/logger.js';
 
+function bulkJobHandler(serviceFn: () => Promise<number>, label: string) {
+    return asyncHandler(async (_req: Request, res: Response) => {
+        logger.info(`${label} requested`);
+        const count = await serviceFn();
+        logger.info({ count }, `${label} completed`);
+        res.json({ count });
+    });
+}
+
 export const getStats = asyncHandler(async (_req: Request, res: Response) => {
     const stats = await queueService.getQueueStats();
     logger.debug({ stats }, 'queue stats fetched');
     res.json(stats);
 });
 
-export const retryFailed = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('retry all failed media requested');
-    const count = await mediaService.retryAllFailed();
-    logger.info({ count }, 'retry all failed media enqueued');
-    res.json({ count });
-});
+export const retryFailed = bulkJobHandler(
+    () => mediaService.retryAllFailed(),
+    'retry all failed media',
+);
 
 export const batchRetry = asyncHandler(async (req: Request, res: Response) => {
     const { ids } = req.body;
@@ -30,33 +37,25 @@ export const batchRetry = asyncHandler(async (req: Request, res: Response) => {
     res.json({ count });
 });
 
-export const enqueuePending = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('enqueue all pending media requested');
-    const count = await mediaService.enqueueAllPending();
-    logger.info({ count }, 'enqueue all pending media completed');
-    res.json({ count });
-});
+export const enqueuePending = bulkJobHandler(
+    () => mediaService.enqueueAllPending(),
+    'enqueue all pending media',
+);
 
-export const backfillBlurHashes = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('blurhash backfill requested');
-    const count = await mediaService.backfillBlurHashes();
-    logger.info({ count }, 'blurhash backfill enqueued');
-    res.json({ count });
-});
+export const backfillBlurHashes = bulkJobHandler(
+    () => mediaService.backfillBlurHashes(),
+    'blurhash backfill',
+);
 
-export const backfillAllMissingBlurHashes = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('backfill ALL missing blurhashes requested');
-    const count = await mediaService.backfillAllMissingBlurHashes();
-    logger.info({ count }, 'backfill ALL missing blurhashes enqueued');
-    res.json({ count });
-});
+export const backfillAllMissingBlurHashes = bulkJobHandler(
+    () => mediaService.backfillAllMissingBlurHashes(),
+    'backfill ALL missing blurhashes',
+);
 
-export const fixOrphanedProcessing = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('fix orphaned PROCESSING items requested');
-    const count = await mediaService.fixOrphanedProcessing();
-    logger.info({ count }, 'orphaned PROCESSING items fixed');
-    res.json({ count });
-});
+export const fixOrphanedProcessing = bulkJobHandler(
+    () => mediaService.fixOrphanedProcessing(),
+    'fix orphaned PROCESSING items',
+);
 
 export const triggerRecluster = asyncHandler(async (_req: Request, res: Response) => {
     logger.info('manual recluster requested');
@@ -65,25 +64,26 @@ export const triggerRecluster = asyncHandler(async (_req: Request, res: Response
     res.json({ status: 'enqueued' });
 });
 
-export const rerunMissingFaces = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('rerun missing faces requested');
-    const count = await mediaService.rerunMissingFaces();
-    logger.info({ count }, 'rerun missing faces enqueued');
-    res.json({ count });
-});
+export const rerunMissingFaces = bulkJobHandler(
+    () => mediaService.rerunMissingFaces(),
+    'rerun missing faces',
+);
 
-export const backfillTranscoding = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('transcode backfill requested');
-    const count = await mediaService.backfillTranscoding();
-    logger.info({ count }, 'transcode backfill enqueued');
-    res.json({ count });
-});
+export const backfillTranscoding = bulkJobHandler(
+    () => mediaService.backfillTranscoding(),
+    'transcode backfill',
+);
 
-export const backfillWebOptimized = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('web-optimized backfill requested');
-    const count = await mediaService.backfillWebOptimized();
-    logger.info({ count }, 'web-optimized backfill enqueued');
-    res.json({ count });
+export const backfillWebOptimized = bulkJobHandler(
+    () => mediaService.backfillWebOptimized(),
+    'web-optimized backfill',
+);
+
+export const backfillGeocoding = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('geocode backfill requested');
+    await queueService.maintenanceQueue.add('geocode-backfill', { triggeredBy: 'manual' as const });
+    logger.info('geocode backfill job enqueued');
+    res.json({ status: 'enqueued' });
 });
 
 export const getStorageStats = asyncHandler(async (_req: Request, res: Response) => {
@@ -95,4 +95,14 @@ export const getStorageStats = asyncHandler(async (_req: Request, res: Response)
         totalBytes: (result._sum.fileSize ?? BigInt(0)).toString(),
         totalItems: result._count.id,
     });
+});
+
+export const getProcessingStats = asyncHandler(async (_req: Request, res: Response) => {
+    const counts = await prisma.mediaItem.groupBy({
+        by: ['processingStatus'],
+        where: { processingStatus: { in: ['PENDING', 'PROCESSING', 'FAILED'] } },
+        _count: { id: true },
+    });
+    const find = (s: string) => counts.find(c => c.processingStatus === s)?._count.id ?? 0;
+    res.json({ pending: find('PENDING'), processing: find('PROCESSING'), failed: find('FAILED') });
 });

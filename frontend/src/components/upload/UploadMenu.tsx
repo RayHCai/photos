@@ -37,22 +37,11 @@ export function UploadMenu({ onUploadFiles, onUploadFolder, className }: UploadM
         onUploadFolder();
     }, [onUploadFolder]);
 
-    const handleClick = useCallback(() => {
-        if (isMobile) {
-            // On mobile, skip the dropdown — folder upload (webkitdirectory) isn't
-            // supported on Android/iOS, so open the file picker directly.
-            onUploadFiles();
-        }
-        else {
-            setOpen((o) => !o);
-        }
-    }, [isMobile, onUploadFiles]);
-
     return (
         <div ref={ref} className={`relative ${className ?? ''}`}>
             <IconButton
                 icon={Plus}
-                onClick={handleClick}
+                onClick={isMobile ? onUploadFiles : () => setOpen((o) => !o)}
                 title="Upload"
                 className="flex-shrink-0"
             />

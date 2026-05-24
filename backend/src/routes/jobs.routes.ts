@@ -23,6 +23,7 @@ router.post('/backfill-transcode', eitherAuth, jobsController.backfillTranscodin
 router.post('/backfill-web', eitherAuth, jobsController.backfillWebOptimized);
 router.post('/recluster', eitherAuth, jobsController.triggerRecluster);
 router.post('/rerun-missing-faces', eitherAuth, jobsController.rerunMissingFaces);
+router.post('/backfill-geocode', eitherAuth, jobsController.backfillGeocoding);
 
 router.post('/retry-failed', eitherAuth, jobsController.retryFailed);
 router.post('/retry', eitherAuth, jobsController.batchRetry);
@@ -31,5 +32,6 @@ router.use(authMiddleware);
 
 router.get('/stats', jobsController.getStats);
 router.get('/storage-stats', jobsController.getStorageStats);
+router.get('/processing-stats', jobsController.getProcessingStats);
 
 export default router;
