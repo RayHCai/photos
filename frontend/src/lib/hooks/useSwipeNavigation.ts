@@ -35,7 +35,8 @@ export function useSwipeNavigation<T extends HTMLElement>(
             swiped.current = true;
             if (dx < 0) {
                 onSwipeLeft?.();
-            } else {
+            }
+            else {
                 onSwipeRight?.();
             }
         }
