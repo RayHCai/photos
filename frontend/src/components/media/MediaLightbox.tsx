@@ -8,6 +8,7 @@ import { MediaDetail } from './MediaDetail';
 import { MediaActions } from './MediaActions';
 import { X, ChevronLeft, ChevronRight, Info, Loader2 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
+import { useSwipeNavigation } from '@/lib/hooks/useSwipeNavigation';
 
 interface MediaLightboxProps {
     mediaId: string;
@@ -29,6 +30,12 @@ export function MediaLightbox({
     const [showInfo, setShowInfo] = useState(false);
     const [originalLoaded, setOriginalLoaded] = useState(false);
     const preloadedRef = useRef(new Set<string>());
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    useSwipeNavigation(containerRef, {
+        onSwipeLeft: onNext,
+        onSwipeRight: onPrev,
+    });
 
     const { data: item } = useQuery({
         queryKey: ['media', mediaId],
@@ -82,7 +89,7 @@ export function MediaLightbox({
     }, [handleKeyDown]);
 
     return (
-        <div className="fixed inset-0 z-50 bg-stone-950 flex select-none">
+        <div ref={containerRef} className="fixed inset-0 z-50 bg-stone-950 flex select-none">
             <div className="flex-1 flex items-center justify-center relative">
                 <IconButton
                     icon={X}

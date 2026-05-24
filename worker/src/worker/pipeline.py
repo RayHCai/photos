@@ -31,7 +31,7 @@ from worker.thumbnail import (
 
 logger = get_logger(__name__)
 
-Stage = Literal["full", "clip", "faces", "blurhash", "transcode", "web"]
+Stage = Literal["full", "clip", "faces", "blurhash", "transcode", "web", "metadata"]
 
 
 def _build_fts_document(meta: MediaMetadata, file_name: str) -> str:
@@ -161,11 +161,10 @@ async def _stage_transcode(tmp_path: str, media_item_id: str) -> None:
 
 async def _stage_content_photo(
     image: Image.Image,
+    meta: MediaMetadata,
     media_item_id: str,
     file_name: str,
 ) -> None:
-    logger.info("step_extract_metadata", media_item_id=media_item_id)
-    meta = extract_photo_metadata(image)
 
     if meta.latitude is not None and meta.longitude is not None:
         logger.info("step_reverse_geocode", media_item_id=media_item_id)
@@ -445,11 +444,19 @@ async def process_photo(
     logger.info("step_download_original", media_item_id=media_item_id, key=original_key)
     raw = await s3.download_to_bytes(original_key)
     image = Image.open(io.BytesIO(raw))
+
+    # Extract metadata BEFORE exif_transpose — transposing strips GPS sub-IFD
+    logger.info("step_extract_metadata", media_item_id=media_item_id)
+    meta = extract_photo_metadata(image)
+
     image = ImageOps.exif_transpose(image) or image
+    # Update dimensions from the transposed image (may be swapped after rotation)
+    meta.width = image.width
+    meta.height = image.height
     logger.info("step_original_opened", media_item_id=media_item_id, size_bytes=len(raw), width=image.width, height=image.height, mode=image.mode)
 
     if start_stage == "full":
-        await _stage_content_photo(image, media_item_id, file_name)
+        await _stage_content_photo(image, meta, media_item_id, file_name)
         await _stage_faces_photo(image, media_item_id)
     elif start_stage == "clip":
         await _stage_clip_photo(image, media_item_id)
@@ -459,6 +466,24 @@ async def process_photo(
         await api.set_processing_status(media_item_id, "COMPLETED")
     elif start_stage == "web":
         await _stage_web(image, media_item_id)
+        await api.set_processing_status(media_item_id, "COMPLETED")
+    elif start_stage == "metadata":
+        if meta.latitude is not None and meta.longitude is not None:
+            meta.city, meta.country = await reverse_geocode(meta.latitude, meta.longitude)
+        fts_doc = _build_fts_document(meta, file_name)
+        await api.persist_content(
+            media_item_id,
+            width=meta.width,
+            height=meta.height,
+            taken_at=meta.taken_at.isoformat() if meta.taken_at else None,
+            latitude=meta.latitude,
+            longitude=meta.longitude,
+            camera_make=meta.camera_make,
+            camera_model=meta.camera_model,
+            city=meta.city,
+            country=meta.country,
+            fts_document=fts_doc,
+        )
         await api.set_processing_status(media_item_id, "COMPLETED")
 
     logger.info("photo_processed", media_item_id=media_item_id)
@@ -488,6 +513,29 @@ async def process_video(
 
         if start_stage == "transcode":
             await _stage_transcode(tmp_path, media_item_id)
+            await api.set_processing_status(media_item_id, "COMPLETED")
+            logger.info("video_processed", media_item_id=media_item_id)
+            return
+
+        if start_stage == "metadata":
+            meta = extract_video_metadata(tmp_path)
+            if meta.latitude is not None and meta.longitude is not None:
+                meta.city, meta.country = await reverse_geocode(meta.latitude, meta.longitude)
+            fts_doc = _build_fts_document(meta, file_name)
+            await api.persist_content(
+                media_item_id,
+                width=meta.width,
+                height=meta.height,
+                duration_seconds=meta.duration_seconds,
+                taken_at=meta.taken_at.isoformat() if meta.taken_at else None,
+                latitude=meta.latitude,
+                longitude=meta.longitude,
+                camera_make=meta.camera_make,
+                camera_model=meta.camera_model,
+                city=meta.city,
+                country=meta.country,
+                fts_document=fts_doc,
+            )
             await api.set_processing_status(media_item_id, "COMPLETED")
             logger.info("video_processed", media_item_id=media_item_id)
             return

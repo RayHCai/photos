@@ -79,6 +79,11 @@ export const backfillWebOptimized = bulkJobHandler(
     'web-optimized backfill',
 );
 
+export const backfillMetadata = bulkJobHandler(
+    () => mediaService.backfillMetadata(),
+    'metadata backfill',
+);
+
 export const backfillGeocoding = asyncHandler(async (_req: Request, res: Response) => {
     logger.info('geocode backfill requested');
     await queueService.maintenanceQueue.add('geocode-backfill', { triggeredBy: 'manual' as const });
