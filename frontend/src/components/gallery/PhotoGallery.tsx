@@ -2,20 +2,17 @@
 
 import { useState, useCallback, useMemo, type ReactNode } from 'react';
 import { GalleryGrid } from './GalleryGrid';
-import { MediaLightbox } from '@/components/media/MediaLightbox';
+import { MediaLightbox, type MediaLightboxProps } from '@/components/media/MediaLightbox';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useLightboxNavigation } from '@/lib/hooks/useLightboxNavigation';
 import type { MediaShellItem } from '@/lib/types/media';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 
-interface LightboxProps {
-    mediaId: string;
-    onClose: () => void;
-    onPrev?: () => void;
-    onNext?: () => void;
-    prevMediaId?: string;
-    nextMediaId?: string;
-}
+/** Navigation props built by PhotoGallery; the rest come from lightboxConfig. */
+type LightboxProps = Pick<MediaLightboxProps, 'mediaId' | 'onClose' | 'onPrev' | 'onNext' | 'prevMediaId' | 'nextMediaId' | 'mediaType'>;
+
+/** Extra config forwarded to MediaLightbox (URL overrides, feature flags). */
+export type LightboxConfig = Pick<MediaLightboxProps, 'showDelete' | 'showInfoPanel' | 'urlFns'>;
 
 interface PhotoGalleryProps {
     items: MediaShellItem[];
@@ -36,6 +33,9 @@ interface PhotoGalleryProps {
 
     // Custom lightbox renderer. Defaults to MediaLightbox.
     renderLightbox?: (props: LightboxProps) => ReactNode;
+
+    /** Extra config forwarded to MediaLightbox (e.g. shared URL fns, hide delete). */
+    lightboxConfig?: LightboxConfig;
 }
 
 export function PhotoGallery({
@@ -47,6 +47,7 @@ export function PhotoGallery({
     onToggleFavorite,
     thumbnailSrcFn,
     renderLightbox,
+    lightboxConfig,
 }: PhotoGalleryProps) {
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
@@ -65,6 +66,8 @@ export function PhotoGallery({
         return <EmptyState isLoading={isLoading} message={emptyMessage} />;
     }
 
+    const currentItem = lightboxId ? items.find((i) => i.id === lightboxId) : null;
+
     const lightboxProps: LightboxProps | null = lightboxId
         ? {
             mediaId: lightboxId,
@@ -73,6 +76,7 @@ export function PhotoGallery({
             onNext,
             prevMediaId,
             nextMediaId,
+            mediaType: currentItem?.type,
         }
         : null;
 
@@ -96,12 +100,8 @@ export function PhotoGallery({
                     renderLightbox(lightboxProps)
                 ) : (
                     <MediaLightbox
-                        mediaId={lightboxProps.mediaId}
-                        onClose={lightboxProps.onClose}
-                        onPrev={lightboxProps.onPrev}
-                        onNext={lightboxProps.onNext}
-                        prevMediaId={lightboxProps.prevMediaId}
-                        nextMediaId={lightboxProps.nextMediaId}
+                        {...lightboxProps}
+                        {...lightboxConfig}
                     />
                 ))}
         </>
