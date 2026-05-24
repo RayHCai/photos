@@ -29,6 +29,7 @@ export function MediaLightbox({
 }: MediaLightboxProps) {
     const [showInfo, setShowInfo] = useState(false);
     const [originalLoaded, setOriginalLoaded] = useState(false);
+    const loadedWebRef = useRef(new Set<string>());
     const preloadedRef = useRef(new Set<string>());
     const trackRef = useRef<HTMLDivElement>(null);
 
@@ -50,9 +51,9 @@ export function MediaLightbox({
         queryFn: () => getMediaById(mediaId),
     });
 
-    // Reset loaded state when mediaId changes
+    // Reset loaded state when mediaId changes, unless already loaded before
     useEffect(() => {
-        setOriginalLoaded(false);
+        setOriginalLoaded(loadedWebRef.current.has(mediaId));
     }, [mediaId]);
 
     // Preload adjacent images
@@ -182,14 +183,16 @@ export function MediaLightbox({
                                         />
                                         {/* Web-optimized image — fades in on top */}
                                         <img
-                                            key={item.id}
                                             src={webUrl(item.id)}
                                             alt={item.fileName}
                                             className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
                                                 originalLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0'
                                             }`}
                                             draggable={false}
-                                            onLoad={() => setOriginalLoaded(true)}
+                                            onLoad={() => {
+                                                loadedWebRef.current.add(item.id);
+                                                setOriginalLoaded(true);
+                                            }}
                                         />
                                         {/* Loading spinner */}
                                         {!originalLoaded && (
