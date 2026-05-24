@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import struct
 import subprocess
 import tempfile
@@ -188,6 +189,7 @@ async def _stage_content_photo(
     logger.info("step_encode_clip", media_item_id=media_item_id)
     clip_input = image.convert("RGB") if image.mode != "RGB" else image
     clip_emb = encode_image(clip_input)
+    clip_list = [0.0 if (math.isnan(v) or math.isinf(v)) else v for v in clip_emb.tolist()]
     fts_doc = _build_fts_document(meta, file_name)
 
     logger.info(
@@ -203,15 +205,15 @@ async def _stage_content_photo(
         height=meta.height,
         duration_seconds=meta.duration_seconds,
         taken_at=meta.taken_at.isoformat() if meta.taken_at else None,
-        latitude=meta.latitude,
-        longitude=meta.longitude,
+        latitude=float(meta.latitude) if meta.latitude is not None else None,
+        longitude=float(meta.longitude) if meta.longitude is not None else None,
         camera_make=meta.camera_make,
         camera_model=meta.camera_model,
         city=meta.city,
         country=meta.country,
         fts_document=fts_doc,
         thumbnail_key=thumb_key,
-        clip_embedding=clip_emb.tolist(),
+        clip_embedding=clip_list,
         blur_hash=blur_hash,
         web_key=web_key,
     )
@@ -251,7 +253,7 @@ async def _stage_content_video(
     if frames:
         logger.info("step_encode_clip", media_item_id=media_item_id, frame_count=len(frames))
         clip_emb = encode_images(frames)
-        clip_embedding = clip_emb.tolist()
+        clip_embedding = [0.0 if (math.isnan(v) or math.isinf(v)) else v for v in clip_emb.tolist()]
     else:
         logger.warning("step_encode_clip_skipped", media_item_id=media_item_id, reason="no_frames")
 
@@ -270,8 +272,8 @@ async def _stage_content_video(
         height=meta.height,
         duration_seconds=meta.duration_seconds,
         taken_at=meta.taken_at.isoformat() if meta.taken_at else None,
-        latitude=meta.latitude,
-        longitude=meta.longitude,
+        latitude=float(meta.latitude) if meta.latitude is not None else None,
+        longitude=float(meta.longitude) if meta.longitude is not None else None,
         camera_make=meta.camera_make,
         camera_model=meta.camera_model,
         city=meta.city,
