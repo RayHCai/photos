@@ -76,7 +76,8 @@ export function SelectionToolbar({
         try {
             await onRemoveFromCollection(Array.from(selection.selectedIds));
             selection.clearSelection();
-        } finally {
+        }
+        finally {
             setIsRemoving(false);
             setRemoveFromCollectionOpen(false);
         }
