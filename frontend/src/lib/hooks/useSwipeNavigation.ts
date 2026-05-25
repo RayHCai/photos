@@ -116,7 +116,8 @@ export function useSwipeNavigation(
                             track!.style.opacity = '1';
                             setTransform(0, false);
                         }, 300);
-                    } else {
+                    }
+                    else {
                         setVerticalTransform(0, true);
                         setTimeout(() => {
                             track!.style.opacity = '1';
