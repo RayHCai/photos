@@ -43,6 +43,7 @@ interface GalleryGridProps {
     onToggleFavorite?: (id: string, isFavorite: boolean) => void;
     onItemSelect?: (id: string, e: React.MouseEvent) => void;
     thumbnailSrcFn?: (id: string) => string | undefined;
+    timeline?: import('@/lib/types/media').TimelineMonth[];
 }
 
 export function GalleryGrid({
@@ -55,6 +56,7 @@ export function GalleryGrid({
     onToggleFavorite,
     onItemSelect,
     thumbnailSrcFn,
+    timeline,
 }: GalleryGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [measuredWidth, setMeasuredWidth] = useState(0);
@@ -230,6 +232,7 @@ export function GalleryGrid({
             <TimelineScrollbar
                 containerRef={containerRef}
                 virtualRows={virtualRows}
+                timeline={timeline}
             />
         </div>
     );

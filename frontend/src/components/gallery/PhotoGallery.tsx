@@ -36,6 +36,9 @@ interface PhotoGalleryProps {
 
     /** Extra config forwarded to MediaLightbox (e.g. shared URL fns, hide delete). */
     lightboxConfig?: LightboxConfig;
+
+    /** Override timeline data for the scrollbar (e.g. collection-scoped). */
+    timeline?: import('@/lib/types/media').TimelineMonth[];
 }
 
 export function PhotoGallery({
@@ -48,6 +51,7 @@ export function PhotoGallery({
     thumbnailSrcFn,
     renderLightbox,
     lightboxConfig,
+    timeline,
 }: PhotoGalleryProps) {
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
@@ -92,6 +96,7 @@ export function PhotoGallery({
                     onToggleFavorite={onToggleFavorite}
                     onItemSelect={handleItemSelect}
                     thumbnailSrcFn={thumbnailSrcFn}
+                    timeline={timeline}
                 />
             </div>
 

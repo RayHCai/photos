@@ -9,10 +9,12 @@ import type { VirtualRow } from './GalleryGrid';
 interface TimelineScrollbarProps {
     containerRef: RefObject<HTMLDivElement | null>;
     virtualRows: VirtualRow[];
+    timeline?: import('@/lib/types/media').TimelineMonth[];
 }
 
-export function TimelineScrollbar({ containerRef, virtualRows }: TimelineScrollbarProps) {
-    const { data: timeline } = useTimeline();
+export function TimelineScrollbar({ containerRef, virtualRows, timeline: timelineProp }: TimelineScrollbarProps) {
+    const { data: globalTimeline } = useTimeline();
+    const timeline = timelineProp ?? globalTimeline;
 
     const {
         isVisible,

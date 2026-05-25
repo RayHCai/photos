@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 const MIN_COLUMNS = 2;
 const MAX_COLUMNS = 6;
-const DEFAULT_COLUMNS = 4;
+const DEFAULT_COLUMNS = 2;
 const WHEEL_THRESHOLD = 80;
 
 function getTouchDistance(t1: Touch, t2: Touch): number {
