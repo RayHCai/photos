@@ -6,7 +6,7 @@ import { getMediaById, downloadUrl, originalUrl, thumbnailUrl, webUrl } from '@/
 import { VideoPlayer } from './VideoPlayer';
 import { MediaDetail } from './MediaDetail';
 import { MediaActions } from './MediaActions';
-import { X, ChevronLeft, ChevronRight, Info, Download, Loader2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Info, Download, Loader2, FolderMinus } from 'lucide-react';
 import { IconButton, getIconButtonStyles } from '@/components/ui/IconButton';
 import { useSwipeNavigation } from '@/lib/hooks/useSwipeNavigation';
 import type { MediaType } from '@/lib/types/media';
@@ -33,6 +33,8 @@ export interface MediaLightboxProps {
     mediaType?: MediaType;
     /** Custom URL functions (e.g. for shared/public links). */
     urlFns?: UrlFns;
+    /** Called to remove the current item from a collection. */
+    onRemoveFromCollection?: (id: string) => void;
 }
 
 const dlStyles = getIconButtonStyles({ size: 'sm', variant: 'overlay' });
@@ -48,6 +50,7 @@ export function MediaLightbox({
     showInfoPanel = true,
     mediaType,
     urlFns,
+    onRemoveFromCollection,
 }: MediaLightboxProps) {
     const [showInfo, setShowInfo] = useState(false);
     const [originalLoaded, setOriginalLoaded] = useState(false);
@@ -143,6 +146,20 @@ export function MediaLightbox({
                 />
 
                 <div className="absolute top-3 right-3 flex items-center gap-1 z-10">
+                    {onRemoveFromCollection && (
+                        <IconButton
+                            icon={FolderMinus}
+                            size="sm"
+                            variant="overlay"
+                            onClick={() => {
+                                onRemoveFromCollection(mediaId);
+                                if (onNext) onNext();
+                                else if (onPrev) onPrev();
+                                else onClose();
+                            }}
+                            title="Remove from collection"
+                        />
+                    )}
                     {showDelete ? (
                         <MediaActions mediaId={mediaId} onDelete={onClose} />
                     ) : (

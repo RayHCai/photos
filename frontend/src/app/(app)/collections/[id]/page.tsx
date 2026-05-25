@@ -45,6 +45,17 @@ export default function CollectionDetailPage() {
         });
     }, [id, removeItems]);
 
+    const handleRemoveOne = useCallback((mediaId: string) => {
+        removeItems.mutate(
+            { collectionId: id, mediaItemIds: [mediaId] },
+            {
+                onSuccess: () => {
+                    toast.success('Item removed from collection');
+                },
+            }
+        );
+    }, [id, removeItems]);
+
     const mediaItems = useMemo(
         () => collection?.items.map((i) => i.mediaItem) || [],
         [collection]
@@ -109,6 +120,7 @@ export default function CollectionDetailPage() {
             <PhotoGallery
                 items={mediaItems}
                 selection={selection}
+                lightboxConfig={{ onRemoveFromCollection: handleRemoveOne }}
             />
 
             <CollectionItemPicker

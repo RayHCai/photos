@@ -12,7 +12,7 @@ import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 type LightboxProps = Pick<MediaLightboxProps, 'mediaId' | 'onClose' | 'onPrev' | 'onNext' | 'prevMediaId' | 'nextMediaId' | 'mediaType'>;
 
 /** Extra config forwarded to MediaLightbox (URL overrides, feature flags). */
-export type LightboxConfig = Pick<MediaLightboxProps, 'showDelete' | 'showInfoPanel' | 'urlFns'>;
+export type LightboxConfig = Pick<MediaLightboxProps, 'showDelete' | 'showInfoPanel' | 'urlFns' | 'onRemoveFromCollection'>;
 
 interface PhotoGalleryProps {
     items: MediaShellItem[];
