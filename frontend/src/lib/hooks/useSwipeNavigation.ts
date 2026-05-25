@@ -70,10 +70,10 @@ export function useSwipeNavigation(
                     direction = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
                 }
             }
-            // Vertical swipe up to dismiss
+            // Vertical swipe down to dismiss
             if (direction === 'v') {
                 const { onSwipeUp: up } = callbacksRef.current;
-                if (!up || dy > 0) return;
+                if (!up || dy < 0) return;
                 e.preventDefault();
                 currentOffset = dy;
                 setVerticalTransform(dy, false);
@@ -100,7 +100,7 @@ export function useSwipeNavigation(
             // Vertical swipe up to dismiss
             if (direction === 'v') {
                 const { onSwipeUp: up } = callbacksRef.current;
-                if (up && currentOffset < 0) {
+                if (up && currentOffset > 0) {
                     const elapsed = Date.now() - startTime;
                     const velocity = Math.abs(currentOffset) / Math.max(elapsed, 1);
                     const containerH = track!.parentElement?.clientHeight ?? window.innerHeight;
@@ -109,7 +109,7 @@ export function useSwipeNavigation(
 
                     animating = true;
                     if (pastThreshold || isFlick) {
-                        setVerticalTransform(-containerH, true);
+                        setVerticalTransform(containerH, true);
                         setTimeout(() => {
                             up();
                             animating = false;
