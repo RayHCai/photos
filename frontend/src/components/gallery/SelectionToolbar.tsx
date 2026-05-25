@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Trash2, FolderPlus, Download, RotateCcw, EyeOff } from 'lucide-react';
+import { X, Trash2, FolderPlus, FolderMinus, Download, RotateCcw, EyeOff } from 'lucide-react';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddToCollectionModal } from '@/components/collections/AddToCollectionModal';
@@ -30,6 +30,10 @@ interface SelectionToolbarProps {
     showHide?: boolean;
     /** Called to hide selected items */
     onHide?: (ids: string[]) => Promise<void>;
+    /** Called to remove selected items from a collection. */
+    onRemoveFromCollection?: (ids: string[]) => Promise<void>;
+    /** Loading state for remove-from-collection action */
+    removeFromCollectionLoading?: boolean;
 }
 
 export function SelectionToolbar({
@@ -44,10 +48,14 @@ export function SelectionToolbar({
     deleteLoading,
     showHide,
     onHide,
+    onRemoveFromCollection,
+    removeFromCollectionLoading,
 }: SelectionToolbarProps) {
     const [deleteOpen, setDeleteOpen] = useState(false);
+    const [removeFromCollectionOpen, setRemoveFromCollectionOpen] = useState(false);
     const [collectionModalOpen, setCollectionModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isRemoving, setIsRemoving] = useState(false);
 
     const handleDelete = async () => {
         if (!onDelete) return;
@@ -59,6 +67,18 @@ export function SelectionToolbar({
         finally {
             setIsDeleting(false);
             setDeleteOpen(false);
+        }
+    };
+
+    const handleRemoveFromCollection = async () => {
+        if (!onRemoveFromCollection) return;
+        setIsRemoving(true);
+        try {
+            await onRemoveFromCollection(Array.from(selection.selectedIds));
+            selection.clearSelection();
+        } finally {
+            setIsRemoving(false);
+            setRemoveFromCollectionOpen(false);
         }
     };
 
@@ -91,6 +111,15 @@ export function SelectionToolbar({
                         danger
                         onClick={() => setDeleteOpen(true)}
                         title="Delete selected"
+                    />
+                )}
+                {onRemoveFromCollection && (
+                    <IconButton
+                        icon={FolderMinus}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setRemoveFromCollectionOpen(true)}
+                        title="Remove from collection"
                     />
                 )}
                 {showAddToCollection && (
@@ -148,6 +177,16 @@ export function SelectionToolbar({
                     onConfirm={handleDelete}
                     message={deleteConfirmMessage ?? `Delete ${selection.count} selected items? This cannot be undone.`}
                     loading={deleteLoading ?? isDeleting}
+                />
+            )}
+
+            {onRemoveFromCollection && (
+                <ConfirmModal
+                    open={removeFromCollectionOpen}
+                    onClose={() => setRemoveFromCollectionOpen(false)}
+                    onConfirm={handleRemoveFromCollection}
+                    message={`Remove ${selection.count} item${selection.count !== 1 ? 's' : ''} from this collection? The files will not be deleted.`}
+                    loading={removeFromCollectionLoading ?? isRemoving}
                 />
             )}
 
