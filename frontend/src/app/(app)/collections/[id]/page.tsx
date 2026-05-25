@@ -10,13 +10,16 @@ import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { CollectionItemPicker } from '@/components/collections/CollectionItemPicker';
 import { CollectionSettingsModal } from '@/components/collections/CollectionSettingsModal';
 import { useFilePicker } from '@/lib/hooks/useFilePicker';
+import { useFavorites } from '@/lib/hooks/useFavorites';
 import { CenteredSpinner } from '@/components/ui/CenteredSpinner';
 import { Button } from '@/components/ui/Button';
 import { FileDropZone } from '@/components/upload/UploadDropzone';
 import { UploadMenu } from '@/components/upload/UploadMenu';
 import { Settings } from 'lucide-react';
 import { pluralize } from '@/lib/utils/pluralize';
+import { format } from 'date-fns';
 import { toast } from 'sonner';
+import type { TimelineMonth } from '@/lib/types/media';
 
 export default function CollectionDetailPage() {
     const params = useParams();
@@ -29,6 +32,16 @@ export default function CollectionDetailPage() {
     const addItems = useAddCollectionItems();
     const removeItems = useRemoveCollectionItems();
     const { openFilePicker, openFolderPicker } = useFilePicker();
+    const { favoriteIds, addToFavorites, removeFromFavorites } = useFavorites();
+
+    const handleToggleFavorite = useCallback((mediaId: string, isFavorite: boolean) => {
+        if (isFavorite) {
+            removeFromFavorites([mediaId]);
+        }
+        else {
+            addToFavorites([mediaId]);
+        }
+    }, [addToFavorites, removeFromFavorites]);
 
     const handleRemoveItems = useCallback(async (ids: string[]) => {
         await new Promise<void>((resolve, reject) => {
@@ -54,6 +67,18 @@ export default function CollectionDetailPage() {
         () => new Set(mediaItems.map((i) => i.id)),
         [mediaItems]
     );
+
+    const collectionTimeline = useMemo((): TimelineMonth[] => {
+        const monthCounts = new Map<string, number>();
+        for (const item of mediaItems) {
+            const dateStr = item.takenAt || item.createdAt;
+            const month = format(new Date(dateStr), 'yyyy-MM');
+            monthCounts.set(month, (monthCounts.get(month) || 0) + 1);
+        }
+        return Array.from(monthCounts.entries())
+            .sort(([a], [b]) => b.localeCompare(a))
+            .map(([month, count]) => ({ month, count }));
+    }, [mediaItems]);
 
     if (isLoading) {
         return <CenteredSpinner />;
@@ -83,6 +108,7 @@ export default function CollectionDetailPage() {
                 <div className="flex-1 flex items-center justify-end gap-2">
                     <SelectionToolbar
                         selection={selection}
+                        showAddToCollection
                         onRemoveFromCollection={handleRemoveItems}
                         removeFromCollectionLoading={removeItems.isPending}
                     />
@@ -108,6 +134,9 @@ export default function CollectionDetailPage() {
             <PhotoGallery
                 items={mediaItems}
                 selection={selection}
+                favoriteIds={favoriteIds}
+                onToggleFavorite={handleToggleFavorite}
+                timeline={collectionTimeline}
             />
 
             <CollectionItemPicker
