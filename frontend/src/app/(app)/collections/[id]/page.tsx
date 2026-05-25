@@ -45,17 +45,6 @@ export default function CollectionDetailPage() {
         });
     }, [id, removeItems]);
 
-    const handleRemoveOne = useCallback((mediaId: string) => {
-        removeItems.mutate(
-            { collectionId: id, mediaItemIds: [mediaId] },
-            {
-                onSuccess: () => {
-                    toast.success('Item removed from collection');
-                },
-            }
-        );
-    }, [id, removeItems]);
-
     const mediaItems = useMemo(
         () => collection?.items.map((i) => i.mediaItem) || [],
         [collection]
@@ -94,9 +83,8 @@ export default function CollectionDetailPage() {
                 <div className="flex-1 flex items-center justify-end gap-2">
                     <SelectionToolbar
                         selection={selection}
-                        onDelete={handleRemoveItems}
-                        deleteConfirmMessage={`Remove ${selection.count} item${selection.count !== 1 ? 's' : ''} from this collection? The files will not be deleted.`}
-                        deleteLoading={removeItems.isPending}
+                        onRemoveFromCollection={handleRemoveItems}
+                        removeFromCollectionLoading={removeItems.isPending}
                     />
                     {!selection.isSelecting && (
                         <>
@@ -120,7 +108,6 @@ export default function CollectionDetailPage() {
             <PhotoGallery
                 items={mediaItems}
                 selection={selection}
-                lightboxConfig={{ onRemoveFromCollection: handleRemoveOne }}
             />
 
             <CollectionItemPicker
