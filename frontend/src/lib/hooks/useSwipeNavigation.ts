@@ -3,6 +3,7 @@ import { useRef, useEffect, type RefObject } from 'react';
 interface UseSwipeNavigationOptions {
     onSwipeLeft?: () => void;
     onSwipeRight?: () => void;
+    onSwipeUp?: () => void;
     threshold?: number;
 }
 
@@ -14,10 +15,10 @@ interface UseSwipeNavigationOptions {
  */
 export function useSwipeNavigation(
     trackRef: RefObject<HTMLElement | null>,
-    { onSwipeLeft, onSwipeRight, threshold = 0.25 }: UseSwipeNavigationOptions
+    { onSwipeLeft, onSwipeRight, onSwipeUp, threshold = 0.25 }: UseSwipeNavigationOptions
 ) {
-    const callbacksRef = useRef({ onSwipeLeft, onSwipeRight });
-    callbacksRef.current = { onSwipeLeft, onSwipeRight };
+    const callbacksRef = useRef({ onSwipeLeft, onSwipeRight, onSwipeUp });
+    callbacksRef.current = { onSwipeLeft, onSwipeRight, onSwipeUp };
 
     useEffect(() => {
         const track = trackRef.current;
@@ -37,6 +38,15 @@ export function useSwipeNavigation(
             track!.style.transform = `translateX(calc(-33.333% + ${offsetPx}px))`;
         }
 
+        function setVerticalTransform(offsetPy: number, animate: boolean) {
+            track!.style.transition = animate
+                ? 'transform 300ms cubic-bezier(0.2, 0, 0, 1), opacity 300ms ease'
+                : 'none';
+            track!.style.transform = `translateX(-33.333%) translateY(${offsetPy}px)`;
+            const progress = Math.min(Math.abs(offsetPy) / 300, 1);
+            track!.style.opacity = `${1 - progress * 0.5}`;
+        }
+
         function handleTouchStart(e: TouchEvent) {
             if (e.touches.length !== 1 || animating) return;
             startX = e.touches[0].clientX;
@@ -44,6 +54,7 @@ export function useSwipeNavigation(
             startTime = Date.now();
             direction = null;
             currentOffset = 0;
+            track!.style.opacity = '1';
             setTransform(0, false);
         }
 
@@ -59,6 +70,16 @@ export function useSwipeNavigation(
                     direction = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
                 }
             }
+            // Vertical swipe up to dismiss
+            if (direction === 'v') {
+                const { onSwipeUp: up } = callbacksRef.current;
+                if (!up || dy > 0) return;
+                e.preventDefault();
+                currentOffset = dy;
+                setVerticalTransform(dy, false);
+                return;
+            }
+
             if (direction !== 'h') return;
 
             e.preventDefault();
@@ -76,6 +97,39 @@ export function useSwipeNavigation(
         }
 
         function handleTouchEnd() {
+            // Vertical swipe up to dismiss
+            if (direction === 'v') {
+                const { onSwipeUp: up } = callbacksRef.current;
+                if (up && currentOffset < 0) {
+                    const elapsed = Date.now() - startTime;
+                    const velocity = Math.abs(currentOffset) / Math.max(elapsed, 1);
+                    const containerH = track!.parentElement?.clientHeight ?? window.innerHeight;
+                    const pastThreshold = Math.abs(currentOffset) > containerH * threshold;
+                    const isFlick = velocity > 0.4 && Math.abs(currentOffset) > 30;
+
+                    animating = true;
+                    if (pastThreshold || isFlick) {
+                        setVerticalTransform(-containerH, true);
+                        setTimeout(() => {
+                            up();
+                            animating = false;
+                            track!.style.opacity = '1';
+                            setTransform(0, false);
+                        }, 300);
+                    } else {
+                        setVerticalTransform(0, true);
+                        setTimeout(() => {
+                            track!.style.opacity = '1';
+                            animating = false;
+                        }, 300);
+                    }
+                }
+                direction = null;
+                startTime = 0;
+                currentOffset = 0;
+                return;
+            }
+
             if (direction !== 'h' || animating) {
                 direction = null;
                 startTime = 0;
@@ -127,6 +181,7 @@ export function useSwipeNavigation(
             startTime = 0;
             currentOffset = 0;
             animating = true;
+            track!.style.opacity = '1';
             setTransform(0, true);
             setTimeout(() => {
                 animating = false;

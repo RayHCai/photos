@@ -61,6 +61,7 @@ export function MediaLightbox({
     useSwipeNavigation(trackRef, {
         onSwipeLeft: onNext,
         onSwipeRight: onPrev,
+        onSwipeUp: onClose,
     });
 
     // Reset track transform after navigation (before paint) to avoid flash
