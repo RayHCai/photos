@@ -5,6 +5,7 @@ import { GalleryGrid } from './GalleryGrid';
 import { MediaLightbox, type MediaLightboxProps } from '@/components/media/MediaLightbox';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useLightboxNavigation } from '@/lib/hooks/useLightboxNavigation';
+import { groupByDate } from '@/lib/utils/groupByDate';
 import type { MediaShellItem } from '@/lib/types/media';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 
@@ -55,9 +56,12 @@ export function PhotoGallery({
 }: PhotoGalleryProps) {
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
-    const { onPrev, onNext, prevMediaId, nextMediaId } = useLightboxNavigation(items, lightboxId, setLightboxId);
+    // Match the visual order produced by GalleryGrid's groupByDate sorting
+    const visualItems = useMemo(() => groupByDate(items).flatMap((g) => g.items), [items]);
 
-    const orderedIds = useMemo(() => items.map((i) => i.id), [items]);
+    const { onPrev, onNext, prevMediaId, nextMediaId } = useLightboxNavigation(visualItems, lightboxId, setLightboxId);
+
+    const orderedIds = useMemo(() => visualItems.map((i) => i.id), [visualItems]);
 
     const handleItemSelect = useCallback(
         (id: string, e: React.MouseEvent) => {
@@ -70,7 +74,7 @@ export function PhotoGallery({
         return <EmptyState isLoading={isLoading} message={emptyMessage} />;
     }
 
-    const currentItem = lightboxId ? items.find((i) => i.id === lightboxId) : null;
+    const currentItem = lightboxId ? visualItems.find((i) => i.id === lightboxId) : null;
 
     const lightboxProps: LightboxProps | null = lightboxId
         ? {
