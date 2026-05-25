@@ -184,7 +184,9 @@ export async function listMedia(params: {
     }
 
     const orderBy: Prisma.MediaItemOrderByWithRelationInput =
-        sort === 'date_asc' ? { takenAt: 'asc' } : { takenAt: 'desc' };
+        sort === 'date_asc'
+            ? { takenAt: { sort: 'asc', nulls: 'last' } }
+            : { takenAt: { sort: 'desc', nulls: 'last' } };
 
     const items = await prisma.mediaItem.findMany({
         where,
@@ -200,7 +202,7 @@ export async function listMedia(params: {
 export async function getShellData() {
     return prisma.mediaItem.findMany({
         where: HIDDEN_EXCLUSION,
-        orderBy: [{ takenAt: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ takenAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
         select: MEDIA_ITEM_SUMMARY_SELECT,
     });
 }
