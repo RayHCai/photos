@@ -25,7 +25,7 @@ export function Providers({ children }: { children: ReactNode }) {
                 <UploadProvider>
                     {children}
                     <Toaster
-                        position="top-right"
+                        position="bottom-right"
                         closeButton
                         toastOptions={{
                             style: {
