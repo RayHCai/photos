@@ -104,7 +104,8 @@ export function useImageZoom(
                 pinchBaseScale.current = scaleRef.current;
                 pinchBaseTranslate.current = { ...translateRef.current };
                 pinchBaseCenter.current = getTouchCenter(e.touches[0], e.touches[1]);
-            } else if (e.touches.length === 1 && scaleRef.current > 1.05) {
+            }
+            else if (e.touches.length === 1 && scaleRef.current > 1.05) {
                 // Pan start (only when zoomed)
                 isPanning.current = true;
                 panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -202,7 +203,8 @@ export function useImageZoom(
                             el.style.transition = '';
                             commitState(1, 0, 0);
                         }, 200);
-                    } else {
+                    }
+                    else {
                         // Zoom in to tap point
                         const rect = el.getBoundingClientRect();
                         const originX = (touch.clientX - rect.left - rect.width / 2) / 1;
@@ -217,7 +219,8 @@ export function useImageZoom(
                             commitState(DOUBLE_TAP_SCALE, clamped.x, clamped.y);
                         }, 200);
                     }
-                } else {
+                }
+                else {
                     lastTapTime.current = now;
                     lastTapX.current = touch.clientX;
                     lastTapY.current = touch.clientY;
