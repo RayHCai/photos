@@ -5,6 +5,8 @@ interface UseSwipeNavigationOptions {
     onSwipeRight?: () => void;
     onSwipeUp?: () => void;
     threshold?: number;
+    /** When true, all swipe gestures are ignored (e.g. while image is zoomed). */
+    disabled?: boolean;
 }
 
 /**
@@ -15,10 +17,12 @@ interface UseSwipeNavigationOptions {
  */
 export function useSwipeNavigation(
     trackRef: RefObject<HTMLElement | null>,
-    { onSwipeLeft, onSwipeRight, onSwipeUp, threshold = 0.25 }: UseSwipeNavigationOptions
+    { onSwipeLeft, onSwipeRight, onSwipeUp, threshold = 0.25, disabled = false }: UseSwipeNavigationOptions
 ) {
     const callbacksRef = useRef({ onSwipeLeft, onSwipeRight, onSwipeUp });
     callbacksRef.current = { onSwipeLeft, onSwipeRight, onSwipeUp };
+    const disabledRef = useRef(disabled);
+    disabledRef.current = disabled;
 
     useEffect(() => {
         const track = trackRef.current;
@@ -48,7 +52,7 @@ export function useSwipeNavigation(
         }
 
         function handleTouchStart(e: TouchEvent) {
-            if (e.touches.length !== 1 || animating) return;
+            if (e.touches.length !== 1 || animating || disabledRef.current) return;
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
             startTime = Date.now();
