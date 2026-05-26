@@ -36,6 +36,7 @@ export function useImageZoom(
     const pinchBaseScale = useRef(1);
     const pinchBaseTranslate = useRef({ x: 0, y: 0 });
     const pinchBaseCenter = useRef({ x: 0, y: 0 });
+    const pinchFocalPoint = useRef({ x: 0, y: 0 }); // focal point in untransformed element coords
     const isPinching = useRef(false);
     const isPanning = useRef(false);
     const panStart = useRef({ x: 0, y: 0 });
@@ -104,6 +105,24 @@ export function useImageZoom(
                 pinchBaseScale.current = scaleRef.current;
                 pinchBaseTranslate.current = { ...translateRef.current };
                 pinchBaseCenter.current = getTouchCenter(e.touches[0], e.touches[1]);
+
+                // Compute focal point in the element's untransformed coordinate space.
+                // Use offsetWidth/Height (unaffected by CSS transforms) to avoid drift.
+                const el = containerRef.current;
+                if (el) {
+                    const rect = el.getBoundingClientRect();
+                    const s = scaleRef.current;
+                    const t = translateRef.current;
+                    const center = pinchBaseCenter.current;
+                    // Map screen coords → untransformed element coords
+                    // rect center = element center in screen space
+                    const cx = rect.left + rect.width / 2;
+                    const cy = rect.top + rect.height / 2;
+                    pinchFocalPoint.current = {
+                        x: (center.x - cx) / s - t.x,
+                        y: (center.y - cy) / s - t.y,
+                    };
+                }
             }
             else if (e.touches.length === 1 && scaleRef.current > 1.05) {
                 // Pan start (only when zoomed)
@@ -124,17 +143,16 @@ export function useImageZoom(
                         Math.min(MAX_SCALE, pinchBaseScale.current * (dist / pinchBaseDistance.current))
                     );
 
-                    // Adjust translate so zoom is centered on the pinch midpoint
-                    const el = containerRef.current;
-                    if (!el) return;
-                    const rect = el.getBoundingClientRect();
-                    const center = getTouchCenter(e.touches[0], e.touches[1]);
-                    // Point in the element's untransformed coordinate space
-                    const originX = (center.x - rect.left - rect.width / 2) / pinchBaseScale.current;
-                    const originY = (center.y - rect.top - rect.height / 2) / pinchBaseScale.current;
-                    const scaleDelta = newScale - pinchBaseScale.current;
-                    const tx = pinchBaseTranslate.current.x - originX * (scaleDelta / newScale);
-                    const ty = pinchBaseTranslate.current.y - originY * (scaleDelta / newScale);
+                    // Keep the focal point (computed at pinch start) stationary on screen.
+                    // The transform is: screen = elementCenter + scale * (point + translate)
+                    // We want the focal point to stay at the same screen position as at pinch start.
+                    // focalScreen = s_base * (focal + t_base)  =>  focal + t_new = (s_base/s_new) * (focal + t_base)
+                    const fp = pinchFocalPoint.current;
+                    const sBase = pinchBaseScale.current;
+                    const tBase = pinchBaseTranslate.current;
+                    const ratio = sBase / newScale;
+                    const tx = ratio * (fp.x + tBase.x) - fp.x;
+                    const ty = ratio * (fp.y + tBase.y) - fp.y;
 
                     scaleRef.current = newScale;
                     translateRef.current = { x: tx, y: ty };
