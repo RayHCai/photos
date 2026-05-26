@@ -9,6 +9,7 @@ import { MediaActions } from './MediaActions';
 import { X, ChevronLeft, ChevronRight, Info, Download, Loader2 } from 'lucide-react';
 import { IconButton, getIconButtonStyles } from '@/components/ui/IconButton';
 import { useSwipeNavigation } from '@/lib/hooks/useSwipeNavigation';
+import { useImageZoom } from '@/lib/hooks/useImageZoom';
 import type { MediaType } from '@/lib/types/media';
 
 export interface UrlFns {
@@ -54,23 +55,10 @@ export function MediaLightbox({
     const loadedWebRef = useRef(new Set<string>());
     const preloadedRef = useRef(new Set<string>());
     const trackRef = useRef<HTMLDivElement>(null);
+    const zoomContainerRef = useRef<HTMLDivElement>(null);
 
     // Resolve URL helpers — custom or default
     const urls = urlFns ?? { thumbnail: thumbnailUrl, web: webUrl, original: originalUrl, download: downloadUrl };
-
-    useSwipeNavigation(trackRef, {
-        onSwipeLeft: onNext,
-        onSwipeRight: onPrev,
-        onSwipeUp: onClose,
-    });
-
-    // Reset track transform after navigation (before paint) to avoid flash
-    useLayoutEffect(() => {
-        if (trackRef.current) {
-            trackRef.current.style.transition = 'none';
-            trackRef.current.style.transform = 'translateX(-33.333%)';
-        }
-    }, [mediaId]);
 
     // Skip the API call when custom urlFns are provided (e.g. shared links)
     const useApi = !urlFns;
@@ -82,6 +70,27 @@ export function MediaLightbox({
 
     // Resolved media type: API data > prop hint > fallback
     const resolvedType = item?.type ?? mediaType ?? 'PHOTO';
+
+    const { containerStyle: zoomStyle, isZoomed, reset: resetZoom } = useImageZoom(
+        zoomContainerRef,
+        resolvedType !== 'VIDEO'
+    );
+
+    useSwipeNavigation(trackRef, {
+        onSwipeLeft: onNext,
+        onSwipeRight: onPrev,
+        onSwipeUp: onClose,
+        disabled: isZoomed,
+    });
+
+    // Reset track transform and zoom after navigation (before paint)
+    useLayoutEffect(() => {
+        if (trackRef.current) {
+            trackRef.current.style.transition = 'none';
+            trackRef.current.style.transform = 'translateX(-33.333%)';
+        }
+        resetZoom();
+    }, [mediaId, resetZoom]);
 
     // Reset loaded state when mediaId changes, unless already loaded before
     useEffect(() => {
@@ -210,7 +219,11 @@ export function MediaLightbox({
 
                     {/* Current slide */}
                     <div className="h-full flex items-center justify-center" style={{ width: '33.333%' }}>
-                        <div className="max-w-[90%] max-h-[90vh] relative">
+                        <div
+                            ref={zoomContainerRef}
+                            className="max-w-[90%] max-h-[90vh] relative"
+                            style={resolvedType !== 'VIDEO' ? zoomStyle : undefined}
+                        >
                             {resolvedType === 'VIDEO' ? (
                                 <VideoPlayer src={urls.original(mediaId)} />
                             ) : (
