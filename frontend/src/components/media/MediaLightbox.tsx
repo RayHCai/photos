@@ -77,26 +77,30 @@ export function MediaLightbox({
         resolvedType !== 'VIDEO'
     );
 
-    const copyToClipboard = useCallback(async () => {
+    const copyToClipboard = useCallback(() => {
+        if (copied) return;
         try {
-            const res = await fetch(urls.original(mediaId));
-            const blob = await res.blob();
-            const pngBlob = blob.type === 'image/png'
-                ? blob
-                : await new Promise<Blob>((resolve) => {
-                    const img = new window.Image();
-                    img.crossOrigin = 'anonymous';
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        canvas.width = img.naturalWidth;
-                        canvas.height = img.naturalHeight;
-                        canvas.getContext('2d')!.drawImage(img, 0, 0);
-                        canvas.toBlob((b) => resolve(b!), 'image/png');
-                    };
-                    img.src = URL.createObjectURL(blob);
+            // Pass a lazy promise to ClipboardItem so the browser can
+            // fetch + convert in the background without blocking the UI.
+            const pngPromise = fetch(urls.original(mediaId))
+                .then((res) => res.blob())
+                .then((blob) => {
+                    if (blob.type === 'image/png') return blob;
+                    return new Promise<Blob>((resolve) => {
+                        const img = new window.Image();
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = img.naturalWidth;
+                            canvas.height = img.naturalHeight;
+                            canvas.getContext('2d')!.drawImage(img, 0, 0);
+                            canvas.toBlob((b) => resolve(b!), 'image/png');
+                            URL.revokeObjectURL(img.src);
+                        };
+                        img.src = URL.createObjectURL(blob);
+                    });
                 });
-            await navigator.clipboard.write([
-                new ClipboardItem({ 'image/png': pngBlob }),
+            navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': pngPromise }),
             ]);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
@@ -104,7 +108,7 @@ export function MediaLightbox({
         catch {
             // Clipboard API may not be available
         }
-    }, [mediaId, urls]);
+    }, [mediaId, urls, copied]);
 
     useSwipeNavigation(trackRef, {
         onSwipeLeft: onNext,
