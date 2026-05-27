@@ -100,7 +100,8 @@ export function MediaLightbox({
             ]);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
-        } catch {
+        }
+        catch {
             // Clipboard API may not be available
         }
     }, [mediaId, urls]);
