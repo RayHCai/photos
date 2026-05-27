@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Plus, FolderOpen, Check, Loader2 } from 'lucide-react';
+import { X, Plus, FolderOpen, Check, Loader2, ExternalLink, Search } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
 import { IconButton } from '@/components/ui/IconButton';
 import { ModalOverlay } from '@/components/ui/ModalOverlay';
@@ -26,9 +26,23 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
 
     const [creatingNew, setCreatingNew] = useState(false);
     const [newName, setNewName] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
     const [addedTo, setAddedTo] = useState<string | null>(null);
     const [removedFrom, setRemovedFrom] = useState<string | null>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
+    const searchInputRef = useRef<HTMLInputElement>(null);
+
+    const filteredCollections = useMemo(() => {
+        if (!searchQuery.trim()) return collections;
+        const q = searchQuery.toLowerCase().trim();
+        return collections.filter((c) => c.name.toLowerCase().includes(q));
+    }, [collections, searchQuery]);
+
+    useEffect(() => {
+        if (open) {
+            setTimeout(() => searchInputRef.current?.focus(), 0);
+        }
+    }, [open]);
 
     useEffect(() => {
         if (creatingNew) {
@@ -40,6 +54,7 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
         if (!open) {
             setCreatingNew(false);
             setNewName('');
+            setSearchQuery('');
             setAddedTo(null);
             setRemovedFrom(null);
         }
@@ -78,7 +93,7 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
             await addItems.mutateAsync({ collectionId: collection.id, mediaItemIds });
             toast.success(`Created "${newName.trim()}" with ${pluralize(mediaItemIds.length, 'item')}`, {
                 action: {
-                    label: 'View',
+                    label: <ExternalLink className="w-3.5 h-3.5" />,
                     onClick: () => router.push(`/collections/${collection.id}`),
                 },
             });
@@ -107,6 +122,23 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
                         className="-mr-0.5"
                     />
                 </div>
+
+                {/* Search */}
+                {collections.length > 0 && (
+                    <div className="px-3 pb-1">
+                        <div className="relative">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400 pointer-events-none" />
+                            <input
+                                ref={searchInputRef}
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search collections..."
+                                className="w-full h-7 pl-7 pr-2 bg-stone-100 rounded text-xs text-stone-900 placeholder:text-stone-400 outline-none focus:ring-1 focus:ring-stone-300 transition-all"
+                            />
+                        </div>
+                    </div>
+                )}
 
                 {/* New collection row */}
                 <div className="px-2">
@@ -160,7 +192,10 @@ export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToColle
                 {/* Existing collections */}
                 {collections.length > 0 && (
                     <div className="px-2 pb-3 max-h-52 overflow-y-auto">
-                        {collections.map((c) => {
+                        {filteredCollections.length === 0 && searchQuery.trim() && (
+                            <p className="text-xs text-stone-400 text-center py-3">No collections found</p>
+                        )}
+                        {filteredCollections.map((c) => {
                             const isInCollection = memberOf.has(c.id);
                             const justAdded = addedTo === c.id;
                             const justRemoved = removedFrom === c.id;
