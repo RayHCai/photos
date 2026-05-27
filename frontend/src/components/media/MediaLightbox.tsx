@@ -6,7 +6,7 @@ import { getMediaById, downloadUrl, originalUrl, thumbnailUrl, webUrl } from '@/
 import { VideoPlayer } from './VideoPlayer';
 import { MediaDetail } from './MediaDetail';
 import { MediaActions } from './MediaActions';
-import { X, ChevronLeft, ChevronRight, Info, Download, Loader2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Info, Download, Loader2, Copy, Check } from 'lucide-react';
 import { IconButton, getIconButtonStyles } from '@/components/ui/IconButton';
 import { useSwipeNavigation } from '@/lib/hooks/useSwipeNavigation';
 import { useImageZoom } from '@/lib/hooks/useImageZoom';
@@ -52,6 +52,7 @@ export function MediaLightbox({
 }: MediaLightboxProps) {
     const [showInfo, setShowInfo] = useState(false);
     const [originalLoaded, setOriginalLoaded] = useState(false);
+    const [copied, setCopied] = useState(false);
     const loadedWebRef = useRef(new Set<string>());
     const preloadedRef = useRef(new Set<string>());
     const trackRef = useRef<HTMLDivElement>(null);
@@ -75,6 +76,34 @@ export function MediaLightbox({
         zoomContainerRef,
         resolvedType !== 'VIDEO'
     );
+
+    const copyToClipboard = useCallback(async () => {
+        try {
+            const res = await fetch(urls.original(mediaId));
+            const blob = await res.blob();
+            const pngBlob = blob.type === 'image/png'
+                ? blob
+                : await new Promise<Blob>((resolve) => {
+                    const img = new window.Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.naturalWidth;
+                        canvas.height = img.naturalHeight;
+                        canvas.getContext('2d')!.drawImage(img, 0, 0);
+                        canvas.toBlob((b) => resolve(b!), 'image/png');
+                    };
+                    img.src = URL.createObjectURL(blob);
+                });
+            await navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': pngBlob }),
+            ]);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            // Clipboard API may not be available
+        }
+    }, [mediaId, urls]);
 
     useSwipeNavigation(trackRef, {
         onSwipeLeft: onNext,
@@ -162,6 +191,15 @@ export function MediaLightbox({
                         >
                             <Download className={dlStyles.icon} />
                         </a>
+                    )}
+                    {resolvedType !== 'VIDEO' && (
+                        <IconButton
+                            icon={copied ? Check : Copy}
+                            size="sm"
+                            variant="overlay"
+                            onClick={copyToClipboard}
+                            title="Copy image to clipboard"
+                        />
                     )}
                     {showInfoPanel && (
                         <IconButton
