@@ -46,7 +46,7 @@ export async function createShareLink(
 
 export async function listShareLinks(collectionId: string) {
     return prisma.shareLink.findMany({
-        where: { collectionId },
+        where: { collectionId, isActive: true },
         orderBy: { createdAt: 'desc' },
     });
 }

@@ -49,6 +49,19 @@ body {
     color: #78716c !important;
 }
 
+[data-sonner-toast] [data-button] {
+    background: transparent !important;
+    color: #78716c !important;
+    border: none !important;
+    padding: 2px !important;
+    margin-right: 20px !important;
+    cursor: pointer;
+}
+
+[data-sonner-toast] [data-button]:hover {
+    color: #1c1917 !important;
+}
+
 /* Hide native scrollbar for custom timeline scrollbar */
 .hide-scrollbar::-webkit-scrollbar {
     display: none;
