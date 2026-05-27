@@ -117,7 +117,8 @@ export function MediaLightbox({
             const ext = blob.type.split('/')[1] || 'jpg';
             const file = new File([blob], `photo.${ext}`, { type: blob.type });
             await navigator.share({ files: [file] });
-        } catch {
+        }
+        catch {
             // Share cancelled or not supported
         }
     }, [mediaId, urls]);
