@@ -6,7 +6,7 @@ import { getMediaById, downloadUrl, originalUrl, thumbnailUrl, webUrl } from '@/
 import { VideoPlayer } from './VideoPlayer';
 import { MediaDetail } from './MediaDetail';
 import { MediaActions } from './MediaActions';
-import { X, ChevronLeft, ChevronRight, Info, Download, Loader2, Copy, Check } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Info, Download, Loader2, Copy, Check, Share2 } from 'lucide-react';
 import { IconButton, getIconButtonStyles } from '@/components/ui/IconButton';
 import { useSwipeNavigation } from '@/lib/hooks/useSwipeNavigation';
 import { useImageZoom } from '@/lib/hooks/useImageZoom';
@@ -110,6 +110,18 @@ export function MediaLightbox({
         }
     }, [mediaId, urls, copied]);
 
+    const shareFile = useCallback(async () => {
+        try {
+            const res = await fetch(urls.original(mediaId));
+            const blob = await res.blob();
+            const ext = blob.type.split('/')[1] || 'jpg';
+            const file = new File([blob], `photo.${ext}`, { type: blob.type });
+            await navigator.share({ files: [file] });
+        } catch {
+            // Share cancelled or not supported
+        }
+    }, [mediaId, urls]);
+
     useSwipeNavigation(trackRef, {
         onSwipeLeft: onNext,
         onSwipeRight: onPrev,
@@ -197,6 +209,13 @@ export function MediaLightbox({
                             <Download className={dlStyles.icon} />
                         </a>
                     )}
+                    <IconButton
+                        icon={Share2}
+                        size="sm"
+                        variant="overlay"
+                        onClick={shareFile}
+                        title="Share"
+                    />
                     {resolvedType !== 'VIDEO' && (
                         <IconButton
                             icon={copied ? Check : Copy}
