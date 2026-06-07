@@ -109,6 +109,7 @@ export default function CollectionDetailPage() {
                     <SelectionToolbar
                         selection={selection}
                         showAddToCollection
+                        showShare
                         onRemoveFromCollection={handleRemoveItems}
                         removeFromCollectionLoading={removeItems.isPending}
                     />

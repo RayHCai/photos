@@ -8,6 +8,9 @@ export const rateLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     skip: async (req) => {
+        // Skip rate limiting for public share routes (they have their own limiter)
+        if (req.path.startsWith('/public/s/')) return true;
+
         const token =
             req.headers.authorization?.replace('Bearer ', '') ||
             req.cookies?.session_token;
@@ -19,6 +22,18 @@ export const rateLimiter = rateLimit({
     store: new RedisStore({
         sendCommand: (...args: string[]) =>
             redisConnection.call(args[0], ...args.slice(1)) as any,
+    }),
+});
+
+export const publicShareRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 500,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: new RedisStore({
+        sendCommand: (...args: string[]) =>
+            redisConnection.call(args[0], ...args.slice(1)) as any,
+        prefix: 'rl:public-share:',
     }),
 });
 

@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Trash2, FolderPlus, FolderMinus, Download, RotateCcw, EyeOff } from 'lucide-react';
+import { X, Trash2, FolderPlus, FolderMinus, Download, RotateCcw, EyeOff, Share2 } from 'lucide-react';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddToCollectionModal } from '@/components/collections/AddToCollectionModal';
+import { ShareSelectedModal } from '@/components/gallery/ShareSelectedModal';
 import { downloadUrl } from '@/lib/api/media';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 
@@ -16,6 +17,8 @@ interface SelectionToolbarProps {
     deleteConfirmMessage?: string;
     /** Show "Add to collection" button (media mode) */
     showAddToCollection?: boolean;
+    /** Show "Share" button for mass sharing selected items */
+    showShare?: boolean;
     /** Show "Download" button (media mode) */
     showDownload?: boolean;
     /** Show "Retry" button for reprocessing failed items */
@@ -41,6 +44,7 @@ export function SelectionToolbar({
     onDelete,
     deleteConfirmMessage,
     showAddToCollection,
+    showShare,
     showDownload,
     showRetry,
     onRetry,
@@ -54,6 +58,7 @@ export function SelectionToolbar({
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [removeFromCollectionOpen, setRemoveFromCollectionOpen] = useState(false);
     const [collectionModalOpen, setCollectionModalOpen] = useState(false);
+    const [shareModalOpen, setShareModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isRemoving, setIsRemoving] = useState(false);
 
@@ -132,6 +137,15 @@ export function SelectionToolbar({
                         title="Add to collection"
                     />
                 )}
+                {showShare && (
+                    <IconButton
+                        icon={Share2}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setShareModalOpen(true)}
+                        title="Share selected"
+                    />
+                )}
                 {showHide && onHide && (
                     <IconButton
                         icon={EyeOff}
@@ -196,6 +210,17 @@ export function SelectionToolbar({
                     open={collectionModalOpen}
                     onClose={() => {
                         setCollectionModalOpen(false);
+                        selection.clearSelection();
+                    }}
+                    mediaItemIds={Array.from(selection.selectedIds)}
+                />
+            )}
+
+            {showShare && (
+                <ShareSelectedModal
+                    open={shareModalOpen}
+                    onClose={() => {
+                        setShareModalOpen(false);
                         selection.clearSelection();
                     }}
                     mediaItemIds={Array.from(selection.selectedIds)}
