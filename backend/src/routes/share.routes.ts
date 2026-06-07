@@ -3,6 +3,7 @@ import { z } from 'zod';
 import * as shareController from '../controllers/share.controller.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
+import { publicShareRateLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
 
@@ -36,16 +37,18 @@ router.delete(
     shareController.revokeLink
 );
 
-// Public share routes (no auth)
-router.get('/public/s/:slug', shareController.viewShared);
+// Public share routes (no auth, dedicated higher rate limit)
+router.get('/public/s/:slug', publicShareRateLimiter, shareController.viewShared);
 
 router.get(
     '/public/s/:slug/media/:mediaId/thumbnail',
+    publicShareRateLimiter,
     shareController.sharedThumbnail
 );
 
 router.get(
     '/public/s/:slug/media/:mediaId/original',
+    publicShareRateLimiter,
     shareController.sharedOriginal
 );
 

@@ -107,6 +107,7 @@ export default function GalleryPage() {
                     selection={selection}
                     onDelete={handleBatchDelete}
                     showAddToCollection
+                    showShare
                     showDownload
                     showRetry
                     showHide
