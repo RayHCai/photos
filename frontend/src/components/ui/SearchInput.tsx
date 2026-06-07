@@ -13,16 +13,25 @@ export function SearchInput({ value, onChange, placeholder = 'Search' }: SearchI
     const [expanded, setExpanded] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
+    const handleClose = () => {
+        setExpanded(false);
+        onChange('');
+    };
+
     useEffect(() => {
         if (expanded && inputRef.current) {
             inputRef.current.focus();
         }
     }, [expanded]);
 
-    const handleClose = () => {
-        setExpanded(false);
-        onChange('');
-    };
+    useEffect(() => {
+        if (!expanded) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') handleClose();
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [expanded]);
 
     return (
         <>
@@ -38,10 +47,6 @@ export function SearchInput({ value, onChange, placeholder = 'Search' }: SearchI
 
             {expanded && (
                 <>
-                    <div
-                        className="sm:hidden fixed inset-0 z-40"
-                        onClick={handleClose}
-                    />
                     <div className="sm:hidden fixed inset-x-0 top-0 z-50 flex items-center gap-2 px-3 py-2 bg-white/90 backdrop-blur-lg shadow-sm">
                         <Search className="w-4 h-4 text-stone-400 flex-shrink-0" />
                         <input
