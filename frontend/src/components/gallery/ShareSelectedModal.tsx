@@ -38,9 +38,11 @@ export function ShareSelectedModal({ open, onClose, mediaItemIds }: ShareSelecte
             setShareSlug(link.slug);
             setShareLinkId(link.id);
             queryClient.invalidateQueries({ queryKey: ['collections'] });
-        } catch {
+        }
+        catch {
             setError('Failed to create share link');
-        } finally {
+        }
+        finally {
             setLoading(false);
         }
     }, [mediaItemIds, queryClient]);
@@ -70,7 +72,8 @@ export function ShareSelectedModal({ open, onClose, mediaItemIds }: ShareSelecte
                 queryClient.invalidateQueries({ queryKey: ['share-links', collectionId] });
             }
             onClose();
-        } catch {
+        }
+        catch {
             toast.error('Failed to revoke link');
         }
     };
