@@ -98,7 +98,8 @@ export function SelectionToolbar({
                 files.push(new File([blob], `photo-${id}.${ext}`, { type: blob.type }));
             }
             await navigator.share({ files });
-        } catch {
+        }
+        catch {
             // Share cancelled or not supported
         }
     }, [selection.selectedIds]);
