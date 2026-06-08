@@ -5,8 +5,7 @@ import { X, Trash2, FolderPlus, FolderMinus, Download, RotateCcw, EyeOff, Share2
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddToCollectionModal } from '@/components/collections/AddToCollectionModal';
-import { ShareSelectedModal } from '@/components/gallery/ShareSelectedModal';
-import { downloadUrl } from '@/lib/api/media';
+import { downloadUrl, originalUrl } from '@/lib/api/media';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 
 interface SelectionToolbarProps {
@@ -58,7 +57,6 @@ export function SelectionToolbar({
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [removeFromCollectionOpen, setRemoveFromCollectionOpen] = useState(false);
     const [collectionModalOpen, setCollectionModalOpen] = useState(false);
-    const [shareModalOpen, setShareModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isRemoving, setIsRemoving] = useState(false);
 
@@ -89,6 +87,21 @@ export function SelectionToolbar({
     };
 
     const getDownloadUrl = downloadUrlFn ?? downloadUrl;
+
+    const handleShare = useCallback(async () => {
+        try {
+            const files: File[] = [];
+            for (const id of selection.selectedIds) {
+                const res = await fetch(originalUrl(id));
+                const blob = await res.blob();
+                const ext = blob.type.split('/')[1] || 'jpg';
+                files.push(new File([blob], `photo-${id}.${ext}`, { type: blob.type }));
+            }
+            await navigator.share({ files });
+        } catch {
+            // Share cancelled or not supported
+        }
+    }, [selection.selectedIds]);
 
     const handleDownload = useCallback(() => {
         for (const id of selection.selectedIds) {
@@ -142,7 +155,7 @@ export function SelectionToolbar({
                         icon={Share2}
                         size="sm"
                         variant="ghost"
-                        onClick={() => setShareModalOpen(true)}
+                        onClick={handleShare}
                         title="Share selected"
                     />
                 )}
@@ -216,16 +229,6 @@ export function SelectionToolbar({
                 />
             )}
 
-            {showShare && (
-                <ShareSelectedModal
-                    open={shareModalOpen}
-                    onClose={() => {
-                        setShareModalOpen(false);
-                        selection.clearSelection();
-                    }}
-                    mediaItemIds={Array.from(selection.selectedIds)}
-                />
-            )}
         </>
     );
 }
