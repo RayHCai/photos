@@ -11,6 +11,9 @@ export const rateLimiter = rateLimit({
         // Skip rate limiting for public share routes (they have their own limiter)
         if (req.path.startsWith('/public/s/')) return true;
 
+        // Skip rate limiting for auth status checks (protected by authMiddleware)
+        if (req.path === '/auth/status') return true;
+
         const token =
             req.headers.authorization?.replace('Bearer ', '') ||
             req.cookies?.session_token;
