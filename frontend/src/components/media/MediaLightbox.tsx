@@ -202,13 +202,28 @@ export function MediaLightbox({
                     {showDelete ? (
                         <MediaActions mediaId={mediaId} onDelete={onClose} />
                     ) : (
-                        <a
-                            href={urls.download(mediaId)}
+                        <button
                             className={dlStyles.button}
                             title="Download"
+                            onClick={async () => {
+                                const res = await fetch(urls.download(mediaId));
+                                const blob = await res.blob();
+                                const disposition = res.headers.get('Content-Disposition');
+                                const filenameMatch = disposition?.match(/filename="(.+?)"/);
+                                const ext = blob.type.split('/')[1] || 'jpg';
+                                const filename = filenameMatch?.[1] ?? `photo-${mediaId}.${ext}`;
+                                const blobUrl = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = blobUrl;
+                                a.download = filename;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(blobUrl);
+                            }}
                         >
                             <Download className={dlStyles.icon} />
-                        </a>
+                        </button>
                     )}
                     <IconButton
                         icon={Share2}
