@@ -104,14 +104,22 @@ export function SelectionToolbar({
         }
     }, [selection.selectedIds]);
 
-    const handleDownload = useCallback(() => {
+    const handleDownload = useCallback(async () => {
         for (const id of selection.selectedIds) {
+            const res = await fetch(getDownloadUrl(id));
+            const blob = await res.blob();
+            const disposition = res.headers.get('Content-Disposition');
+            const filenameMatch = disposition?.match(/filename="(.+?)"/);
+            const ext = blob.type.split('/')[1] || 'jpg';
+            const filename = filenameMatch?.[1] ?? `photo-${id}.${ext}`;
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = getDownloadUrl(id);
-            a.download = '';
+            a.href = url;
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
     }, [selection.selectedIds, getDownloadUrl]);
 
