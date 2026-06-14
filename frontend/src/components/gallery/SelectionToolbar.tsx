@@ -6,6 +6,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddToCollectionModal } from '@/components/collections/AddToCollectionModal';
 import { downloadUrl, originalUrl } from '@/lib/api/media';
+import { useDownload } from '@/lib/hooks/useDownload';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 
 interface SelectionToolbarProps {
@@ -54,6 +55,7 @@ export function SelectionToolbar({
     onRemoveFromCollection,
     removeFromCollectionLoading,
 }: SelectionToolbarProps) {
+    const { triggerDownload } = useDownload();
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [removeFromCollectionOpen, setRemoveFromCollectionOpen] = useState(false);
     const [collectionModalOpen, setCollectionModalOpen] = useState(false);
@@ -104,24 +106,14 @@ export function SelectionToolbar({
         }
     }, [selection.selectedIds]);
 
-    const handleDownload = useCallback(async () => {
-        for (const id of selection.selectedIds) {
-            const res = await fetch(getDownloadUrl(id));
-            const blob = await res.blob();
-            const disposition = res.headers.get('Content-Disposition');
-            const filenameMatch = disposition?.match(/filename="(.+?)"/);
-            const ext = blob.type.split('/')[1] || 'jpg';
-            const filename = filenameMatch?.[1] ?? `photo-${id}.${ext}`;
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
-    }, [selection.selectedIds, getDownloadUrl]);
+    const handleDownload = useCallback(() => {
+        triggerDownload(
+            Array.from(selection.selectedIds).map((id) => ({
+                id,
+                url: getDownloadUrl(id),
+            }))
+        );
+    }, [selection.selectedIds, getDownloadUrl, triggerDownload]);
 
     if (!selection.isSelecting) return null;
 
