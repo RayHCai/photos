@@ -10,6 +10,7 @@ import { X, ChevronLeft, ChevronRight, Info, Download, Loader2, Copy, Check, Sha
 import { IconButton, getIconButtonStyles } from '@/components/ui/IconButton';
 import { useSwipeNavigation } from '@/lib/hooks/useSwipeNavigation';
 import { useImageZoom } from '@/lib/hooks/useImageZoom';
+import { useDownload } from '@/lib/hooks/useDownload';
 import type { MediaType } from '@/lib/types/media';
 
 export interface UrlFns {
@@ -50,6 +51,7 @@ export function MediaLightbox({
     mediaType,
     urlFns,
 }: MediaLightboxProps) {
+    const { triggerDownload } = useDownload();
     const [showInfo, setShowInfo] = useState(false);
     const [originalLoaded, setOriginalLoaded] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -205,22 +207,7 @@ export function MediaLightbox({
                         <button
                             className={dlStyles.button}
                             title="Download"
-                            onClick={async () => {
-                                const res = await fetch(urls.download(mediaId));
-                                const blob = await res.blob();
-                                const disposition = res.headers.get('Content-Disposition');
-                                const filenameMatch = disposition?.match(/filename="(.+?)"/);
-                                const ext = blob.type.split('/')[1] || 'jpg';
-                                const filename = filenameMatch?.[1] ?? `photo-${mediaId}.${ext}`;
-                                const blobUrl = URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = blobUrl;
-                                a.download = filename;
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                                URL.revokeObjectURL(blobUrl);
-                            }}
+                            onClick={() => triggerDownload([{ id: mediaId, url: urls.download(mediaId) }])}
                         >
                             <Download className={dlStyles.icon} />
                         </button>

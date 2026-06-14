@@ -110,6 +110,7 @@ export default function CollectionDetailPage() {
                         selection={selection}
                         showAddToCollection
                         showShare
+                        showDownload
                         onRemoveFromCollection={handleRemoveItems}
                         removeFromCollectionLoading={removeItems.isPending}
                     />

@@ -7,6 +7,7 @@ import { Download, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton, getIconButtonStyles } from '@/components/ui/IconButton';
+import { useDownload } from '@/lib/hooks/useDownload';
 
 interface MediaActionsProps {
     mediaId: string;
@@ -17,6 +18,7 @@ const downloadStyles = getIconButtonStyles({ size: 'sm', variant: 'overlay' });
 
 export function MediaActions({ mediaId, onDelete }: MediaActionsProps) {
     const queryClient = useQueryClient();
+    const { triggerDownload } = useDownload();
     const [confirmOpen, setConfirmOpen] = useState(false);
 
     const deleteMutation = useMutation({
@@ -34,13 +36,14 @@ export function MediaActions({ mediaId, onDelete }: MediaActionsProps) {
     return (
         <>
             <div className="flex items-center gap-0.5">
-                <a
-                    href={downloadUrl(mediaId)}
+                <button
+                    type="button"
+                    onClick={() => triggerDownload([{ id: mediaId, url: downloadUrl(mediaId) }])}
                     className={downloadStyles.button}
                     title="Download"
                 >
                     <Download className={downloadStyles.icon} />
-                </a>
+                </button>
                 <IconButton
                     icon={Trash2}
                     size="sm"

@@ -54,7 +54,9 @@ resource "aws_s3_bucket_cors_configuration" "photos" {
     allowed_headers = ["*"]
     allowed_methods = ["GET", "PUT"]
     allowed_origins = var.cors_origins
-    expose_headers  = ["ETag", "Content-Length"]
+    # Content-Length powers download progress; Content-Disposition lets the
+    # browser recover the original filename when downloading via fetch+blob.
+    expose_headers  = ["ETag", "Content-Length", "Content-Disposition"]
     max_age_seconds = 3600
   }
 }
