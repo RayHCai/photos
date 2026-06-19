@@ -25,7 +25,7 @@ export function CollectionItemPicker({
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const lastSelectedIdRef = useRef<string | null>(null);
     const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
-        useMediaList();
+        useMediaList({ enabled: open });
 
     const items = useMemo(
         () =>

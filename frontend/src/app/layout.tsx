@@ -26,11 +26,20 @@ export default function RootLayout({
 }: {
     children: React.ReactNode;
 }) {
+    const cdnBase = process.env.NEXT_PUBLIC_CDN_BASE_URL;
     return (
         <html lang="en">
             <head>
                 <link rel="icon" href="/icon.svg" type="image/svg+xml" />
                 <link rel="apple-touch-icon" href="/icon.svg" />
+                {/* Warm the connection to the image CDN so the first thumbnail
+                    skips DNS + TCP + TLS. No-op until the CDN base is configured. */}
+                {cdnBase && (
+                    <>
+                        <link rel="preconnect" href={cdnBase} crossOrigin="anonymous" />
+                        <link rel="dns-prefetch" href={cdnBase} />
+                    </>
+                )}
             </head>
             <body className="bg-stone-50 text-stone-900">
                 <Providers>{children}</Providers>

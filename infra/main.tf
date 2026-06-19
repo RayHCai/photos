@@ -85,6 +85,21 @@ resource "aws_cloudfront_origin_access_control" "s3" {
   signing_protocol                  = "sigv4"
 }
 
+# Inject long-lived immutable caching on every CDN response. Object keys are
+# content-addressed UUIDs, so the bytes behind a key never change. override=true
+# so it applies even to objects uploaded without a Cache-Control header.
+resource "aws_cloudfront_response_headers_policy" "immutable_images" {
+  name = "photos-platform-immutable-images"
+
+  custom_headers_config {
+    items {
+      header   = "Cache-Control"
+      value    = "public, max-age=31536000, immutable"
+      override = true
+    }
+  }
+}
+
 resource "aws_cloudfront_cache_policy" "thumbnails" {
   name        = "photos-platform-thumbnails"
   default_ttl = 86400    # 1 day
@@ -118,12 +133,13 @@ resource "aws_cloudfront_distribution" "thumbnails" {
   }
 
   default_cache_behavior {
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "s3-photos-platform"
-    viewer_protocol_policy = "redirect-to-https"
-    compress               = true
-    cache_policy_id        = aws_cloudfront_cache_policy.thumbnails.id
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    target_origin_id           = "s3-photos-platform"
+    viewer_protocol_policy     = "redirect-to-https"
+    compress                   = true
+    cache_policy_id            = aws_cloudfront_cache_policy.thumbnails.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.immutable_images.id
   }
 
   # Block access to originals/ via CloudFront

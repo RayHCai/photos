@@ -7,7 +7,7 @@ import * as s3Service from './s3.service.js';
 import * as queueService from './queue.service.js';
 import { logger } from '../utils/logger.js';
 import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
-import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
+import { MEDIA_ITEM_SUMMARY_SELECT, MEDIA_ITEM_SHELL_SELECT } from '../utils/select.js';
 import { HIDDEN_EXCLUSION, HIDDEN_NOT_EXISTS } from '../utils/filters.js';
 import { collectS3Keys } from '../utils/s3.js';
 
@@ -203,7 +203,7 @@ export async function getShellData() {
     return prisma.mediaItem.findMany({
         where: HIDDEN_EXCLUSION,
         orderBy: [{ takenAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
-        select: MEDIA_ITEM_SUMMARY_SELECT,
+        select: MEDIA_ITEM_SHELL_SELECT,
     });
 }
 
@@ -321,11 +321,11 @@ export async function getWebUrl(id: string) {
     const item = await findOrThrow(
         () => prisma.mediaItem.findUnique({
             where: { id },
-            select: { webKey: true, originalKey: true, streamingKey: true, type: true },
+            select: { webKey: true, thumbnailKey: true, originalKey: true, streamingKey: true, type: true },
         }),
         'Media item'
     );
-    // For videos, use streaming key; for photos, prefer web key, fall back to original
+    // For videos, use streaming key; for photos, prefer web key
     if (item.type === 'VIDEO') {
         const key = item.streamingKey ?? item.originalKey;
         return s3Service.getPresignedDownloadUrl(key);
@@ -334,7 +334,15 @@ export async function getWebUrl(id: string) {
     if (item.webKey) {
         return s3Service.getMediaUrl(item.webKey);
     }
-    return s3Service.getPresignedDownloadUrl(item.originalKey);
+    // No web variant yet. NEVER serve the raw original to a browser <img>: a
+    // HEIC/HEIF/TIFF original is undecodable in Chrome/Firefox (permanent broken
+    // image), and a large JPG/PNG original is a multi-MB download for a
+    // fit-to-screen view. Fall back to the thumbnail — always a browser-safe
+    // WebP — which self-heals once the web variant is generated.
+    if (item.thumbnailKey) {
+        return s3Service.getMediaUrl(item.thumbnailKey);
+    }
+    throw new AppError(404, 'Web version not yet available');
 }
 
 export async function getDownloadUrl(id: string) {

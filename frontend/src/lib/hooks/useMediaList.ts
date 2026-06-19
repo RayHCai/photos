@@ -7,6 +7,8 @@ import type { MediaType } from '../types/media';
 export function useMediaList(params?: {
     type?: MediaType;
     sort?: 'date_asc' | 'date_desc';
+    /** Gate the query — e.g. only fetch while the picker dialog is open. */
+    enabled?: boolean;
 }) {
     return useInfiniteQuery({
         queryKey: ['media', params?.type, params?.sort],
@@ -20,6 +22,6 @@ export function useMediaList(params?: {
         getNextPageParam: (lastPage) =>
             lastPage.hasMore ? lastPage.nextCursor : undefined,
         initialPageParam: undefined as string | undefined,
-        refetchInterval: 10_000,
+        enabled: params?.enabled ?? true,
     });
 }
