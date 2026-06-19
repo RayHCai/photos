@@ -39,6 +39,10 @@ export interface MediaLightboxProps {
 
 const dlStyles = getIconButtonStyles({ size: 'sm', variant: 'overlay' });
 
+/** Formats the browser can decode in an <img>. HEIC/HEIF/TIFF/RAW originals
+ *  cannot, so for those we keep the web variant rather than the raw original. */
+const BROWSER_SAFE_IMAGE = /^image\/(jpeg|png|webp|gif|avif)$/i;
+
 export function MediaLightbox({
     mediaId,
     onClose,
@@ -53,7 +57,13 @@ export function MediaLightbox({
 }: MediaLightboxProps) {
     const { triggerDownload } = useDownload();
     const [showInfo, setShowInfo] = useState(false);
-    const [originalLoaded, setOriginalLoaded] = useState(false);
+    // Tracks the WEB (2000px) image load — the first sharp paint.
+    const [webLoaded, setWebLoaded] = useState(false);
+    // Tracks the full-resolution ORIGINAL load (Layer 3, lazy on zoom).
+    const [fullResLoaded, setFullResLoaded] = useState(false);
+    // True once the user has zoomed on this item — gates the detail fetch
+    // (we need mimeType for the original layer) and the original layer itself.
+    const [zoomActivated, setZoomActivated] = useState(false);
     const [copied, setCopied] = useState(false);
     const loadedWebRef = useRef(new Set<string>());
     const preloadedRef = useRef(new Set<string>());
@@ -63,12 +73,18 @@ export function MediaLightbox({
     // Resolve URL helpers — custom or default
     const urls = urlFns ?? { thumbnail: thumbnailUrl, web: webUrl, original: originalUrl, download: downloadUrl };
 
-    // Skip the API call when custom urlFns are provided (e.g. shared links)
+    // Skip the API call when custom urlFns are provided (e.g. shared links).
+    // Otherwise defer it: the lightbox render only needs the media type, which
+    // the `mediaType` prop already supplies for the main gallery. Fetch the full
+    // record (EXIF + faces join) lazily — only when the info panel opens, the
+    // user zooms (we need mimeType for the original layer), or no type hint was
+    // given. The info panel's MediaDetail shares this query key, so opening it
+    // reuses the same fetch.
     const useApi = !urlFns;
     const { data: item } = useQuery({
         queryKey: ['media', mediaId],
         queryFn: () => getMediaById(mediaId),
-        enabled: useApi,
+        enabled: useApi && (showInfo || zoomActivated || !mediaType),
     });
 
     // Resolved media type: API data > prop hint > fallback
@@ -78,6 +94,23 @@ export function MediaLightbox({
         zoomContainerRef,
         resolvedType !== 'VIDEO'
     );
+
+    // Resolution ladder (Layer 3): show the full-res original only when zoomed,
+    // and only for formats the browser can decode in an <img>.
+    const canShowOriginal =
+        resolvedType !== 'VIDEO' && !!item && BROWSER_SAFE_IMAGE.test(item.mimeType);
+    const showOriginal = isZoomed && canShowOriginal;
+    const originalVisible = showOriginal && fullResLoaded;
+
+    // Activate the detail fetch + original layer the first time the user zooms.
+    useEffect(() => {
+        if (isZoomed) setZoomActivated(true);
+    }, [isZoomed]);
+
+    // Drop the full-res layer when zooming back out so the web variant shows.
+    useEffect(() => {
+        if (!isZoomed) setFullResLoaded(false);
+    }, [isZoomed]);
 
     const copyToClipboard = useCallback(() => {
         if (copied) return;
@@ -141,12 +174,16 @@ export function MediaLightbox({
         resetZoom();
     }, [mediaId, resetZoom]);
 
-    // Reset loaded state when mediaId changes, unless already loaded before
+    // Reset loaded state when mediaId changes, unless the web image was already
+    // loaded before. The original layer always re-arms (loads again on zoom).
     useEffect(() => {
-        setOriginalLoaded(loadedWebRef.current.has(mediaId));
+        setWebLoaded(loadedWebRef.current.has(mediaId));
+        setFullResLoaded(false);
+        setZoomActivated(false);
     }, [mediaId]);
 
-    // Preload adjacent images
+    // Preload adjacent images at low priority so they don't compete with the
+    // current slide's web image.
     useEffect(() => {
         const idsToPreload = [prevMediaId, nextMediaId].filter(
             (id): id is string => !!id && !preloadedRef.current.has(id)
@@ -154,6 +191,7 @@ export function MediaLightbox({
         for (const id of idsToPreload) {
             preloadedRef.current.add(id);
             const img = new Image();
+            img.setAttribute('fetchpriority', 'low');
             img.src = urls.web(id);
         }
     }, [prevMediaId, nextMediaId, urls]);
@@ -276,6 +314,8 @@ export function MediaLightbox({
                             <img
                                 src={urls.web(prevMediaId)}
                                 alt=""
+                                fetchPriority="low"
+                                decoding="async"
                                 className="max-w-[90%] max-h-[90vh] object-contain"
                                 draggable={false}
                             />
@@ -290,33 +330,50 @@ export function MediaLightbox({
                             style={resolvedType !== 'VIDEO' ? zoomStyle : undefined}
                         >
                             {resolvedType === 'VIDEO' ? (
-                                <VideoPlayer src={urls.original(mediaId)} />
+                                <VideoPlayer src={urls.original(mediaId)} poster={urls.thumbnail(mediaId)} />
                             ) : (
                                 <>
-                                    {/* Thumbnail placeholder — shown instantly */}
+                                    {/* Layer 1 — thumbnail placeholder, shown instantly */}
                                     <img
                                         src={urls.thumbnail(mediaId)}
                                         alt=""
+                                        decoding="async"
                                         className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
-                                            originalLoaded ? 'opacity-0 absolute inset-0' : 'opacity-100'
+                                            webLoaded || originalVisible ? 'opacity-0 absolute inset-0' : 'opacity-100'
                                         }`}
                                         draggable={false}
                                     />
-                                    {/* Web-optimized image — fades in on top */}
+                                    {/* Layer 2 — web-optimized image, first sharp paint */}
                                     <img
                                         src={urls.web(mediaId)}
-                                        alt={item?.fileName ?? ''}
+                                        alt={item?.fileName ?? 'Photo'}
+                                        fetchPriority="high"
+                                        decoding="async"
                                         className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
-                                            originalLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0'
+                                            webLoaded && !originalVisible ? 'opacity-100' : 'opacity-0 absolute inset-0'
                                         }`}
                                         draggable={false}
                                         onLoad={() => {
                                             loadedWebRef.current.add(mediaId);
-                                            setOriginalLoaded(true);
+                                            setWebLoaded(true);
                                         }}
                                     />
-                                    {/* Loading spinner */}
-                                    {!originalLoaded && (
+                                    {/* Layer 3 — full-resolution original, loaded lazily on zoom */}
+                                    {showOriginal && (
+                                        <img
+                                            src={urls.original(mediaId)}
+                                            alt=""
+                                            fetchPriority="high"
+                                            decoding="async"
+                                            className={`max-w-full max-h-[90vh] object-contain transition-opacity duration-200 ${
+                                                fullResLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0'
+                                            }`}
+                                            draggable={false}
+                                            onLoad={() => setFullResLoaded(true)}
+                                        />
+                                    )}
+                                    {/* Loading spinner until the first sharp paint */}
+                                    {!webLoaded && (
                                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                                             <Loader2 className="w-8 h-8 text-white/50 animate-spin" />
                                         </div>
@@ -332,6 +389,8 @@ export function MediaLightbox({
                             <img
                                 src={urls.web(nextMediaId)}
                                 alt=""
+                                fetchPriority="low"
+                                decoding="async"
                                 className="max-w-[90%] max-h-[90vh] object-contain"
                                 draggable={false}
                             />

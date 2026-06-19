@@ -42,6 +42,21 @@ export function useTimelineScrollbar(
     const isDraggingRef = useRef(false);
     const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Drag throttling: latest fraction + pending frame, separate from rafRef so
+    // drag and scroll rAF callbacks never clobber each other.
+    const dragRafRef = useRef<number | null>(null);
+    const dragFractionRef = useRef(0);
+    // Last label we committed via setActiveLabel — lets us skip redundant
+    // setState when the day label is unchanged between frames.
+    const lastLabelRef = useRef<string | null>(null);
+
+    // Single label setter shared by the scroll + drag paths so lastLabelRef
+    // stays in sync with the rendered label.
+    const commitLabel = useCallback((next: string | null) => {
+        if (next === lastLabelRef.current) return;
+        lastLabelRef.current = next;
+        setActiveLabel(next);
+    }, []);
 
     const markers = useMemo(
         () => buildTimelineMarkers(timeline ?? []),
@@ -109,7 +124,7 @@ export function useTimelineScrollbar(
 
             const currentDate = findCurrentDateBinary(dateIndex, container.scrollTop);
             if (currentDate) {
-                setActiveLabel(formatDate(currentDate));
+                commitLabel(formatDate(currentDate));
             }
         };
 
@@ -134,7 +149,7 @@ export function useTimelineScrollbar(
             if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
             if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
         };
-    }, [containerRef, markers, dateIndex]);
+    }, [containerRef, markers, dateIndex, commitLabel]);
 
     // Hover detection
     useEffect(() => {
@@ -181,8 +196,10 @@ export function useTimelineScrollbar(
         };
     }, [containerRef]);
 
-    // Scroll to a target fraction — direct mapping, instant jump
-    const scrollToTimelineFraction = useCallback((fraction: number) => {
+    // Apply a target fraction to the scroll container — writes scrollTop and
+    // updates the thumb + day label. Called synchronously on pointer-down and
+    // at most once per frame during drag (see scheduleDragFrame).
+    const applyFraction = useCallback((fraction: number) => {
         const container = containerRef.current;
         if (!container) return;
 
@@ -194,14 +211,27 @@ export function useTimelineScrollbar(
 
         // Show day-level label during drag
         const currentDate = findCurrentDateBinary(dateIndex, container.scrollTop);
-        if (currentDate) {
-            setActiveLabel(formatDate(currentDate));
-        }
-        else {
-            const marker = findMarkerAtFraction(correctedMarkers, fraction);
-            setActiveLabel(marker?.label ?? null);
-        }
-    }, [containerRef, correctedMarkers, dateIndex]);
+        const nextLabel = currentDate
+            ? formatDate(currentDate)
+            : (findMarkerAtFraction(correctedMarkers, fraction)?.label ?? null);
+        commitLabel(nextLabel);
+    }, [containerRef, correctedMarkers, dateIndex, commitLabel]);
+
+    // rAF-throttle drag updates: pointermove fires far more often than the
+    // display refreshes, so coalesce to at most one scrollTop write per frame.
+    const scheduleDragFrame = useCallback((fraction: number) => {
+        dragFractionRef.current = fraction;
+        if (dragRafRef.current !== null) return;
+        dragRafRef.current = requestAnimationFrame(() => {
+            dragRafRef.current = null;
+            applyFraction(dragFractionRef.current);
+        });
+    }, [applyFraction]);
+
+    // Cancel any pending drag frame on unmount
+    useEffect(() => () => {
+        if (dragRafRef.current !== null) cancelAnimationFrame(dragRafRef.current);
+    }, []);
 
     // Drag handling
     const onTrackPointerDown = useCallback((e: React.PointerEvent) => {
@@ -216,25 +246,33 @@ export function useTimelineScrollbar(
 
         const trackRect = track.getBoundingClientRect();
         const fraction = Math.max(0, Math.min(1, (e.clientY - trackRect.top) / trackRect.height));
-        scrollToTimelineFraction(fraction);
+        applyFraction(fraction); // immediate feedback on the initial jump
 
         const handlePointerMove = (ev: PointerEvent) => {
             if (!isDraggingRef.current) return;
             const rect = track.getBoundingClientRect();
             const f = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
-            scrollToTimelineFraction(f);
+            scheduleDragFrame(f);
         };
 
         const handlePointerUp = () => {
             isDraggingRef.current = false;
             setIsDragging(false);
+            if (dragRafRef.current !== null) {
+                // A frame was pending with the latest fraction not yet applied;
+                // commit it once so the resting position matches the release
+                // point (pointerup can win the race against the queued rAF).
+                cancelAnimationFrame(dragRafRef.current);
+                dragRafRef.current = null;
+                applyFraction(dragFractionRef.current);
+            }
             document.removeEventListener('pointermove', handlePointerMove);
             document.removeEventListener('pointerup', handlePointerUp);
         };
 
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
-    }, [scrollToTimelineFraction]);
+    }, [applyFraction, scheduleDragFrame]);
 
     const isVisible = (isHovering || isDragging || isScrolling) && canShow && markers.length > 0;
 

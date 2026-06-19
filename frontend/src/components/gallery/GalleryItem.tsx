@@ -1,26 +1,13 @@
 'use client';
 
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
-import { decode } from 'blurhash';
+import { memo, useMemo } from 'react';
 import { PlayCircle, Star } from 'lucide-react';
-import { thumbnailUrl } from '@/lib/api/media';
+import { thumbnailUrlFromKey } from '@/lib/api/media';
+import { blurhashToDataUrl } from '@/lib/utils/blurhashCache';
 import { formatDuration } from '@/lib/utils/format';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { useSelectableItem } from '@/lib/hooks/useSelectableItem';
 import type { MediaShellItem } from '@/lib/types/media';
-
-function blurhashToDataUrl(hash: string, width = 32, height = 32): string | null {
-    if (typeof document === 'undefined') return null;
-    const pixels = decode(hash, width, height);
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d')!;
-    const imageData = ctx.createImageData(width, height);
-    imageData.data.set(pixels);
-    ctx.putImageData(imageData, 0, 0);
-    return canvas.toDataURL();
-}
 
 interface GalleryItemProps {
     item: MediaShellItem;
@@ -53,25 +40,10 @@ export const GalleryItem = memo(function GalleryItem({
         onClick: item.processingStatus === 'COMPLETED' ? onClick : undefined,
     });
 
-    const loadedRef = useRef(false);
-    const [loaded, setLoaded] = useState(false);
-
-    const handleLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
-        if (loadedRef.current) return;
-        loadedRef.current = true;
-        const img = e.currentTarget;
-        img.decode().then(() => setLoaded(true)).catch(() => setLoaded(true));
-    }, []);
-
-    const blurDataUrl = useMemo(() => {
-        if (!item.blurHash) return null;
-        try {
-            return blurhashToDataUrl(item.blurHash);
-        }
-        catch {
-            return null;
-        }
-    }, [item.blurHash]);
+    const blurDataUrl = useMemo(
+        () => (item.blurHash ? blurhashToDataUrl(item.blurHash) : null),
+        [item.blurHash]
+    );
 
     return (
         <div
@@ -91,12 +63,12 @@ export const GalleryItem = memo(function GalleryItem({
         >
             {item.processingStatus === 'COMPLETED' && item.thumbnailKey ? (
                 <img
-                    src={thumbnailSrc ?? thumbnailUrl(item.id)}
+                    src={thumbnailSrc ?? thumbnailUrlFromKey(item.thumbnailKey, item.id)}
                     alt="Photo"
                     loading="lazy"
-                    className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+                    decoding="async"
+                    className="w-full h-full object-cover"
                     draggable={false}
-                    onLoad={handleLoad}
                 />
             ) : (
                 <div className="w-full h-full flex items-center justify-center text-stone-400 text-xs">

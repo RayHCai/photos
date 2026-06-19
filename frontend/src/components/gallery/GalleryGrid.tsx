@@ -9,6 +9,7 @@ import { groupByDate } from '@/lib/utils/groupByDate';
 import { TimelineScrollbar } from './TimelineScrollbar';
 import { useThumbnailPrefetch } from '@/lib/hooks/useThumbnailPrefetch';
 import { usePinchToZoom } from '@/lib/hooks/usePinchToZoom';
+import { CDN_CONFIGURED } from '@/lib/api/media';
 import type { MediaShellItem } from '@/lib/types/media';
 
 const MOBILE_BREAKPOINT = 768;
@@ -59,7 +60,14 @@ export function GalleryGrid({
     timeline,
 }: GalleryGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [measuredWidth, setMeasuredWidth] = useState(0);
+    // Seed with the viewport width so the first synchronous render already
+    // produces rows (and mounts thumbnails) instead of emitting zero rows until
+    // the post-mount ResizeObserver fires. Refined to the real container width
+    // below. Slightly overestimates (ignores the sidebar/padding), which only
+    // affects the transient first paint before the layout effect corrects it.
+    const [measuredWidth, setMeasuredWidth] = useState(
+        () => (typeof window !== 'undefined' ? window.innerWidth : 0)
+    );
 
     useLayoutEffect(() => {
         const el = containerRef.current;
@@ -173,8 +181,12 @@ export function GalleryGrid({
         overscan: isMobile ? 3 : 5,
     });
 
-    const prefetchSrcFn = useThumbnailPrefetch(virtualRows, virtualizer, !thumbnailSrcFn);
-    const resolvedThumbnailSrcFn = thumbnailSrcFn ?? prefetchSrcFn;
+    // With a CDN configured, GalleryItem builds thumbnail URLs directly from each
+    // item's key — no batch round-trip and no version-bump re-render storm (RS-1).
+    // Keep the prefetch only as the presigned-mode fallback (and whenever a caller
+    // supplies its own thumbnailSrcFn, e.g. shared links).
+    const prefetchSrcFn = useThumbnailPrefetch(virtualRows, virtualizer, !thumbnailSrcFn && !CDN_CONFIGURED);
+    const resolvedThumbnailSrcFn = thumbnailSrcFn ?? (CDN_CONFIGURED ? undefined : prefetchSrcFn);
 
     useEffect(() => {
         virtualizer.measure();

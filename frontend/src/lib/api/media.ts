@@ -31,8 +31,28 @@ export function getTimeline(): Promise<TimelineMonth[]> {
     return apiFetch('/media/timeline');
 }
 
+const CDN_BASE = process.env.NEXT_PUBLIC_CDN_BASE_URL;
+
+/** True when a public CDN base is configured (build-time inlined). */
+export const CDN_CONFIGURED = !!CDN_BASE;
+
 export function thumbnailUrl(id: string): string {
     return apiUrl(`/media/${id}/thumbnail`);
+}
+
+/**
+ * Direct CDN URL built from a stored key, or the redirect endpoint as a fallback
+ * (presigned mode / missing key). Lets the browser skip the batch URL-resolution
+ * round-trip and per-item 302 entirely when a CDN is configured.
+ */
+export function thumbnailUrlFromKey(thumbnailKey: string | null, id: string): string {
+    if (CDN_BASE && thumbnailKey) return `${CDN_BASE}/${thumbnailKey}`;
+    return apiUrl(`/media/${id}/thumbnail`);
+}
+
+/** Direct CDN URL from any stored key, or null when no CDN is configured. */
+export function cdnUrlFromKey(key: string | null): string | null {
+    return CDN_BASE && key ? `${CDN_BASE}/${key}` : null;
 }
 
 export function getBatchThumbnailUrls(ids: string[]): Promise<Record<string, string>> {

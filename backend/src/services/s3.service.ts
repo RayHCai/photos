@@ -15,6 +15,11 @@ import { redisConnection } from '../config/redis.js';
 
 const THUMBNAIL_CACHE_TTL = 55 * 60; // 55 minutes
 
+// All object keys are content-addressed UUIDs, so the bytes behind a key never
+// change — safe to cache forever. Applied as a GET-side response override so it
+// also covers objects already in the bucket (no re-upload/backfill needed).
+const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
 export function buildKey(prefix: string, ext: string): string {
     const now = new Date();
     const year = now.getFullYear();
@@ -74,6 +79,7 @@ export async function getPresignedDownloadUrl(key: string, fileName?: string) {
     const command = new GetObjectCommand({
         Bucket: env.S3_BUCKET,
         Key: key,
+        ResponseCacheControl: IMMUTABLE_CACHE_CONTROL,
         ...(fileName && {
             ResponseContentDisposition: `attachment; filename="${fileName}"`,
         }),
