@@ -258,6 +258,11 @@ function mapSearchResult(r: SearchResult) {
 // ── CLIP Embedding ─────────────────────────────────────────────────────
 
 async function getQueryEmbedding(queryText: string): Promise<number[] | null> {
+    // Semantic search disabled: worker runs locally (Mac Mini) and is not reachable
+    // over HTTP from the backend. Returning null makes search fall back to FTS.
+    // To re-enable, remove this early return and expose the worker at WORKER_URL.
+    return null;
+
     const cached = await prisma.$queryRaw<Array<{ embedding: string }>>`
         SELECT embedding::text FROM query_embeddings
         WHERE query_text = ${queryText}
