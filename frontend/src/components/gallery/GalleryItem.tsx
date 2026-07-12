@@ -47,12 +47,16 @@ export const GalleryItem = memo(function GalleryItem({
 
     return (
         <div
+            data-media-id={item.id}
             className={`relative overflow-hidden bg-stone-100 flex-shrink-0 group select-none ${
                 item.processingStatus === 'COMPLETED' || isSelecting ? 'cursor-pointer' : 'cursor-default'
             }`}
             style={{
                 width,
                 height,
+                // Suppress the iOS long-press "Save Image" callout so it doesn't
+                // hijack the drag-to-select long press.
+                WebkitTouchCallout: 'none',
                 ...(blurDataUrl && {
                     backgroundImage: `url(${blurDataUrl})`,
                     backgroundSize: 'cover',
