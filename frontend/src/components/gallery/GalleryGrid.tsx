@@ -9,6 +9,7 @@ import { groupByDate } from '@/lib/utils/groupByDate';
 import { TimelineScrollbar } from './TimelineScrollbar';
 import { useThumbnailPrefetch } from '@/lib/hooks/useThumbnailPrefetch';
 import { usePinchToZoom } from '@/lib/hooks/usePinchToZoom';
+import { useDragSelect, type DragSelectController } from '@/lib/hooks/useDragSelect';
 import { CDN_CONFIGURED } from '@/lib/api/media';
 import type { MediaShellItem } from '@/lib/types/media';
 
@@ -45,6 +46,8 @@ interface GalleryGridProps {
     onItemSelect?: (id: string, e: React.MouseEvent) => void;
     thumbnailSrcFn?: (id: string) => string | undefined;
     timeline?: import('@/lib/types/media').TimelineMonth[];
+    /** Enables mobile press-and-drag multi-select + edge auto-scroll. */
+    dragSelect?: DragSelectController;
 }
 
 export function GalleryGrid({
@@ -58,6 +61,7 @@ export function GalleryGrid({
     onItemSelect,
     thumbnailSrcFn,
     timeline,
+    dragSelect,
 }: GalleryGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     // Seed with the viewport width so the first synchronous render already
@@ -87,6 +91,10 @@ export function GalleryGrid({
     const { columns: mobileColumns, gestureCellSize } = usePinchToZoom(
         containerRef, isMobile, mobileAvailableWidth, MOBILE_GAP
     );
+
+    // Press-and-drag multi-select with edge auto-scroll (mobile only). Coexists
+    // with pinch-to-zoom above — it bails out the moment a second finger lands.
+    useDragSelect(containerRef, isMobile, dragSelect);
 
     const mediaMap = useMemo(() => {
         const map = new Map<string, MediaShellItem>();

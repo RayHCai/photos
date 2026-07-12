@@ -70,6 +70,19 @@ export function PhotoGallery({
         [selection, orderedIds]
     );
 
+    // Bridge the touch drag-select gesture (resolved in GalleryGrid) to the
+    // selection paint API. Stable across renders as long as the selection methods
+    // and visual order hold, so listeners aren't re-registered mid-gesture.
+    const { beginDrag, updateDrag, endDrag } = selection;
+    const dragSelect = useMemo(
+        () => ({
+            begin: (id: string) => beginDrag(id),
+            update: (id: string) => updateDrag(id, orderedIds),
+            end: () => endDrag(),
+        }),
+        [beginDrag, updateDrag, endDrag, orderedIds]
+    );
+
     if (isLoading || items.length === 0) {
         return <EmptyState isLoading={isLoading} message={emptyMessage} />;
     }
@@ -101,6 +114,7 @@ export function PhotoGallery({
                     onItemSelect={handleItemSelect}
                     thumbnailSrcFn={thumbnailSrcFn}
                     timeline={timeline}
+                    dragSelect={dragSelect}
                 />
             </div>
 
