@@ -258,41 +258,8 @@ export function GalleryGrid({
         // own identity would loop.
     }, [virtualRows]);
 
-    /**
-     * Label of the topmost visible group.
-     *
-     * Replaces the sticky date header, which could never work: each virtual row is an
-     * absolutely-positioned box of exactly the header's height carrying a transform
-     * and `contain: layout style paint`, so a `position: sticky` header had zero
-     * sliding range and was clipped. The user therefore lost all date context while
-     * scrolling. Derived from rows the virtualizer already computed, so it costs
-     * nothing extra.
-     */
-    const activeGroupLabel = useMemo(() => {
-        const visible = virtualizer.getVirtualItems();
-        for (const v of visible) {
-            const row = virtualRows[v.index];
-            if (row?.type === 'date-header' && row.label) return row.label;
-        }
-        // Mid-group: walk back to the header that owns the first visible row.
-        const firstIndex = visible[0]?.index ?? 0;
-        for (let i = firstIndex; i >= 0; i--) {
-            const row = virtualRows[i];
-            if (row?.type === 'date-header' && row.label) return row.label;
-        }
-        return null;
-    }, [virtualizer, virtualRows]);
-
     return (
         <div className="h-full relative">
-            {activeGroupLabel && (
-                <div
-                    className="absolute top-2 left-1/2 -translate-x-1/2 z-20 rounded-full bg-stone-900/75 px-3 py-1 text-xs font-medium text-stone-50 backdrop-blur-sm pointer-events-none"
-                    aria-live="polite"
-                >
-                    {activeGroupLabel}
-                </div>
-            )}
             <div
                 ref={containerRef}
                 className="h-full overflow-y-auto hide-scrollbar"

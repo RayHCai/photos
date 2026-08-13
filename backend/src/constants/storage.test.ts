@@ -36,6 +36,12 @@ describe('isManagedStorageKey', () => {
         ).toBe(true);
     });
 
+    it('accepts an uppercase extension from legacy rows predating safeExtension lowercasing', () => {
+        expect(
+            isManagedStorageKey('originals/2026/08/0189cf9e-4d3a-7c11-9a5e-2b1f6c8d4e70.JPG')
+        ).toBe(true);
+    });
+
     it.each([
         // Traversal, absolute paths and prefix escapes.
         ['../../etc/passwd'],

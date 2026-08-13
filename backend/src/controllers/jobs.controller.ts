@@ -92,6 +92,11 @@ export const backfillWebOptimized = bulkJobHandler(
     'web-optimized backfill',
 );
 
+export const backfillThumbnailLadder = bulkJobHandler(
+    () => mediaService.backfillThumbnailLadder(),
+    'thumbnail ladder backfill',
+);
+
 export const backfillMetadata = bulkJobHandler(
     () => mediaService.backfillMetadata(),
     'metadata backfill',

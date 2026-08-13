@@ -30,7 +30,9 @@ const csp = [
     "font-src 'self' https://fonts.gstatic.com data:",
     `img-src 'self' data: blob: ${imageOrigins}`.trim(),
     `media-src 'self' blob: ${imageOrigins}`.trim(),
-    "connect-src 'self'",
+    // The service worker's thumbnail strategy re-issues cross-origin <img> requests as
+    // fetch() calls, which the browser checks against connect-src rather than img-src.
+    `connect-src 'self' ${imageOrigins}`.trim(),
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",

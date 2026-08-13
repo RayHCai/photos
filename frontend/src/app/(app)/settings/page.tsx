@@ -14,6 +14,7 @@ import {
     rerunMissingFaces,
     backfillTranscoding,
     backfillWebOptimized,
+    backfillThumbnailLadder,
     backfillGeocoding,
     backfillMetadata,
 } from '@/lib/api/jobs';
@@ -126,6 +127,15 @@ export default function SettingsPage() {
             onClick: async () => {
                 const { count } = await backfillWebOptimized();
                 toast.success(`Enqueued ${count} photos for web optimization`);
+            },
+        },
+        {
+            label: 'Backfill Thumbnail Ladder',
+            description:
+                'Regenerate responsive thumbnail sizes (200/400/800px) for all photos. Re-enqueues every completed photo, since nothing tracks which ones are missing it.',
+            onClick: async () => {
+                const { count } = await backfillThumbnailLadder();
+                toast.success(`Enqueued ${pluralize(count, 'item')} for thumbnail ladder`);
             },
         },
         {

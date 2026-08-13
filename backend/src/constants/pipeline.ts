@@ -17,6 +17,7 @@ export const PIPELINE_STAGES = [
     'blurhash',
     'transcode',
     'web',
+    'thumbnail-ladder',
     'metadata',
 ] as const;
 

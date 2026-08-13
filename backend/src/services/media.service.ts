@@ -711,6 +711,21 @@ export async function backfillWebOptimized() {
     return queryAndEnqueue({ type: 'PHOTO', webKey: null, processingStatus: 'COMPLETED' }, 'web', 'web-optimized backfill enqueued');
 }
 
+/**
+ * No column tracks whether an item already has its responsive thumbnail ladder
+ * (the variants live only in S3, derived from thumbnailKey), so unlike the other
+ * backfills this can't scope to "missing" — it re-enqueues every completed photo.
+ * Cheap per item (a few small WebP re-encodes), but worth knowing before running
+ * it against a large library.
+ */
+export async function backfillThumbnailLadder() {
+    return queryAndEnqueue(
+        { type: 'PHOTO', thumbnailKey: { not: null }, processingStatus: 'COMPLETED' },
+        'thumbnail-ladder',
+        'thumbnail ladder backfill enqueued',
+    );
+}
+
 export async function backfillMetadata() {
     // Keyed on takenAtLocal rather than latitude: the previous predicate matched
     // every photo without GPS, so items that simply have no location were

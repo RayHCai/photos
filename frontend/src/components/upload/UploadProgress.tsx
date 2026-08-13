@@ -84,7 +84,7 @@ export function UploadProgress() {
                                     <Loader2 className="w-4 h-4 text-stone-400 animate-spin" />
                                 )}
                                 {item.status === 'retrying' && (
-                                    <RefreshCw className="w-4 h-4 text-amber-500 animate-spin" />
+                                    <RefreshCw className="w-4 h-4 text-stone-400" />
                                 )}
                                 {item.status === 'pending' && (
                                     <div className="w-4 h-4 rounded-full border-2 border-stone-200" />
@@ -108,9 +108,8 @@ export function UploadProgress() {
                                     <div className="mt-1.5 h-0.5 w-full bg-stone-100 rounded-full" />
                                 )}
                                 {item.status === 'retrying' && (
-                                    <p className="text-[11px] text-amber-600 mt-0.5 truncate">
-                                        Upload failed — retrying ({item.retryAttempt} of{' '}
-                                        {item.retryMax})
+                                    <p className="text-[11px] text-stone-400 mt-0.5 truncate">
+                                        Retrying ({item.retryAttempt} of {item.retryMax})
                                     </p>
                                 )}
                                 {item.error && (
