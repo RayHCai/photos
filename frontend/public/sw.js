@@ -101,6 +101,17 @@ async function safePut(cache, key, response) {
     }
 }
 
+/** A fetch that reports failure as null rather than rejecting. A CORS check the response
+ * fails rejects here exactly like an offline network does. */
+async function tryFetch(request, init) {
+    try {
+        return await fetch(request, init);
+    }
+    catch {
+        return null;
+    }
+}
+
 /**
  * Evict oldest-first until the cache is back under the target.
  *
@@ -151,13 +162,31 @@ async function thumbnailStrategy(event, url) {
     const cached = await cache.match(key);
     if (cached) return cached;
 
-    let response;
-    try {
-        response = await fetch(request);
+    let response = await tryFetch(request);
+
+    // A thumbnail can be pinned to a *failure* in the browser's HTTP cache, and nothing
+    // below this line would ever notice. Every CDN response carries
+    // `Cache-Control: public, max-age=31536000, immutable` — including the 403 S3 returns
+    // for a ladder variant the worker has not written yet, because CloudFront applies the
+    // header policy to error responses and a viewer-response function cannot strip it
+    // (those do not run for 4xx). So a thumbnail requested a few seconds too early, or
+    // fetched while the CDN was still missing its CORS headers, keeps failing for a year:
+    // a reload re-runs this fetch, which happily replays the cached failure.
+    //
+    // `cache: 'reload'` is the only way past that entry, and it overwrites it with
+    // whatever the CDN says now. Cost when the variant genuinely is not written yet: one
+    // extra request per attempt, against a 403 that is a few hundred bytes.
+    //
+    // Opaque is excluded, not overlooked: a no-cors response reports ok=false whether it
+    // was a 200 or a 404, so retrying every one of them would double the request count for
+    // the surfaces that load thumbnails without crossorigin, and the retry would come back
+    // just as opaque.
+    if (!response || (!response.ok && response.type !== 'opaque')) {
+        const revalidated = await tryFetch(request, { cache: 'reload' });
+        if (revalidated) response = revalidated;
     }
-    catch {
-        return Response.error();
-    }
+
+    if (!response) return Response.error();
 
     // Persist only responses we can *verify* succeeded, and that cache.put accepts: a
     // redirected (same-origin 302) or partial (206) response makes it throw.
