@@ -21,11 +21,11 @@ from worker.geocode import reverse_geocode
 from worker.log import get_logger
 from worker.metadata import MediaMetadata, extract_photo_metadata, extract_video_metadata
 from worker.thumbnail import (
+    extract_thumbnail_frame,
     extract_video_frames,
     generate_blurhash,
     generate_photo_thumbnail,
     generate_thumbnail_ladder,
-    generate_video_thumbnail,
     generate_web_image,
 )
 from worker.video import build_transcode_args, probe_video_shape, run_ffmpeg
@@ -289,10 +289,25 @@ async def _stage_content_video(
         height=meta.height,
         duration_seconds=meta.duration_seconds,
     )
-    thumb_bytes = generate_video_thumbnail(tmp_path)
+    frame = await _run_cpu(extract_thumbnail_frame, tmp_path)
+    try:
+        thumb_bytes = await _run_cpu(generate_photo_thumbnail, frame)
 
-    logger.info("step_upload_thumbnail", media_item_id=media_item_id, size_bytes=len(thumb_bytes))
-    thumb_key = await s3.generate_key_and_upload("thumbnails", thumb_bytes, "image/webp")
+        logger.info(
+            "step_upload_thumbnail", media_item_id=media_item_id, size_bytes=len(thumb_bytes)
+        )
+        thumb_key = await s3.generate_key_and_upload("thumbnails", thumb_bytes, "image/webp")
+
+        # Same best-effort ladder as a photo, from the full-resolution poster frame.
+        # Its absence is not cosmetic for videos: the client builds the srcset from
+        # thumbnailKey alone, so a missing ladder makes every candidate a 404 and the
+        # grid cell renders empty.
+        try:
+            await _upload_thumbnail_ladder(frame, thumb_key, media_item_id)
+        except Exception:
+            logger.exception("thumbnail_ladder_failed", media_item_id=media_item_id)
+    finally:
+        frame.close()
 
     logger.info("step_generate_blurhash", media_item_id=media_item_id)
     thumb_image = Image.open(io.BytesIO(thumb_bytes))
@@ -665,6 +680,18 @@ async def process_video(
             logger.info("video_processed", media_item_id=media_item_id)
             return
 
+        if start_stage == "thumbnail-ladder":
+            # Ahead of frame extraction: the ladder needs one poster frame, not the
+            # CLIP sample set, and extract_video_frames is the expensive part.
+            frame = await _run_cpu(extract_thumbnail_frame, tmp_path)
+            try:
+                await _stage_thumbnail_ladder(frame, media_item_id)
+            finally:
+                frame.close()
+            await api.set_processing_status(media_item_id, "COMPLETED")
+            logger.info("video_processed", media_item_id=media_item_id)
+            return
+
         if start_stage == "metadata":
             meta = await _run_cpu(extract_video_metadata, tmp_path)
             if meta.latitude is not None and meta.longitude is not None:
@@ -702,6 +729,12 @@ async def process_video(
         elif start_stage == "faces":
             await _stage_faces_video(frames, media_item_id)
             await api.set_processing_status(media_item_id, "COMPLETED")
+        else:
+            # process_photo grew this guard; the video chain never did, so a stage
+            # with no video branch — 'thumbnail-ladder', until now — fell through,
+            # logged "video_processed", and left the row PROCESSING forever. That is
+            # exactly how the ladder backfill appeared to run and changed nothing.
+            raise ValueError(f"stage {start_stage!r} is not applicable to a video")
 
         logger.info("video_processed", media_item_id=media_item_id)
 

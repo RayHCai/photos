@@ -26,5 +26,6 @@ export const rerunMissingFaces = postJob('rerun-missing-faces');
 export const backfillTranscoding = postJob('backfill-transcode');
 export const backfillWebOptimized = postJob('backfill-web');
 export const backfillThumbnailLadder = postJob('backfill-thumbnail-ladder');
+export const backfillThumbnailLadderVideos = postJob('backfill-thumbnail-ladder-videos');
 export const backfillGeocoding = postJob<{ status: string }>('backfill-geocode');
 export const backfillMetadata = postJob('backfill-metadata');

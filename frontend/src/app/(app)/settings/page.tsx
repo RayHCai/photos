@@ -15,6 +15,7 @@ import {
     backfillTranscoding,
     backfillWebOptimized,
     backfillThumbnailLadder,
+    backfillThumbnailLadderVideos,
     backfillGeocoding,
     backfillMetadata,
 } from '@/lib/api/jobs';
@@ -132,10 +133,22 @@ export default function SettingsPage() {
         {
             label: 'Backfill Thumbnail Ladder',
             description:
-                'Regenerate responsive thumbnail sizes (200/400/800px) for all photos. Re-enqueues every completed photo, since nothing tracks which ones are missing it.',
+                'Regenerate responsive thumbnail sizes (200/400/800px) for all photos and videos. Re-enqueues every completed item, since nothing tracks which ones are missing it.',
             onClick: async () => {
                 const { count } = await backfillThumbnailLadder();
                 toast.success(`Enqueued ${pluralize(count, 'item')} for thumbnail ladder`);
+            },
+        },
+        {
+            label: 'Backfill Thumbnail Ladder (Videos)',
+            description:
+                'The same job scoped to videos, which are the only items that ever shipped without a ladder. Slower per item than photos — each one is downloaded and a poster frame pulled with ffmpeg.',
+            onClick: async () => {
+                // No count in the toast: the bulk endpoints answer 202 the moment the
+                // job is accepted and page over the library afterwards, so there is no
+                // total to report yet. Watch the pending counter for progress.
+                await backfillThumbnailLadderVideos();
+                toast.success('Video thumbnail ladder backfill started');
             },
         },
         {

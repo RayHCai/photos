@@ -26,6 +26,7 @@ router.post('/fix-orphaned-processing', jobsController.fixOrphanedProcessing);
 router.post('/backfill-transcode', jobsController.backfillTranscoding);
 router.post('/backfill-web', jobsController.backfillWebOptimized);
 router.post('/backfill-thumbnail-ladder', jobsController.backfillThumbnailLadder);
+router.post('/backfill-thumbnail-ladder-videos', jobsController.backfillThumbnailLadderVideos);
 router.post('/recluster', jobsController.triggerRecluster);
 router.post('/rerun-missing-faces', jobsController.rerunMissingFaces);
 router.post('/backfill-geocode', jobsController.backfillGeocoding);
