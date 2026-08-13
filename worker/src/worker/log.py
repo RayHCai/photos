@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 import structlog
 
@@ -26,4 +27,7 @@ structlog.configure(
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
-    return structlog.get_logger(name)  # type: ignore[return-value]
+    # structlog.get_logger is annotated as returning Any, so under strict mode this
+    # needs a cast rather than an ignore: the concrete type is whatever
+    # wrapper_class was configured with above.
+    return cast("structlog.stdlib.BoundLogger", structlog.get_logger(name))
