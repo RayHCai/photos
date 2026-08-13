@@ -97,6 +97,11 @@ export const backfillThumbnailLadder = bulkJobHandler(
     'thumbnail ladder backfill',
 );
 
+export const backfillThumbnailLadderVideos = bulkJobHandler(
+    () => mediaService.backfillThumbnailLadderVideos(),
+    'thumbnail ladder backfill (videos)',
+);
+
 export const backfillMetadata = bulkJobHandler(
     () => mediaService.backfillMetadata(),
     'metadata backfill',

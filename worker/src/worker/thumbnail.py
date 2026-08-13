@@ -105,7 +105,17 @@ def _extract_frame(video_path: str, tmp_path: str, seek: str) -> None:
     )
 
 
-def generate_video_thumbnail(video_path: str) -> bytes:
+def extract_thumbnail_frame(video_path: str) -> Image.Image:
+    """The full-resolution poster frame a video's thumbnails are derived from.
+
+    Returned rather than immediately downscaled so callers can also build the
+    responsive ladder from it: the 400px thumbnail is too small to cut an 800w
+    variant from, and `generate_thumbnail_ladder` skips widths it would have to
+    upscale — which is why videos ended up with a bare thumbnail and no ladder.
+
+    The image is fully loaded before the temp frame is deleted, so the caller
+    owns a standalone image with no file dependency.
+    """
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp_path = tmp.name
 
@@ -114,13 +124,21 @@ def generate_video_thumbnail(video_path: str) -> bytes:
             _extract_frame(video_path, tmp_path, "1")
         except subprocess.CalledProcessError:
             _extract_frame(video_path, tmp_path, "0")
-        frame = Image.open(tmp_path)
-        return generate_photo_thumbnail(frame)
+        with Image.open(tmp_path) as frame:
+            return frame.copy()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         logger.warning("video_thumbnail_failed", error=str(exc))
         raise
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+def generate_video_thumbnail(video_path: str) -> bytes:
+    frame = extract_thumbnail_frame(video_path)
+    try:
+        return generate_photo_thumbnail(frame)
+    finally:
+        frame.close()
 
 
 def extract_video_frames(

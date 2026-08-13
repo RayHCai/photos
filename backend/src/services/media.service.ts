@@ -714,15 +714,37 @@ export async function backfillWebOptimized() {
 /**
  * No column tracks whether an item already has its responsive thumbnail ladder
  * (the variants live only in S3, derived from thumbnailKey), so unlike the other
- * backfills this can't scope to "missing" — it re-enqueues every completed photo.
+ * backfills this can't scope to "missing" — it re-enqueues every completed item.
  * Cheap per item (a few small WebP re-encodes), but worth knowing before running
- * it against a large library.
+ * it against a large library. Videos cost more: the worker must download the
+ * original and pull a poster frame before it can re-encode.
+ *
+ * Videos were excluded here, which left them with a thumbnailKey but no `@Nw`
+ * variants — and since the client derives the whole srcset from that key, every
+ * candidate 404'd and video cells rendered blank.
  */
 export async function backfillThumbnailLadder() {
     return queryAndEnqueue(
-        { type: 'PHOTO', thumbnailKey: { not: null }, processingStatus: 'COMPLETED' },
+        { thumbnailKey: { not: null }, processingStatus: 'COMPLETED' },
         'thumbnail-ladder',
         'thumbnail ladder backfill enqueued',
+    );
+}
+
+/**
+ * The same backfill scoped to videos.
+ *
+ * Videos were the only type that ever shipped without a ladder, so re-running the
+ * whole library to repair them re-encodes every photo for nothing. Still not a
+ * "missing"-scoped query — see above — just a much smaller blast radius. Per item
+ * it is the most expensive backfill there is: the worker downloads the original
+ * and runs ffmpeg to pull a poster frame before it can encode a single width.
+ */
+export async function backfillThumbnailLadderVideos() {
+    return queryAndEnqueue(
+        { type: 'VIDEO', thumbnailKey: { not: null }, processingStatus: 'COMPLETED' },
+        'thumbnail-ladder',
+        'thumbnail ladder backfill (videos) enqueued',
     );
 }
 
