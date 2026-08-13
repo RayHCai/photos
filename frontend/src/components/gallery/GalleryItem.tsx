@@ -2,7 +2,7 @@
 
 import { memo, useMemo } from 'react';
 import { PlayCircle, Star } from 'lucide-react';
-import { thumbnailSrcSet, thumbnailUrlFromKey } from '@/lib/api/media';
+import { CDN_CONFIGURED, thumbnailSrcSet, thumbnailUrlFromKey } from '@/lib/api/media';
 import { blurhashToDataUrl } from '@/lib/utils/blurhashCache';
 import { formatDuration } from '@/lib/utils/format';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
@@ -59,6 +59,20 @@ export const GalleryItem = memo(function GalleryItem({
 
     const isReady = item.processingStatus === 'COMPLETED' && item.thumbnailKey;
 
+    /**
+     * Request CDN thumbnails with CORS so the service worker can read their status.
+     * A no-cors response is opaque — status 0, `ok` false — whether it was a 200 or the
+     * 404 a ladder variant returns before it has been generated, so the worker had no way
+     * to avoid caching failures as images.
+     *
+     * Scoped to the CDN deliberately. The other two sources are same-origin endpoints that
+     * 302 to S3 (`/media/:id/thumbnail`, and the share links that supply `thumbnailSrc`),
+     * and a cross-origin redirect makes the browser send `Origin: null` on the second hop,
+     * which no bucket allowlist can match — `anonymous` there would break the image
+     * outright. Neither path is cacheable anyway: the worker skips redirected responses.
+     */
+    const useCors = CDN_CONFIGURED && !thumbnailSrc;
+
     return (
         <div
             data-media-id={item.id}
@@ -94,6 +108,7 @@ export const GalleryItem = memo(function GalleryItem({
                      */
                     srcSet={thumbnailSrc ? undefined : thumbnailSrcSet(item.thumbnailKey!)}
                     sizes={`${Math.round(width)}px`}
+                    crossOrigin={useCors ? 'anonymous' : undefined}
                     alt={item.fileName ?? (item.type === 'VIDEO' ? 'Video' : 'Photo')}
                     loading="lazy"
                     decoding="async"

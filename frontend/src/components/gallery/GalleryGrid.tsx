@@ -63,6 +63,8 @@ interface GalleryGridProps {
     hasMore?: boolean;
     /** Whether a page fetch triggered by onLoadMore is in flight. */
     isLoadingMore?: boolean;
+    /** Lets a timeline jump load the page holding an item index directly. */
+    onSeekToIndex?: (index: number) => Promise<void>;
 }
 
 /**
@@ -92,6 +94,7 @@ export function GalleryGrid({
     onLoadMore,
     hasMore,
     isLoadingMore,
+    onSeekToIndex,
 }: GalleryGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const hasTouch = useHasTouch();
@@ -366,8 +369,8 @@ export function GalleryGrid({
             </div>
 
             {/*
-              * Jumping to a month whose page is not loaded yet pulls pages until it
-              * arrives, so this can run for a beat on a long jump.
+              * Jumping to a month whose page is not loaded yet pulls those pages
+              * first, so this can run for a beat on a long jump.
               */}
             {isLoadingMore && (
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-stone-800/80 text-white text-xs font-sans px-3 py-1.5 rounded-full shadow-lg">
@@ -381,6 +384,7 @@ export function GalleryGrid({
                 timeline={timeline}
                 hasMore={hasMore}
                 onLoadMore={onLoadMore}
+                onSeekToIndex={onSeekToIndex}
             />
         </div>
     );

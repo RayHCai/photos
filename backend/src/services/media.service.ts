@@ -272,14 +272,47 @@ export async function listMedia(params: {
  */
 export const SHELL_PAGE_SIZE = 2000;
 
-export async function getShellData(params: { cursor?: string; limit?: number } = {}) {
+/**
+ * A *total* order, which both pagination modes below depend on.
+ *
+ * `takenAt, createdAt` alone leaves ties — a bulk import writes many rows with the
+ * same capture timestamp inside one transaction — and Postgres is free to return
+ * tied rows in a different order per query. Cursor paging then skips or repeats
+ * rows across a page boundary, and offset paging (which issues several
+ * independent queries at once) does so far more visibly. `id` breaks every tie.
+ */
+const SHELL_ORDER_BY: Prisma.MediaItemOrderByWithRelationInput[] = [
+    { takenAt: { sort: 'desc', nulls: 'last' } },
+    { createdAt: 'desc' },
+    { id: 'desc' },
+];
+
+/**
+ * A page of the gallery shell, addressed either by `cursor` (sequential scroll)
+ * or by `offset` (a timeline jump).
+ *
+ * The offset mode exists because a cursor can only be derived from the page
+ * before it. Jumping to a month tens of thousands of items down therefore meant
+ * walking every intervening page one round trip at a time, with the grid
+ * rendering each one on the way past. An offset addresses any page directly, so
+ * the client can fetch the gap it needs in parallel and land once.
+ */
+export async function getShellData(
+    params: { cursor?: string; offset?: number; limit?: number } = {}
+) {
     const limit = Math.min(params.limit ?? SHELL_PAGE_SIZE, SHELL_PAGE_SIZE);
 
     const items = await prisma.mediaItem.findMany({
         where: HIDDEN_EXCLUSION,
-        orderBy: [{ takenAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+        orderBy: SHELL_ORDER_BY,
         take: limit + 1,
-        ...applyCursor(params.cursor),
+        // A cursor wins when both are supplied: it is the exact address, whereas
+        // an offset is only correct relative to an unchanged table.
+        ...(params.cursor
+            ? applyCursor(params.cursor)
+            : params.offset
+                ? { skip: params.offset }
+                : {}),
         select: MEDIA_ITEM_SHELL_SELECT,
     });
 

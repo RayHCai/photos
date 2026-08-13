@@ -198,6 +198,28 @@ resource "aws_cloudfront_response_headers_policy" "immutable_images" {
       override = true
     }
   }
+
+  # The grid requests thumbnails with crossorigin="anonymous" so the service worker can
+  # read the response status. Without CORS headers here that request fails the CORS check
+  # and the image does not render at all -- this block and the img attribute ship together.
+  cors_config {
+    access_control_allow_credentials = false
+
+    access_control_allow_headers {
+      items = ["*"]
+    }
+
+    access_control_allow_methods {
+      items = ["GET", "HEAD"]
+    }
+
+    access_control_allow_origins {
+      items = var.cors_origins
+    }
+
+    access_control_max_age_sec = 3600
+    origin_override            = true
+  }
 }
 
 resource "aws_cloudfront_cache_policy" "thumbnails" {
@@ -210,8 +232,14 @@ resource "aws_cloudfront_cache_policy" "thumbnails" {
     cookies_config {
       cookie_behavior = "none"
     }
+    # Origin is part of the cache key so the CORS-headed response is not served to a
+    # request that sent no Origin, and vice versa. The allowlist is small, so the
+    # resulting fan-out is a couple of variants per object.
     headers_config {
-      header_behavior = "none"
+      header_behavior = "whitelist"
+      headers {
+        items = ["Origin"]
+      }
     }
     query_strings_config {
       query_string_behavior = "none"
@@ -240,6 +268,24 @@ resource "aws_cloudfront_distribution" "thumbnails" {
     compress                   = true
     cache_policy_id            = aws_cloudfront_cache_policy.thumbnails.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.immutable_images.id
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.no_store_errors.arn
+    }
+  }
+
+  # A thumbnail requested before the worker (or a backfill) has written it 404s, and S3
+  # behind OAC answers a missing key with 403. Cache that for the default TTL and the
+  # object appearing moments later goes unnoticed. Keep the negative window to seconds.
+  custom_error_response {
+    error_code            = 403
+    error_caching_min_ttl = 5
+  }
+
+  custom_error_response {
+    error_code            = 404
+    error_caching_min_ttl = 5
   }
 
   # Block access to originals/ via CloudFront
@@ -274,6 +320,28 @@ resource "aws_cloudfront_distribution" "thumbnails" {
   }
 
   depends_on = [aws_s3_bucket_ownership_controls.logs]
+}
+
+# The immutable_images policy sets Cache-Control with override=true, which applies to
+# *every* response CloudFront returns -- including the 403/404 for an object that has not
+# been generated yet. That stamped a one-year immutable lifetime on "this thumbnail does
+# not exist", which browsers honoured long after the backfill created it.
+#
+# custom_error_response above bounds CloudFront's own caching; this bounds the viewer's.
+# Viewer-response functions run after the response headers policy, so this wins.
+resource "aws_cloudfront_function" "no_store_errors" {
+  name    = "photos-platform-no-store-errors"
+  runtime = "cloudfront-js-2.0"
+  comment = "Keep error responses out of viewer caches"
+  code    = <<-EOF
+    function handler(event) {
+      var response = event.response;
+      if (Number(response.statusCode) >= 400) {
+        response.headers['cache-control'] = { value: 'no-store' };
+      }
+      return response;
+    }
+  EOF
 }
 
 # CloudFront Function to block access to originals/

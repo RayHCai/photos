@@ -11,10 +11,12 @@
  *    object whose key is a random UUID and whose response is stamped immutable, so a
  *    scroll through 500 thumbnails made 500 pointless requests.
  *  - Every cache.put is guarded: a quota error used to reject unhandled.
+ *  - Failures are no longer cached as if they were images. See thumbnailStrategy.
  */
 
 // Bump on each deploy. Anything not in CURRENT_CACHES is deleted on activate.
-const VERSION = 'v2';
+// v3 retires the v2 thumbnail cache, which may hold 404s stored as valid thumbnails.
+const VERSION = 'v3';
 const CACHE_NAME = `photos-app-${VERSION}`;
 const THUMB_CACHE = `photos-thumbs-${VERSION}`;
 
@@ -28,8 +30,8 @@ const CURRENT_CACHES = [CACHE_NAME, THUMB_CACHE];
 const THUMB_MAX_BYTES = 120 * 1024 * 1024;
 /** Trim in batches so a single put does not pay for a full sweep. */
 const THUMB_TRIM_TARGET_BYTES = 100 * 1024 * 1024;
-/** An opaque cross-origin response reports no length; charge it a nominal size. */
-const OPAQUE_SIZE_ESTIMATE = 30 * 1024;
+/** Fallback charge for an entry whose response declares no Content-Length. */
+const UNKNOWN_SIZE_ESTIMATE = 30 * 1024;
 
 const PRECACHE_URLS = ['/', '/manifest.json', '/icon.svg'];
 
@@ -112,7 +114,7 @@ async function trimThumbCache(cache) {
     for (const request of keys) {
         const response = await cache.match(request);
         const length = Number(response?.headers.get('Content-Length') ?? 0);
-        const size = length > 0 ? length : OPAQUE_SIZE_ESTIMATE;
+        const size = length > 0 ? length : UNKNOWN_SIZE_ESTIMATE;
         sizes.push({ request, size });
         total += size;
     }
@@ -133,6 +135,13 @@ async function trimThumbCache(cache) {
  * are immutable, so the bytes behind a key never change. Revalidating on every hit was
  * pure waste, and on a mobile connection it competed with the thumbnails actually being
  * scrolled into view.
+ *
+ * That reasoning holds for a key that *exists*. The one transition a key can undergo is
+ * absent -> present: a ladder variant 404s until the worker (or a backfill) writes it.
+ * Since nothing here ever revalidates, storing that 404 pins it forever — the object
+ * appearing later is never noticed. So an absence is simply never written down; the next
+ * request for the key misses, goes to the network, and picks up the object once it is
+ * there. No invalidation, no version token, no change notification.
  */
 async function thumbnailStrategy(event, url) {
     const { request } = event;
@@ -150,13 +159,17 @@ async function thumbnailStrategy(event, url) {
         return Response.error();
     }
 
-    // Persist only fully-formed responses: a redirected (same-origin 302) or partial
-    // (206) response makes cache.put throw.
-    if (
-        (response.ok || response.type === 'opaque') &&
-        !response.redirected &&
-        response.status !== 206
-    ) {
+    // Persist only responses we can *verify* succeeded, and that cache.put accepts: a
+    // redirected (same-origin 302) or partial (206) response makes it throw.
+    //
+    // `ok` is load-bearing and used to be unreachable. An opaque (no-cors) response
+    // reports status 0 and ok=false whether it was a 200 or a 404, so the old
+    // `|| response.type === 'opaque'` arm stored failures indistinguishably from
+    // images. Grid thumbnails are now requested with CORS (crossorigin="anonymous"
+    // against a CDN that returns Access-Control-Allow-Origin), which makes the status
+    // readable. Anything still opaque is served to the page but not cached — we cannot
+    // tell whether it is a thumbnail or a 404 dressed as one.
+    if (response.ok && !response.redirected && response.status !== 206) {
         const copy = response.clone();
         event.waitUntil(
             safePut(cache, key, copy).then((stored) => (stored ? trimThumbCache(cache) : undefined))

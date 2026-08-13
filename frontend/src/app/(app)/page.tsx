@@ -28,6 +28,8 @@ export default function GalleryPage() {
         fetchNextPage,
         hasNextPage,
         isFetchingNextPage,
+        seekToIndex,
+        isSeeking,
     } = useShellData();
     const [search, setSearch] = useState('');
     const selection = useMediaSelection();
@@ -115,7 +117,11 @@ export default function GalleryPage() {
                     emptyMessage={isSearchActive ? 'No results found' : undefined}
                     onLoadMore={isSearchActive ? undefined : fetchNextPage}
                     hasMore={isSearchActive ? false : hasNextPage}
-                    isLoadingMore={isSearchActive ? false : isFetchingNextPage}
+                    // A timeline jump fetching the pages it needs is the same
+                    // "more is coming" state as a scroll-driven page fetch, and it
+                    // also keeps the grid's scroll lookahead from racing it.
+                    isLoadingMore={isSearchActive ? false : isFetchingNextPage || isSeeking}
+                    onSeekToIndex={isSearchActive ? undefined : seekToIndex}
                 />
             </ErrorBoundary>
         </FileDropZone>
