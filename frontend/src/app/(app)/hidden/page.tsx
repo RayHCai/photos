@@ -8,15 +8,14 @@ import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { IconButton } from '@/components/ui/IconButton';
-import { pluralize } from '@/lib/utils/pluralize';
-import { toast } from 'sonner';
 import * as collectionsApi from '@/lib/api/collections';
+import { queryKeys } from '@/lib/queries/keys';
 import type { MediaShellItem } from '@/lib/types/media';
 
 export default function HiddenPage() {
     const { data: hiddenCollection, isLoading } = useQuery({
-        queryKey: ['collections', 'hidden'],
-        queryFn: collectionsApi.getHiddenCollection,
+        queryKey: queryKeys.collections.hidden(),
+        queryFn: () => collectionsApi.getHiddenCollection(),
     });
 
     const { unhideItems } = useHidden();
@@ -28,18 +27,14 @@ export default function HiddenPage() {
         return hiddenCollection.items.map((i) => i.mediaItem);
     }, [hiddenCollection]);
 
-    const handleUnhide = useCallback(async (ids: string[]) => {
-        try {
-            await unhideItems(ids);
-            toast.success(`${pluralize(ids.length, 'item')} unhidden`);
-        }
-        catch {
-            toast.error('Failed to unhide items');
-        }
+    // useSystemCollection reports success and failure itself (optimistic update
+    // plus rollback plus toast), so no local try/catch or toast is needed here.
+    const handleUnhide = useCallback((ids: string[]) => {
+        unhideItems(ids);
     }, [unhideItems]);
 
     return (
-        <div className="h-screen flex flex-col">
+        <div className="h-[100dvh] flex flex-col">
             <div className="relative flex items-center justify-center gap-2 px-[30px] pt-5 sm:pt-3 pb-9">
                 {selection.isSelecting && (
                     <div className="absolute right-[30px] top-1/2 -translate-y-1/2 z-10 flex items-center gap-0.5 h-9 bg-stone-100 rounded-lg px-2">

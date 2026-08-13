@@ -30,6 +30,14 @@ export default function CollectionsPage() {
     const filteredCollections = useLocalFilter(collections, search, useCallback((c) => c.name, []));
     const collectionIds = useMemo(() => filteredCollections.map((c) => c.id), [filteredCollections]);
 
+    // id -> index, so shift-range selection is a Map lookup rather than a
+    // linear scan per click.
+    const collectionIdsIndex = useMemo(() => {
+        const map = new Map<string, number>();
+        collectionIds.forEach((id, i) => map.set(id, i));
+        return map;
+    }, [collectionIds]);
+
     const handleDeleteCollections = useCallback(async (ids: string[]) => {
         try {
             await Promise.all(ids.map((id) => deleteCollection.mutateAsync(id)));
@@ -58,7 +66,7 @@ export default function CollectionsPage() {
                         <SelectionToolbar
                             selection={selection}
                             onDelete={handleDeleteCollections}
-                            deleteConfirmMessage={`Delete ${selection.count} selected collection${selection.count !== 1 ? 's' : ''}? This cannot be undone.`}
+                            deleteConfirmMessage={`Delete ${pluralize(selection.count, 'selected collection')}? This cannot be undone.`}
                         />
                         <IconButton
                             icon={Plus}
@@ -76,7 +84,7 @@ export default function CollectionsPage() {
                                 collection={c}
                                 isSelected={selection.selectedIds.has(c.id)}
                                 isSelecting={selection.isSelecting}
-                                onSelect={(e: React.MouseEvent) => selection.handleSelect(c.id, collectionIds, e)}
+                                onSelect={(e: React.MouseEvent) => selection.handleSelect(c.id, collectionIds, collectionIdsIndex, e)}
                             />
                         </div>
                     ))}

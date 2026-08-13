@@ -5,7 +5,8 @@ import { useState, type ReactNode } from 'react';
 import { Toaster } from 'sonner';
 import { AuthProvider } from '@/lib/providers/AuthProvider';
 import { DownloadProvider } from '@/lib/providers/DownloadProvider';
-import { DownloadProgress } from '@/components/download/DownloadProgress';
+import { UploadProvider } from '@/lib/providers/UploadProvider';
+import { ProgressDock } from '@/components/layout/ProgressDock';
 
 export function Providers({ children }: { children: ReactNode }) {
     const [queryClient] = useState(
@@ -24,12 +25,21 @@ export function Providers({ children }: { children: ReactNode }) {
 
     return (
         <QueryClientProvider client={queryClient}>
-            <AuthProvider>
+            {/*
+              * Transfer providers sit ABOVE AuthProvider, at the root rather than inside
+              * the (app) route group.
+              *
+              * UploadProvider used to be mounted in app/(app)/layout.tsx, so an AuthGuard
+              * redirect to /login on a session blip — or any navigation out of the group —
+              * unmounted it, tearing down the reducer, the queue and the panel while the
+              * in-flight fetches carried on writing into a dead reducer.
+              */}
+            <UploadProvider>
                 <DownloadProvider>
-                    {children}
-                    <DownloadProgress />
+                    <AuthProvider>{children}</AuthProvider>
+                    <ProgressDock />
                 </DownloadProvider>
-            </AuthProvider>
+            </UploadProvider>
             <Toaster
                 position="bottom-right"
                 closeButton

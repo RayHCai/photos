@@ -1,5 +1,6 @@
 'use client';
 
+import { pluralize } from '@/lib/utils/pluralize';
 import { useState, useCallback } from 'react';
 import { X, Trash2, FolderPlus, FolderMinus, Download, RotateCcw, EyeOff, Share2 } from 'lucide-react';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -12,7 +13,7 @@ import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 interface SelectionToolbarProps {
     selection: ReturnType<typeof useMediaSelection>;
     /** Called to delete selected items. Must return a promise. */
-    onDelete?: (ids: string[]) => Promise<void>;
+    onDelete?: (ids: string[]) => void | Promise<void>;
     /** Message shown in the delete confirmation modal */
     deleteConfirmMessage?: string;
     /** Show "Add to collection" button (media mode) */
@@ -24,7 +25,7 @@ interface SelectionToolbarProps {
     /** Show "Retry" button for reprocessing failed items */
     showRetry?: boolean;
     /** Called to retry selected items. Must return a promise. */
-    onRetry?: (ids: string[]) => Promise<void>;
+    onRetry?: (ids: string[]) => void | Promise<void>;
     /** Custom URL function for downloads (defaults to originalUrl) */
     downloadUrlFn?: (id: string) => string;
     /** Loading state for delete action */
@@ -32,9 +33,9 @@ interface SelectionToolbarProps {
     /** Show "Hide" button (eye-off icon) */
     showHide?: boolean;
     /** Called to hide selected items */
-    onHide?: (ids: string[]) => Promise<void>;
+    onHide?: (ids: string[]) => void | Promise<void>;
     /** Called to remove selected items from a collection. */
-    onRemoveFromCollection?: (ids: string[]) => Promise<void>;
+    onRemoveFromCollection?: (ids: string[]) => void | Promise<void>;
     /** Loading state for remove-from-collection action */
     removeFromCollectionLoading?: boolean;
 }
@@ -214,7 +215,7 @@ export function SelectionToolbar({
                     open={removeFromCollectionOpen}
                     onClose={() => setRemoveFromCollectionOpen(false)}
                     onConfirm={handleRemoveFromCollection}
-                    message={`Remove ${selection.count} item${selection.count !== 1 ? 's' : ''} from this collection? The files will not be deleted.`}
+                    message={`Remove ${pluralize(selection.count, 'item')} from this collection? The files will not be deleted.`}
                     loading={removeFromCollectionLoading ?? isRemoving}
                 />
             )}

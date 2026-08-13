@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMutationWithInvalidation } from './useMutationWithInvalidation';
 import * as collectionsApi from '../api/collections';
+import { queryKeys } from '../queries/keys';
 
 export function useCollections() {
     return useQuery({
@@ -51,11 +52,25 @@ export function useRemoveCollectionItems() {
     );
 }
 
-export function useCollectionMembership(mediaItemIds: string[]) {
+/**
+ * Which collections contain *every* one of these items.
+ *
+ * `enabled` is now caller-controlled, and the key uses a sorted id list.
+ *
+ * Both matter. AddToCollectionModal called this above its own `if (!open) return null`
+ * guard, and SelectionToolbar keeps that modal mounted for the entire duration of a
+ * selection — so the query was live with the modal closed, and because the key was the
+ * raw id spread, every distinct selection was a brand-new key with no cached data and
+ * therefore an immediate POST. Dragging through 80 photos on a phone fired 80+
+ * requests in about three seconds, each carrying up to 80 ids and running a groupBy,
+ * and left that many dead cache entries behind. Set iteration order also differs by
+ * drag direction, so the same logical selection hashed to several different keys.
+ */
+export function useCollectionMembership(mediaItemIds: string[], enabled = true) {
     return useQuery({
-        queryKey: ['collection-membership', ...mediaItemIds],
+        queryKey: queryKeys.collections.membership(mediaItemIds),
         queryFn: () => collectionsApi.getCollectionMembership(mediaItemIds),
-        enabled: mediaItemIds.length > 0,
+        enabled: enabled && mediaItemIds.length > 0,
         select: (data) => new Set(data.collectionIds),
     });
 }

@@ -15,6 +15,11 @@ router.get(
             q: z.string().optional(),
             page: z.coerce.number().min(1).optional(),
             limit: z.coerce.number().min(1).max(200).optional(),
+            // The client already sent this and threaded it into its query key, but
+            // it was absent here — and `validate` replaces req.query with the
+            // parsed object, so zod stripped it silently and the filter never took
+            // effect.
+            type: z.enum(['PHOTO', 'VIDEO']).optional(),
         }),
     }),
     searchController.search

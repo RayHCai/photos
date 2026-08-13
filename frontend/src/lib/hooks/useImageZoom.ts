@@ -252,16 +252,115 @@ export function useImageZoom(
             commitState(scaleRef.current, translateRef.current.x, translateRef.current.y);
         }
 
+        /**
+         * Pointer/wheel handlers for desktop.
+         *
+         * This hook previously bound touch events *only*, so zoom and pan were
+         * completely unreachable with a mouse, trackpad or keyboard — on desktop the
+         * full-resolution layer could never be shown at all.
+         */
+
+        function zoomAround(clientX: number, clientY: number, nextScale: number) {
+            const rect = el!.getBoundingClientRect();
+            const target = Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
+
+            if (target <= 1.05) {
+                commitState(1, 0, 0);
+                return;
+            }
+
+            // Keep the point under the cursor fixed while the scale changes.
+            const focalX = (clientX - rect.left - rect.width / 2) / scaleRef.current
+                - translateRef.current.x;
+            const focalY = (clientY - rect.top - rect.height / 2) / scaleRef.current
+                - translateRef.current.y;
+
+            const tx = -focalX * (1 - 1 / target) + translateRef.current.x / target;
+            const ty = -focalY * (1 - 1 / target) + translateRef.current.y / target;
+
+            commitState(target, tx, ty);
+        }
+
+        function handleWheel(e: WheelEvent) {
+            // Trackpad pinch and ctrl+wheel are the conventional zoom gestures; a
+            // plain wheel is left alone so it can still scroll the page.
+            if (!e.ctrlKey && !e.metaKey) return;
+            e.preventDefault();
+            const factor = Math.exp(-e.deltaY / 300);
+            zoomAround(e.clientX, e.clientY, scaleRef.current * factor);
+        }
+
+        function handleDoubleClick(e: MouseEvent) {
+            e.preventDefault();
+            zoomAround(
+                e.clientX,
+                e.clientY,
+                scaleRef.current > 1.05 ? 1 : DOUBLE_TAP_SCALE
+            );
+        }
+
+        function handlePointerDown(e: PointerEvent) {
+            // Primary button only, and only meaningful once zoomed in.
+            if (e.pointerType === 'touch' || e.button !== 0) return;
+            if (scaleRef.current <= 1.05) return;
+
+            isPanning.current = true;
+            panStart.current = { x: e.clientX, y: e.clientY };
+            panBaseTranslate.current = { ...translateRef.current };
+            el!.setPointerCapture(e.pointerId);
+            el!.style.cursor = 'grabbing';
+        }
+
+        function handlePointerMove(e: PointerEvent) {
+            if (!isPanning.current || e.pointerType === 'touch') return;
+            const dx = (e.clientX - panStart.current.x) / scaleRef.current;
+            const dy = (e.clientY - panStart.current.y) / scaleRef.current;
+            const next = clampTranslate(
+                scaleRef.current,
+                panBaseTranslate.current.x + dx,
+                panBaseTranslate.current.y + dy
+            );
+            translateRef.current = next;
+            // rAF-coalesced: pointermove fires far more often than the display
+            // refreshes, and each raw event would otherwise write a style.
+            cancelAnimationFrame(rafId.current);
+            rafId.current = requestAnimationFrame(() =>
+                applyTransform(scaleRef.current, next.x, next.y)
+            );
+        }
+
+        function handlePointerUp(e: PointerEvent) {
+            if (!isPanning.current || e.pointerType === 'touch') return;
+            isPanning.current = false;
+            el!.style.cursor = '';
+            if (el!.hasPointerCapture(e.pointerId)) el!.releasePointerCapture(e.pointerId);
+            commitState(scaleRef.current, translateRef.current.x, translateRef.current.y);
+        }
+
         el.addEventListener('touchstart', handleTouchStart, { passive: true });
         el.addEventListener('touchmove', handleTouchMove, { passive: false });
         el.addEventListener('touchend', handleTouchEnd, { passive: true });
         el.addEventListener('touchcancel', handleTouchCancel, { passive: true });
+        // passive:false because handleWheel calls preventDefault to stop the
+        // browser's own page zoom taking over.
+        el.addEventListener('wheel', handleWheel, { passive: false });
+        el.addEventListener('dblclick', handleDoubleClick);
+        el.addEventListener('pointerdown', handlePointerDown);
+        el.addEventListener('pointermove', handlePointerMove);
+        el.addEventListener('pointerup', handlePointerUp);
+        el.addEventListener('pointercancel', handlePointerUp);
 
         return () => {
             el.removeEventListener('touchstart', handleTouchStart);
             el.removeEventListener('touchmove', handleTouchMove);
             el.removeEventListener('touchend', handleTouchEnd);
             el.removeEventListener('touchcancel', handleTouchCancel);
+            el.removeEventListener('wheel', handleWheel);
+            el.removeEventListener('dblclick', handleDoubleClick);
+            el.removeEventListener('pointerdown', handlePointerDown);
+            el.removeEventListener('pointermove', handlePointerMove);
+            el.removeEventListener('pointerup', handlePointerUp);
+            el.removeEventListener('pointercancel', handlePointerUp);
             cancelAnimationFrame(rafId.current);
         };
     }, [containerRef, enabled]);
@@ -271,6 +370,9 @@ export function useImageZoom(
         transformOrigin: 'center center',
         touchAction: isZoomed ? 'none' : undefined,
         willChange: isZoomed ? 'transform' : undefined,
+        // Signals to a mouse user that the zoomed image can be dragged. Without any
+        // desktop affordance, zoom was not merely hard to find — it did not exist.
+        cursor: isZoomed ? 'grab' : undefined,
     };
 
     return { containerStyle, isZoomed, reset };

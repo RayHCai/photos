@@ -30,3 +30,11 @@ export function sharedThumbnailUrl(slug: string, mediaId: string): string {
 export function sharedOriginalUrl(slug: string, mediaId: string): string {
     return apiUrl(`/public/s/${slug}/media/${mediaId}/original`);
 }
+
+/**
+ * Same bytes as {@link sharedOriginalUrl}, but served with an attachment
+ * disposition so the browser saves the file instead of rendering it.
+ */
+export function sharedDownloadUrl(slug: string, mediaId: string): string {
+    return apiUrl(`/public/s/${slug}/media/${mediaId}/original?download=1`);
+}

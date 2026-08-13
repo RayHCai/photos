@@ -25,16 +25,26 @@ router.post(
     '/membership',
     validate({
         body: z.object({
-            mediaItemIds: z.array(z.string()).min(1),
+            mediaItemIds: z.array(z.string()).min(1).max(1000),
         }),
     }),
     collectionsController.membership
 );
 
-router.get('/hidden', collectionsController.getHidden);
-router.get('/favorites', collectionsController.getFavorites);
+const itemPagination = validate({
+    query: z.object({
+        cursor: z.string().optional(),
+        limit: z.coerce.number().min(1).max(500).optional(),
+    }),
+});
 
-router.get('/:id', collectionsController.getById);
+// Static segments must precede /:id or they are captured as an id.
+router.get('/hidden/ids', collectionsController.getHiddenIds);
+router.get('/favorites/ids', collectionsController.getFavoriteIds);
+router.get('/hidden', itemPagination, collectionsController.getHidden);
+router.get('/favorites', itemPagination, collectionsController.getFavorites);
+
+router.get('/:id', itemPagination, collectionsController.getById);
 
 router.patch(
     '/:id',

@@ -2,15 +2,31 @@ import { Request, Response } from 'express';
 import * as queueService from '../services/queue.service.js';
 import * as mediaService from '../services/media.service.js';
 import { prisma } from '../config/prisma.js';
-import { asyncHandler } from '../utils/async.js';
+import { asyncHandler, fireAndForget } from '../utils/async.js';
 import { logger } from '../utils/logger.js';
 
+/**
+ * Bulk maintenance handler.
+ *
+ * These endpoints page over the whole library and enqueue a job per row. Awaiting
+ * that inside the request meant the client and load balancer timed out long before
+ * the loop finished (roughly a million sequential round trips at 500k items) while
+ * the work kept running detached. They now return 202 immediately and report
+ * progress through the existing /jobs/stats and /jobs/processing-stats endpoints.
+ */
 function bulkJobHandler(serviceFn: () => Promise<number>, label: string) {
     return asyncHandler(async (_req: Request, res: Response) => {
         logger.info(`${label} requested`);
-        const count = await serviceFn();
-        logger.info({ count }, `${label} completed`);
-        res.json({ count });
+
+        res.status(202).json({ status: 'accepted' });
+
+        fireAndForget(
+            async () => {
+                const count = await serviceFn();
+                logger.info({ count }, `${label} completed`);
+            },
+            (err) => logger.error({ err }, `${label} failed`)
+        );
     });
 }
 
@@ -26,11 +42,8 @@ export const retryFailed = bulkJobHandler(
 );
 
 export const batchRetry = asyncHandler(async (req: Request, res: Response) => {
-    const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0) {
-        res.status(400).json({ error: 'ids array is required' });
-        return;
-    }
+    // Shape is guaranteed by the route's zod schema.
+    const ids = req.body.ids as string[];
     logger.info({ count: ids.length }, 'batch retry media requested');
     const count = await mediaService.batchRetryMedia(ids);
     logger.info({ count }, 'batch retry media enqueued');
@@ -77,6 +90,11 @@ export const backfillTranscoding = bulkJobHandler(
 export const backfillWebOptimized = bulkJobHandler(
     () => mediaService.backfillWebOptimized(),
     'web-optimized backfill',
+);
+
+export const backfillThumbnailLadder = bulkJobHandler(
+    () => mediaService.backfillThumbnailLadder(),
+    'thumbnail ladder backfill',
 );
 
 export const backfillMetadata = bulkJobHandler(

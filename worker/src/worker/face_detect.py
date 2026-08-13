@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -17,18 +18,37 @@ logger = get_logger(__name__)
 
 _app: FaceAnalysis | None = None
 
+# Guards first load. CPU stages now run in a thread pool, so without this several
+# threads could each build their own ~275 MB model on the first job.
+_load_lock = threading.Lock()
+
+
+def is_loaded() -> bool:
+    return _app is not None
+
+
+def warm_up() -> None:
+    """Load the model eagerly so the first real job does not pay for it."""
+    _load_model()
+
 
 def _load_model() -> FaceAnalysis:
     global _app  # noqa: PLW0603
-    if _app is None:
+    if _app is not None:
+        return _app
+
+    with _load_lock:
+        if _app is not None:
+            return _app
         logger.info("loading_insightface_model")
-        _app = FaceAnalysis(
+        app = FaceAnalysis(
             name="buffalo_l",
             providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
         )
-        _app.prepare(ctx_id=0, det_size=(640, 640), det_thresh=settings.face_det_thresh)
+        app.prepare(ctx_id=0, det_size=(640, 640), det_thresh=settings.face_det_thresh)
+        _app = app
         logger.info("insightface_model_loaded")
-    return _app
+        return _app
 
 
 @dataclass

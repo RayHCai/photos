@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.5"
 
   required_providers {
     aws = {
@@ -7,10 +7,28 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  # Remote state, encrypted and locked.
+  #
+  # There was no backend block, so state lived in a local terraform.tfstate: the IAM
+  # secret key sat in plaintext on one machine, with no encryption, no locking (two
+  # concurrent applies could corrupt it) and no version history to recover from.
+  #
+  # Configure with `terraform init -backend-config=backend.hcl` so the bucket name is
+  # not committed. See infra/backend.hcl.example.
+  backend "s3" {
+    key          = "photos-platform/terraform.tfstate"
+    encrypt      = true
+    use_lockfile = true
+  }
 }
 
 provider "aws" {
   region = var.aws_region
+
+  default_tags {
+    tags = var.tags
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -18,6 +36,12 @@ provider "aws" {
 # -----------------------------------------------------------------------------
 resource "aws_s3_bucket" "photos" {
   bucket = var.bucket_name
+
+  # This bucket holds the only copy of the user's photos. A rename, a region change,
+  # or an accidental `terraform destroy` would otherwise delete all of them.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "photos" {
@@ -71,6 +95,82 @@ resource "aws_s3_bucket_lifecycle_configuration" "photos" {
 
     abort_incomplete_multipart_upload {
       days_after_initiation = 1
+    }
+  }
+
+  # Versioning is enabled, and the only rule used to be the one above — so a
+  # "deleted" photo was retained forever: still billed, and still restorable by
+  # anyone with bucket access. A user deleting 20 GB for privacy or to reclaim space
+  # saw neither happen. The window is long enough to recover from an accidental
+  # delete and short enough that deletion eventually means deletion.
+  rule {
+    id     = "expire-noncurrent-versions"
+    status = "Enabled"
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.noncurrent_version_retention_days
+    }
+  }
+
+  rule {
+    id     = "expire-delete-markers"
+    status = "Enabled"
+    filter {}
+
+    expiration {
+      expired_object_delete_marker = true
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Access logging
+# -----------------------------------------------------------------------------
+# The CDN serves derived image variants with no signed URLs, so a leaked URL is
+# indefinitely reusable. Without logs there was zero audit trail for who had ever
+# fetched a photo.
+resource "aws_s3_bucket" "logs" {
+  bucket = "${var.bucket_name}-logs"
+}
+
+resource "aws_s3_bucket_public_access_block" "logs" {
+  bucket                  = aws_s3_bucket.logs.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# CloudFront's standard logging writes via ACL, which requires ownership to permit it.
+resource "aws_s3_bucket_ownership_controls" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  rule {
+    id     = "expire-logs"
+    status = "Enabled"
+    filter {}
+
+    expiration {
+      days = var.log_retention_days
     }
   }
 }
@@ -157,6 +257,12 @@ resource "aws_cloudfront_distribution" "thumbnails" {
     }
   }
 
+  logging_config {
+    bucket          = aws_s3_bucket.logs.bucket_domain_name
+    prefix          = "cloudfront/"
+    include_cookies = false
+  }
+
   restrictions {
     geo_restriction {
       restriction_type = "none"
@@ -166,6 +272,8 @@ resource "aws_cloudfront_distribution" "thumbnails" {
   viewer_certificate {
     cloudfront_default_certificate = true
   }
+
+  depends_on = [aws_s3_bucket_ownership_controls.logs]
 }
 
 # CloudFront Function to block access to originals/
