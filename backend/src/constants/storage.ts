@@ -36,6 +36,16 @@ export const CDN_SERVED_PREFIXES = ['thumbnails', 'web', 'crops'] as const;
 
 export type WorkerWritablePrefix = (typeof WORKER_WRITABLE_PREFIXES)[number];
 
+/**
+ * Widths in the responsive thumbnail ladder, smallest first.
+ *
+ * Mirrors `worker/src/worker/thumbnail.py` THUMBNAIL_WIDTHS and
+ * `frontend/src/lib/api/media.ts` THUMBNAIL_WIDTHS. The backend needs its own copy
+ * because deletion has to name these objects: they live at keys derived from
+ * `thumbnailKey` and are recorded in no column, so nothing else can enumerate them.
+ */
+export const THUMBNAIL_WIDTHS = [200, 400, 800] as const;
+
 /** `originals/2026/08/<uuid>.<ext>` */
 const KEY_PATTERN = new RegExp(
     `^(${STORAGE_PREFIXES.join('|')})/\\d{4}/\\d{2}/[0-9a-f-]{36}\\.[a-z0-9]{1,12}$`
