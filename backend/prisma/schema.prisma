@@ -1,10 +1,15 @@
 generator client {
     provider = "prisma-client-js"
+    // Required for `extensions = [vector]` on the datasource. Without it Prisma
+    // has no idea the pgvector columns exist, and `migrate dev` generates
+    // DROP COLUMN for clip_embedding / face_embedding / embedding / fts_vector.
+    previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+    provider   = "postgresql"
+    url        = env("DATABASE_URL")
+    extensions = [vector]
 }
 
 // ─── Authentication ────────────────────────────────────────
@@ -48,29 +53,55 @@ model MediaItem {
     height           Int?
     durationSeconds  Float?           @map("duration_seconds")
     takenAt          DateTime?        @map("taken_at")
+    /// Capture-local wall clock as written by the camera, with no zone applied.
+    /// `takenAt` is the true UTC instant; this is what day/month buckets are
+    /// derived from so a photo does not move between days for viewers in other
+    /// timezones. See worker/metadata.py.
+    takenAtLocal     DateTime?        @map("taken_at_local")
+    /// Fixed offset in minutes recovered from EXIF OffsetTimeOriginal, when the
+    /// camera recorded one. Null means the offset was unknown and takenAtLocal
+    /// was assumed to equal the capture zone.
+    takenAtOffsetMin Int?             @map("taken_at_offset_min")
     latitude         Float?
     longitude        Float?
     city             String?
     country          String?
     cameraMake       String?          @map("camera_make")
     cameraModel      String?          @map("camera_model")
+    /// Display rotation in degrees for video (0/90/180/270), from the container
+    /// matrix. Photos are physically rotated at thumbnail time instead.
+    videoRotation    Int?             @map("video_rotation")
     ftsDocument      String?          @map("fts_document")
     processingStatus ProcessingStatus @default(PENDING) @map("processing_status")
     processingError  String?          @map("processing_error")
     currentTaskId    String?          @map("current_task_id")
+    /// Set when a worker claims a task; used by the stalled-PROCESSING reaper to
+    /// distinguish a live job from an abandoned one.
+    processingAt     DateTime?        @map("processing_at")
+    /// True once face detection has run and found nothing, so the
+    /// `missing_faces` retry filter stops re-downloading landscapes forever.
+    facesScanned     Boolean          @default(false) @map("faces_scanned")
     createdAt        DateTime         @default(now()) @map("created_at")
     updatedAt        DateTime         @updatedAt @map("updated_at")
 
-    // pgvector CLIP embedding - managed via raw SQL migration
-    // clip_embedding vector(512)
+    /// pgvector CLIP embedding. Declared (not commented out) so that
+    /// `prisma migrate dev` does not see it as drift and emit DROP COLUMN.
+    clipEmbedding Unsupported("vector(512)")? @map("clip_embedding")
+    /// Generated tsvector maintained by a trigger; see migration 0001.
+    ftsVector     Unsupported("tsvector")?    @map("fts_vector")
 
     faces           Face[]
     collectionItems CollectionItem[]
 
-    @@index([takenAt])
-    @@index([type])
+    // Supports the timeline's `ORDER BY taken_at DESC NULLS LAST, created_at DESC`.
+    // The plain ascending (taken_at) index could not satisfy it, so every listing
+    // fell back to a sequential scan plus a full sort.
+    @@index([takenAt(sort: Desc), createdAt(sort: Desc)], map: "media_items_taken_at_desc_idx")
+    @@index([type, takenAt(sort: Desc), createdAt(sort: Desc)], map: "media_items_type_taken_at_desc_idx")
     @@index([processingStatus])
     @@index([createdAt])
+    // checkDuplicateFileNames looks up by exact file name on every upload batch.
+    @@index([fileName])
     @@map("media_items")
 }
 
@@ -98,16 +129,22 @@ model Face {
     boxHeight   Float    @map("box_height")
     confidence  Float?
     cropKey     String?  @map("crop_key")
+    /// True when a human assigned this face to a person (rename/merge/confirm).
+    /// The recluster job must never move or delete a manually assigned face.
+    manuallyAssigned Boolean @default(false) @map("manually_assigned")
     createdAt   DateTime @default(now()) @map("created_at")
 
-    // pgvector face embedding - managed via raw SQL migration
-    // face_embedding vector(512)
+    /// pgvector face embedding. Declared so migrate does not drop it.
+    faceEmbedding Unsupported("vector(512)")? @map("face_embedding")
 
     mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
     person    Person?   @relation(fields: [personId], references: [id], onDelete: SetNull)
 
     @@index([mediaItemId])
     @@index([personId])
+    // getPersonMedia selects distinct media per person; this covers it without a
+    // sort on the unindexed faces.created_at.
+    @@index([personId, mediaItemId], map: "faces_person_media_idx")
     @@map("faces")
 }
 
@@ -122,7 +159,10 @@ model Collection {
     createdAt   DateTime @default(now()) @map("created_at")
     updatedAt   DateTime @updatedAt @map("updated_at")
 
-    person     Person?        @relation(fields: [personId], references: [id], onDelete: SetNull)
+    // Cascade, not SetNull: a person's auto-generated album (and therefore its
+    // public share links) must not outlive the person. SetNull left a live,
+    // publicly reachable share link pointing at a deleted person's photos.
+    person     Person?          @relation(fields: [personId], references: [id], onDelete: Cascade)
     items      CollectionItem[]
     shareLinks ShareLink[]
 
@@ -140,7 +180,9 @@ model CollectionItem {
     mediaItem  MediaItem  @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
 
     @@unique([collectionId, mediaItemId])
-    @@index([collectionId])
+    // Ordered reads are always (collection, sortOrder); the bare collection_id
+    // index forced a sort of every row in the album.
+    @@index([collectionId, sortOrder], map: "collection_items_collection_sort_idx")
     @@index([mediaItemId])
     @@map("collection_items")
 }
@@ -156,6 +198,7 @@ model ShareLink {
 
     collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
 
+    @@index([collectionId])
     @@map("share_links")
 }
 
@@ -165,8 +208,8 @@ model QueryEmbedding {
     queryText String   @unique @map("query_text")
     createdAt DateTime @default(now()) @map("created_at")
 
-    // pgvector embedding - managed via raw SQL migration
-    // embedding vector(512)
+    /// pgvector embedding. Declared so migrate does not drop it.
+    embedding Unsupported("vector(512)")?
 
     @@map("query_embeddings")
 }

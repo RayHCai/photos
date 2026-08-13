@@ -3,6 +3,8 @@ import { z } from 'zod';
 import * as internalController from '../controllers/internal.controller.js';
 import { serviceAuthMiddleware } from '../middleware/serviceAuth.js';
 import { validate } from '../middleware/validate.js';
+import { PIPELINE_STAGES } from '../constants/pipeline.js';
+import { WORKER_WRITABLE_PREFIXES } from '../constants/storage.js';
 
 const router = Router();
 
@@ -42,7 +44,10 @@ router.post(
     '/media/:id/retry-task',
     validate({
         body: z.object({
-            startStage: z.enum(['full', 'clip', 'faces', 'blurhash', 'transcode', 'web']).default('full'),
+            // Derived from the shared constant rather than re-listed by hand.
+            // This copy used to omit 'metadata', so a retry for that stage was
+            // rejected by zod and surfaced to the operator as an opaque 500.
+            startStage: z.enum(PIPELINE_STAGES).default('full'),
         }),
     }),
     internalController.createRetryTask,
@@ -67,6 +72,14 @@ router.put(
             height: z.number().int().positive().nullable().optional(),
             durationSeconds: z.number().nullable().optional(),
             takenAt: z.string().nullable().optional(),
+            // Capture-local wall clock and its UTC offset. Day/month bucketing is
+            // derived from the local value so a photo does not move between days
+            // depending on the viewer's timezone.
+            takenAtLocal: z.string().nullable().optional(),
+            takenAtOffsetMin: z.number().int().min(-840).max(840).nullable().optional(),
+            videoRotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)])
+                .nullable()
+                .optional(),
             latitude: z.number().nullable().optional(),
             longitude: z.number().nullable().optional(),
             cameraMake: z.string().nullable().optional(),
@@ -169,7 +182,15 @@ router.post(
     internalController.insertFace
 );
 
-router.get('/faces/embeddings', internalController.getAllFaceEmbeddings);
+// Keyset-paginated: returning every 512-dim vector in one response exceeded
+// V8's max string length past ~100k faces and took the process down.
+router.get(
+    '/faces/embeddings',
+    validate({ query: z.object({ cursor: z.string().optional() }) }),
+    internalController.getFaceEmbeddings
+);
+
+router.post('/media/:id/faces-scanned', internalController.markFacesScanned);
 
 router.post(
     '/faces/batch-reassign',
@@ -185,6 +206,9 @@ router.post(
 );
 
 // ─── Persons ─────────────────────────────────────────────────
+
+// Must precede any /persons/:id style route.
+router.get('/persons/named', internalController.listNamedPersons);
 
 router.post('/persons', internalController.createPerson);
 
@@ -220,11 +244,26 @@ router.post(
     '/s3/upload-url',
     validate({
         body: z.object({
-            prefix: z.enum(['thumbnails', 'crops', 'streaming', 'web']),
+            // 'originals' is deliberately excluded: only the user-facing presign
+            // flow may write originals.
+            prefix: z.enum(WORKER_WRITABLE_PREFIXES),
             contentType: z.string(),
         }),
     }),
     internalController.generateUploadUrl
+);
+
+// Presign an upload at a key derived from an existing managed key (the
+// responsive thumbnail ladder). The key shape is validated server-side.
+router.post(
+    '/s3/upload-url-for-key',
+    validate({
+        body: z.object({
+            key: z.string().min(1).max(300),
+            contentType: z.string().min(1).max(100),
+        }),
+    }),
+    internalController.presignUploadForKey
 );
 
 // ─── Cleanup ─────────────────────────────────────────────────

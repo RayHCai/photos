@@ -46,9 +46,28 @@ router.get(
     shareController.sharedThumbnail
 );
 
+/**
+ * Fit-to-screen variant for the shared lightbox. Without this route the client
+ * had to fall back to /original, so a guest downloaded full-resolution originals
+ * (three at a time for prev/current/next) and HEIC/HEVC files did not decode at
+ * all outside Safari.
+ */
+router.get(
+    '/public/s/:slug/media/:mediaId/web',
+    publicShareRateLimiter,
+    shareController.sharedWeb
+);
+
 router.get(
     '/public/s/:slug/media/:mediaId/original',
     publicShareRateLimiter,
+    validate({
+        // download=1 asks S3 for an attachment disposition so the file saves
+        // rather than opening in the browser.
+        query: z.object({
+            download: z.enum(['1']).optional(),
+        }),
+    }),
     shareController.sharedOriginal
 );
 

@@ -67,7 +67,7 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
     const handleSkipAll = useCallback(() => {
         const all = new Map<string, 'skip' | 'keep_both'>();
         for (const dup of duplicates) {
-            all.set(dup.file.name, 'skip');
+            all.set(dup.key, 'skip');
         }
         onResolve(all);
     }, [duplicates, onResolve]);
@@ -75,7 +75,7 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
     function handleKeepAll() {
         const all = new Map<string, 'skip' | 'keep_both'>();
         for (const dup of duplicates) {
-            all.set(dup.file.name, 'keep_both');
+            all.set(dup.key, 'keep_both');
         }
         onResolve(all);
     }
@@ -83,7 +83,7 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
     function handleConfirm() {
         const final = new Map<string, 'skip' | 'keep_both'>();
         for (const dup of duplicates) {
-            final.set(dup.file.name, decisions.get(dup.file.name) || 'skip');
+            final.set(dup.key, decisions.get(dup.key) || 'skip');
         }
         onResolve(final);
     }
@@ -138,7 +138,7 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
                 >
                     {virtualizer.getVirtualItems().map((virtualItem) => {
                         const dup = duplicates[virtualItem.index];
-                        const decision = decisions.get(dup.file.name);
+                        const decision = decisions.get(dup.key);
                         return (
                             <div
                                 key={dup.file.name}
@@ -186,7 +186,7 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
                                         <Button
                                             variant={decision === 'skip' ? 'primary' : 'secondary'}
                                             size="sm"
-                                            onClick={() => setDecision(dup.file.name, 'skip')}
+                                            onClick={() => setDecision(dup.key, 'skip')}
                                             className="flex-1"
                                         >
                                             Skip
@@ -194,7 +194,7 @@ export function DuplicateModal({ duplicates, onResolve }: DuplicateModalProps) {
                                         <Button
                                             variant={decision === 'keep_both' ? 'primary' : 'secondary'}
                                             size="sm"
-                                            onClick={() => setDecision(dup.file.name, 'keep_both')}
+                                            onClick={() => setDecision(dup.key, 'keep_both')}
                                             className="flex-1"
                                         >
                                             Keep Both

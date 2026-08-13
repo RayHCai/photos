@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
+import structlog
 from bullmq import Worker as BullWorker
 
 from worker import backend_client as api
@@ -11,6 +12,7 @@ from worker.geocode import run_geocode_backfill
 from worker.log import get_logger
 from worker.pipeline import process_media
 from worker.recluster import run_recluster
+from worker.stages import LOCK_DURATION_MS
 
 logger = get_logger(__name__)
 
@@ -38,12 +40,19 @@ async def _handle_process_media(job: Any, token: str | None = None) -> str:
     task_id = data.get("taskId")
     media_item_id = data["mediaItemId"]
     start_stage = data.get("startStage", "full")
+    # Carried from the HTTP request that enqueued this job. Without it, debugging one
+    # upload meant correlating three services by timestamp alone.
+    request_id = data.get("requestId")
+
+    structlog.contextvars.bind_contextvars(
+        media_item_id=media_item_id,
+        job_id=job.id,
+        **({"request_id": request_id} if request_id else {}),
+    )
 
     logger.info(
         "job_started",
-        job_id=job.id,
         job_name=job.name,
-        media_item_id=media_item_id,
         task_id=task_id,
         start_stage=start_stage,
     )
@@ -52,7 +61,12 @@ async def _handle_process_media(job: Any, token: str | None = None) -> str:
         if task_id:
             claimed = await api.claim_task(media_item_id, task_id)
             if not claimed:
-                logger.info("task_superseded", job_id=job.id, task_id=task_id, media_item_id=media_item_id)
+                logger.info(
+                    "task_superseded",
+                    job_id=job.id,
+                    task_id=task_id,
+                    media_item_id=media_item_id,
+                )
                 return "superseded"
 
         await process_media(
@@ -63,10 +77,14 @@ async def _handle_process_media(job: Any, token: str | None = None) -> str:
             start_stage=start_stage,
         )
     except Exception:
-        logger.exception("job_failed", job_id=job.id, media_item_id=media_item_id, task_id=task_id)
+        logger.exception("job_failed", task_id=task_id)
         raise
+    finally:
+        # Bound values are per-task in asyncio, but clearing keeps a reused task from
+        # inheriting the previous job's ids.
+        structlog.contextvars.clear_contextvars()
 
-    logger.info("job_completed", job_id=job.id)
+    logger.info("job_completed")
     return "done"
 
 
@@ -101,7 +119,16 @@ async def start_consumers() -> None:
     media_worker = BullWorker(
         "process-media",
         _handle_process_media,
-        {"connection": redis_opts, "concurrency": settings.media_concurrency},
+        {
+            "connection": redis_opts,
+            "concurrency": settings.media_concurrency,
+            # A 4K transcode can legitimately take many minutes. The 30s default
+            # lapsed mid-job, so the stalled-job checker re-delivered the item to a
+            # second task: a duplicate transcode, a duplicate streaming-key upload,
+            # duplicate face rows, and "Missing lock for job" failures. Must exceed
+            # the worst-case single stage.
+            "lockDuration": LOCK_DURATION_MS,
+        },
     )
     _workers.append(media_worker)
     logger.info("media_consumer_started", queue="process-media")
@@ -109,7 +136,12 @@ async def start_consumers() -> None:
     maintenance_worker = BullWorker(
         "maintenance",
         _handle_maintenance,
-        {"connection": redis_opts, "concurrency": 1},
+        {
+            "connection": redis_opts,
+            "concurrency": 1,
+            # Recluster over a large library is minutes of CPU.
+            "lockDuration": LOCK_DURATION_MS,
+        },
     )
     _workers.append(maintenance_worker)
     logger.info("maintenance_consumer_started", queue="maintenance")

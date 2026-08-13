@@ -1,0 +1,178 @@
+name: CI
+
+# There was no CI of any kind. That is the direct cause of the two "always crashes"
+# defects that shipped — an invalid HDBSCAN parameter that made the recluster job raise
+# on every run, and a FastAPI route permanently shadowed by a parameterised one — plus a
+# declared ruff/mypy gate that had never actually executed.
+#
+# Every job here fails the build. Nothing is advisory.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # Supersede an in-flight run for the same ref rather than queueing behind it.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend (typecheck, lint, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: backend/yarn.lock
+
+      - run: yarn install --frozen-lockfile
+        working-directory: backend
+
+      # The Prisma client is generated code that the type checker needs. It also
+      # validates the schema, which is what guards the pgvector columns being modelled
+      # as Unsupported(...) rather than silently dropped by a future migrate.
+      - run: npx prisma generate
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://unused:unused@localhost:5432/unused
+
+      - run: npx prisma validate
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://unused:unused@localhost:5432/unused
+
+      - run: yarn typecheck
+        working-directory: backend
+
+      - run: npx eslint src/ --max-warnings=0
+        working-directory: backend
+
+      - run: yarn test:run
+        working-directory: backend
+
+  frontend:
+    name: frontend (typecheck, lint, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - run: yarn install --frozen-lockfile
+        working-directory: frontend
+
+      - run: yarn typecheck
+        working-directory: frontend
+
+      - run: npx eslint src/ --max-warnings=0
+        working-directory: frontend
+
+      - run: yarn test:run
+        working-directory: frontend
+
+      # next.config.ts sets ignoreBuildErrors/ignoreDuringBuilds to false, so this is a
+      # real gate rather than a smoke test.
+      - run: yarn build
+        working-directory: frontend
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+
+  worker:
+    name: worker (lint, typecheck, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # Only the light dependencies. The tests deliberately avoid importing torch,
+      # insightface and bullmq — the heavy imports were moved out of the modules under
+      # test (worker/video.py, worker/stages.py, and a lazy import inside
+      # recluster._fit) precisely so this job stays a couple of minutes rather than
+      # pulling multiple gigabytes of ML wheels.
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio ruff mypy \
+                      pillow structlog pydantic-settings httpx numpy
+
+      - name: Lint
+        run: ruff check src/ tests/
+        working-directory: worker
+
+      # No `ruff format --check`: this codebase has never been ruff-formatted, so it
+      # would fail on pre-existing style across every file. The linter already enforces
+      # line length and import order, which is what actually matters here. Adopting the
+      # formatter is a separate, mechanical commit.
+
+      - name: Test
+        run: python -m pytest tests/ -q
+        working-directory: worker
+        env:
+          PYTHONPATH: src
+
+      # mypy runs against the modules that do not need the ML stack. Type-checking the
+      # inference modules needs torch installed, so that is left to a nightly job rather
+      # than paid on every push.
+      - name: Typecheck (lightweight modules)
+        run: |
+          mypy --ignore-missing-imports \
+               src/worker/stages.py \
+               src/worker/video.py \
+               src/worker/metadata.py \
+               src/worker/config.py
+        working-directory: worker
+
+  infra:
+    name: infra (fmt, validate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - run: terraform fmt -check -recursive
+        working-directory: infra
+
+      # -backend=false so validation needs no remote state or credentials.
+      - run: terraform init -backend=false
+        working-directory: infra
+
+      - run: terraform validate -no-color
+        working-directory: infra
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The shipped .env.example files used to document an empty WORKER_SECRET, which
+      # disabled auth on the whole internal surface. A scan will not catch that class of
+      # thing, but it does catch a real key being committed alongside it.
+      - name: Check no env or state files are tracked
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.(local|production)$|\.tfstate$|backend\.hcl$|terraform\.tfvars$'; then
+            echo "::error::Secret-bearing file is tracked in git"
+            exit 1
+          fi

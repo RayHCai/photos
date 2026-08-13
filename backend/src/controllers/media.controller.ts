@@ -17,13 +17,31 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
     res.json(result);
 });
 
-export const shell = asyncHandler(async (_req: Request, res: Response) => {
-    const items = await mediaService.getShellData();
-    res.json(items);
+export const shell = asyncHandler(async (req: Request, res: Response) => {
+    const result = await mediaService.getShellData({
+        ...(req.query.cursor ? { cursor: req.query.cursor as string } : {}),
+        ...(req.query.limit ? { limit: Number(req.query.limit) } : {}),
+    });
+    res.json(result);
 });
 
 export const timeline = asyncHandler(async (_req: Request, res: Response) => {
     const result = await mediaService.getTimeline();
+    // Cheap to recompute and cached server-side; a short client cache stops a
+    // remount from re-requesting it.
+    res.set('Cache-Control', 'private, max-age=60');
+    res.json(result);
+});
+
+/**
+ * Narrow feed for the processing poll. Replaces re-fetching the whole shell
+ * payload every 5 seconds while anything is processing.
+ */
+export const processingUpdates = asyncHandler(async (req: Request, res: Response) => {
+    const since = req.query.since ? new Date(req.query.since as string) : undefined;
+    const result = await mediaService.getProcessingUpdates(
+        since && !Number.isNaN(since.getTime()) ? since : undefined
+    );
     res.json(result);
 });
 
@@ -45,7 +63,12 @@ export const presign = asyncHandler(async (req: Request, res: Response) => {
 
 export const confirmUpload = asyncHandler(async (req: Request, res: Response) => {
     logger.info({ mediaId: req.body.id }, 'confirming presigned upload');
-    const item = await mediaService.confirmPresignedUpload(req.body.id);
+    // Propagated into the queue job so worker logs can be correlated with the
+    // originating request; previously x-request-id died at the HTTP boundary.
+    const item = await mediaService.confirmPresignedUpload(
+        req.body.id,
+        req.headers['x-request-id'] as string | undefined
+    );
     logger.info({ mediaId: item.id }, 'presigned upload confirmed, processing enqueued');
     res.json(item);
 });
@@ -77,7 +100,8 @@ export const multipartComplete = asyncHandler(async (req: Request, res: Response
         req.body.mediaItemId,
         req.body.s3Key,
         req.body.uploadId,
-        req.body.parts
+        req.body.parts,
+        req.headers['x-request-id'] as string | undefined
     );
     logger.info({ mediaId: item.id }, 'multipart upload completed, processing enqueued');
     res.json(item);
@@ -106,23 +130,23 @@ export const batchThumbnails = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const getThumbnail = asyncHandler(async (req: Request, res: Response) => {
-    const url = await mediaService.getThumbnailUrl(req.params.id as string);
-    cachedRedirect(res, url);
+    const { url, expiresInSeconds } = await mediaService.getThumbnailUrl(req.params.id as string);
+    cachedRedirect(res, url, expiresInSeconds);
 });
 
 export const getOriginal = asyncHandler(async (req: Request, res: Response) => {
-    const url = await mediaService.getOriginalUrl(req.params.id as string);
-    cachedRedirect(res, url);
+    const { url, expiresInSeconds } = await mediaService.getOriginalUrl(req.params.id as string);
+    cachedRedirect(res, url, expiresInSeconds);
 });
 
 export const getWeb = asyncHandler(async (req: Request, res: Response) => {
-    const url = await mediaService.getWebUrl(req.params.id as string);
-    cachedRedirect(res, url);
+    const { url, expiresInSeconds } = await mediaService.getWebUrl(req.params.id as string);
+    cachedRedirect(res, url, expiresInSeconds);
 });
 
 export const download = asyncHandler(async (req: Request, res: Response) => {
-    const url = await mediaService.getDownloadUrl(req.params.id as string);
-    cachedRedirect(res, url);
+    const { url, expiresInSeconds } = await mediaService.getDownloadUrl(req.params.id as string);
+    cachedRedirect(res, url, expiresInSeconds);
 });
 
 export const checkDuplicates = asyncHandler(async (req: Request, res: Response) => {

@@ -14,19 +14,14 @@ import {
     rerunMissingFaces,
     backfillTranscoding,
     backfillWebOptimized,
+    backfillThumbnailLadder,
     backfillGeocoding,
     backfillMetadata,
 } from '@/lib/api/jobs';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
-
-function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    const value = bytes / Math.pow(1024, i);
-    return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
+import { formatFileSize } from '@/lib/utils/format';
+import { pluralize } from '@/lib/utils/pluralize';
 
 interface ActionButtonProps {
     label: string;
@@ -90,15 +85,16 @@ export default function SettingsPage() {
             description: 'Re-queue all failed media items for reprocessing',
             onClick: async () => {
                 const { count } = await retryFailed();
-                toast.success(`Retrying ${count} items`);
+                toast.success(`Retrying ${pluralize(count, 'item')}`);
             },
         },
         {
             label: 'Fix Orphaned Processing',
-            description: 'Reset items stuck in PROCESSING status back to PENDING',
+            description:
+                'Reconcile items stuck in PROCESSING: complete the ones that actually finished, fail the rest so they can be retried',
             onClick: async () => {
                 const { count } = await fixOrphanedProcessing();
-                toast.success(`Fixed ${count} items`);
+                toast.success(`Reconciled ${pluralize(count, 'item')}`);
             },
         },
         {
@@ -131,6 +127,15 @@ export default function SettingsPage() {
             onClick: async () => {
                 const { count } = await backfillWebOptimized();
                 toast.success(`Enqueued ${count} photos for web optimization`);
+            },
+        },
+        {
+            label: 'Backfill Thumbnail Ladder',
+            description:
+                'Regenerate responsive thumbnail sizes (200/400/800px) for all photos. Re-enqueues every completed photo, since nothing tracks which ones are missing it.',
+            onClick: async () => {
+                const { count } = await backfillThumbnailLadder();
+                toast.success(`Enqueued ${pluralize(count, 'item')} for thumbnail ladder`);
             },
         },
         {
@@ -171,7 +176,7 @@ export default function SettingsPage() {
     const totalItems = storageStats?.totalItems ?? 0;
 
     return (
-        <div className="h-screen flex flex-col">
+        <div className="h-[100dvh] flex flex-col">
             <div className="flex-1 overflow-y-auto">
                 <div className="max-w-lg mx-auto px-6 py-16 space-y-10">
                     {/* Storage Stats */}
@@ -185,7 +190,7 @@ export default function SettingsPage() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="p-4 rounded-xl bg-stone-50 border border-stone-100">
                                     <p className="text-2xl font-light text-stone-800 tracking-tight">
-                                        {formatBytes(totalBytes)}
+                                        {formatFileSize(totalBytes)}
                                     </p>
                                     <p className="text-xs text-stone-400 mt-1">Total stored</p>
                                 </div>

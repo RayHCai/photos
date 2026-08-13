@@ -65,6 +65,8 @@ export function MediaLightbox({
     // (we need mimeType for the original layer) and the original layer itself.
     const [zoomActivated, setZoomActivated] = useState(false);
     const [copied, setCopied] = useState(false);
+    /** True while MediaActions has its delete confirmation open. */
+    const [modalOpen, setModalOpen] = useState(false);
     const loadedWebRef = useRef(new Set<string>());
     const preloadedRef = useRef(new Set<string>());
     const trackRef = useRef<HTMLDivElement>(null);
@@ -198,6 +200,26 @@ export function MediaLightbox({
 
     const handleKeyDown = useCallback(
         (e: KeyboardEvent) => {
+            /**
+             * Suspend navigation while a modal owned by this lightbox is open.
+             *
+             * Arrow keys used to navigate unconditionally, so with the delete
+             * confirmation open a stray arrow press moved to the next photo while the
+             * dialog stayed on screen — confirming then deleted the *new* photo.
+             * Escape must also close the dialog rather than the whole lightbox.
+             */
+            if (modalOpen) return;
+
+            // Let the user type in a field (rename, search) without hijacking keys.
+            const target = e.target as HTMLElement | null;
+            if (
+                target &&
+                (target.isContentEditable ||
+                    ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+            ) {
+                return;
+            }
+
             switch (e.key) {
             case 'Escape':
                 onClose();
@@ -213,15 +235,19 @@ export function MediaLightbox({
                 break;
             }
         },
-        [onClose, onPrev, onNext]
+        [onClose, onPrev, onNext, modalOpen]
     );
 
     useEffect(() => {
         document.addEventListener('keydown', handleKeyDown);
+
+        // Scroll lock, restoring whatever was there rather than assuming ''.
+        const previousOverflow = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
+
         return () => {
             document.removeEventListener('keydown', handleKeyDown);
-            document.body.style.overflow = '';
+            document.body.style.overflow = previousOverflow;
         };
     }, [handleKeyDown]);
 
@@ -240,7 +266,11 @@ export function MediaLightbox({
 
                 <div className="absolute top-3 right-3 flex items-center gap-1 z-10">
                     {showDelete ? (
-                        <MediaActions mediaId={mediaId} onDelete={onClose} />
+                        <MediaActions
+                            mediaId={mediaId}
+                            onDelete={onClose}
+                            onConfirmOpenChange={setModalOpen}
+                        />
                     ) : (
                         <button
                             className={dlStyles.button}

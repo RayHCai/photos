@@ -25,6 +25,14 @@ export default function PersonsPage() {
     const filteredPersons = useLocalFilter(persons, search, useCallback((p) => p.name, []));
     const personIds = useMemo(() => filteredPersons.map((p) => p.id), [filteredPersons]);
 
+    // id -> index, so shift-range selection is a Map lookup rather than a
+    // linear scan per click.
+    const personIdsIndex = useMemo(() => {
+        const map = new Map<string, number>();
+        personIds.forEach((id, i) => map.set(id, i));
+        return map;
+    }, [personIds]);
+
     // Keep selected person in sync with latest data
     const activePerson = useMemo(() => {
         if (!selectedPerson || !persons) return null;
@@ -59,7 +67,7 @@ export default function PersonsPage() {
                     <SelectionToolbar
                         selection={selection}
                         onDelete={handleDeletePersons}
-                        deleteConfirmMessage={`Delete ${selection.count} selected person${selection.count !== 1 ? 's' : ''}? This cannot be undone.`}
+                        deleteConfirmMessage={`Delete ${pluralize(selection.count, 'selected person', `selected people`)}? This cannot be undone.`}
                     />
                     <div className="w-9 flex-shrink-0 hidden sm:block" />
                 </>
@@ -73,7 +81,7 @@ export default function PersonsPage() {
                         onClick={() => setSelectedPerson(p)}
                         isSelected={selection.selectedIds.has(p.id)}
                         isSelecting={selection.isSelecting}
-                        onSelect={(e: React.MouseEvent) => selection.handleSelect(p.id, personIds, e)}
+                        onSelect={(e: React.MouseEvent) => selection.handleSelect(p.id, personIds, personIdsIndex, e)}
                     />
                 ))}
             </div>

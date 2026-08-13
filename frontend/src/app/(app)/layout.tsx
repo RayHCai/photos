@@ -1,6 +1,5 @@
 'use client';
 
-import { UploadProvider } from '@/lib/providers/UploadProvider';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { AppShell } from '@/components/layout/AppShell';
 
@@ -9,11 +8,11 @@ export default function AppLayout({
 }: {
     children: React.ReactNode;
 }) {
+    // UploadProvider now lives at the root (app/providers.tsx) so an in-flight upload
+    // survives a redirect out of this route group.
     return (
-        <UploadProvider>
-            <AuthGuard>
-                <AppShell>{children}</AppShell>
-            </AuthGuard>
-        </UploadProvider>
+        <AuthGuard>
+            <AppShell>{children}</AppShell>
+        </AuthGuard>
     );
 }

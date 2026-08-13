@@ -2,6 +2,7 @@ import * as chrono from 'chrono-node';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
 import { env } from '../config/env.js';
+import { redisConnection } from '../config/redis.js';
 import { logger } from '../utils/logger.js';
 import { toVectorLiteral } from '../utils/embeddings.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
@@ -13,6 +14,14 @@ interface SearchParams {
     q: string;
     page: number;
     limit: number;
+    /**
+     * Explicit media-type filter from the UI. This was accepted by the client and
+     * threaded into the query key, but the route's zod schema did not declare it —
+     * and `validate` replaces req.query with the parsed object, so zod stripped it
+     * silently and the controller never saw it. Media-type filtering existed only
+     * as a regex over the query text.
+     */
+    type?: 'PHOTO' | 'VIDEO';
 }
 
 interface SearchResult {
@@ -22,9 +31,12 @@ interface SearchResult {
     thumbnail_key: string | null;
     blur_hash: string | null;
     taken_at: Date | null;
+    taken_at_local: Date | null;
+    created_at: Date;
     width: number | null;
     height: number | null;
     duration_seconds: number | null;
+    processing_status: string;
     similarity?: number;
     rank?: number;
 }
@@ -49,7 +61,8 @@ function extractMediaType(query: string): { mediaType: 'PHOTO' | 'VIDEO' | null;
     if (photoPattern.test(remaining)) {
         mediaType = 'PHOTO';
         remaining = remaining.replace(photoPattern, ' ').trim();
-    } else if (videoPattern.test(remaining)) {
+    }
+    else if (videoPattern.test(remaining)) {
         mediaType = 'VIDEO';
         remaining = remaining.replace(videoPattern, ' ').trim();
     }
@@ -57,28 +70,66 @@ function extractMediaType(query: string): { mediaType: 'PHOTO' | 'VIDEO' | null;
     return { mediaType, remaining };
 }
 
-async function extractPersons(query: string): Promise<{ personIds: string[]; remaining: string }> {
-    const allPersons = await prisma.person.findMany({
+const PERSON_NAME_CACHE_KEY = 'search:person-names:v1';
+const PERSON_NAME_CACHE_TTL = 300;
+
+/**
+ * Named people, cached.
+ *
+ * This was an unfiltered `person.findMany` on **every** search request.
+ */
+async function getNamedPersons(): Promise<Array<{ id: string; name: string }>> {
+    const cached = await redisConnection.get(PERSON_NAME_CACHE_KEY);
+    if (cached) return JSON.parse(cached) as Array<{ id: string; name: string }>;
+
+    const rows = await prisma.person.findMany({
         where: { name: { not: null } },
         select: { id: true, name: true },
     });
+    const named = rows.filter((p): p is { id: string; name: string } => p.name !== null);
+
+    await redisConnection.setex(
+        PERSON_NAME_CACHE_KEY,
+        PERSON_NAME_CACHE_TTL,
+        JSON.stringify(named)
+    );
+    return named;
+}
+
+export async function invalidatePersonNameCache() {
+    await redisConnection.del(PERSON_NAME_CACHE_KEY);
+}
+
+async function extractPersons(query: string): Promise<{ personIds: string[]; remaining: string }> {
+    const allPersons = await getNamedPersons();
 
     let remaining = query.toLowerCase();
     const personIds: string[] = [];
 
-    // Match longest names first to handle multi-word names
-    const sorted = allPersons
-        .filter((p): p is { id: string; name: string } => p.name !== null)
-        .sort((a, b) => b.name.length - a.name.length);
+    // Match longest names first to handle multi-word names.
+    const sorted = [...allPersons].sort((a, b) => b.name.length - a.name.length);
 
     for (const person of sorted) {
-        if (remaining.includes(person.name.toLowerCase())) {
+        const name = person.name.toLowerCase();
+        /**
+         * Word-boundary match rather than a bare substring.
+         *
+         * `includes` matched a person named "Al" inside "Alaska" or "always", and a
+         * city named "Nice" inside "a nice sunset" — so unrelated queries silently
+         * became person/location filters and returned nothing.
+         */
+        const pattern = new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i');
+        if (pattern.test(remaining)) {
             personIds.push(person.id);
-            remaining = remaining.replace(person.name.toLowerCase(), ' ').trim();
+            remaining = remaining.replace(pattern, ' ').trim();
         }
     }
 
     return { personIds, remaining };
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function extractDateRange(query: string): { dateRange: ParsedQuery['dateRange']; remaining: string } {
@@ -93,7 +144,8 @@ function extractDateRange(query: string): { dateRange: ParsedQuery['dateRange'];
             // Explicit range like "june to august"
             start = result.start.date();
             end = result.end.date();
-        } else {
+        }
+        else {
             const known = result.start;
             const hasDay = known.isCertain('day');
             const hasMonth = known.isCertain('month');
@@ -103,11 +155,13 @@ function extractDateRange(query: string): { dateRange: ParsedQuery['dateRange'];
                 // Specific day: "may 4th"
                 start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
                 end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-            } else if (hasMonth) {
+            }
+            else if (hasMonth) {
                 // Month-level: "june" or "january 2024"
                 start = new Date(d.getFullYear(), d.getMonth(), 1);
                 end = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-            } else {
+            }
+            else {
                 // Year-level from chrono (unlikely but handle it)
                 start = new Date(d.getFullYear(), 0, 1);
                 end = new Date(d.getFullYear() + 1, 0, 1);
@@ -138,25 +192,45 @@ function extractDateRange(query: string): { dateRange: ParsedQuery['dateRange'];
     return { dateRange: null, remaining: query };
 }
 
-// Location cache (refreshes every 5 minutes)
-let locationCache: { cities: string[]; countries: string[]; expiresAt: number } | null = null;
+const FACET_CACHE_KEY = 'search:facets:v1';
+const FACET_CACHE_TTL = 600;
 
-async function getLocationValues() {
-    if (locationCache && Date.now() < locationCache.expiresAt) {
-        return locationCache;
-    }
+interface LocationFacets {
+    cities: string[];
+    countries: string[];
+}
+
+/**
+ * Distinct city/country values used to recognise place names in a query.
+ *
+ * Previously a module-level variable with a 5-minute expiry and no single-flight
+ * protection: every process refreshed independently, and on expiry several
+ * concurrent searches each ran two `SELECT DISTINCT` full scans (neither column
+ * was indexed) at the same time. Now Redis-backed so all processes share one
+ * refresh, and the columns have partial indexes (migration 0007).
+ */
+async function getLocationValues(): Promise<LocationFacets> {
+    const cached = await redisConnection.get(FACET_CACHE_KEY);
+    if (cached) return JSON.parse(cached) as LocationFacets;
+
     const [cityRows, countryRows] = await Promise.all([
         prisma.$queryRaw<Array<{ city: string }>>`
             SELECT DISTINCT city FROM media_items WHERE city IS NOT NULL`,
         prisma.$queryRaw<Array<{ country: string }>>`
             SELECT DISTINCT country FROM media_items WHERE country IS NOT NULL`,
     ]);
-    locationCache = {
+
+    const facets: LocationFacets = {
         cities: cityRows.map((r) => r.city),
         countries: countryRows.map((r) => r.country),
-        expiresAt: Date.now() + 5 * 60 * 1000,
     };
-    return locationCache;
+
+    await redisConnection.setex(FACET_CACHE_KEY, FACET_CACHE_TTL, JSON.stringify(facets));
+    return facets;
+}
+
+export async function invalidateSearchFacets() {
+    await redisConnection.del(FACET_CACHE_KEY);
 }
 
 async function extractLocations(query: string): Promise<{
@@ -169,18 +243,22 @@ async function extractLocations(query: string): Promise<{
     const matchedCities: string[] = [];
     const matchedCountries: string[] = [];
 
-    // Match countries first (longer names like "United States" before "States")
+    // Countries first (longer names like "United States" before "States").
+    // Word-boundary matched: a bare substring test made a city called "Nice" match
+    // inside "a nice sunset".
     for (const country of [...countries].sort((a, b) => b.length - a.length)) {
-        if (remaining.includes(country.toLowerCase())) {
+        const pattern = new RegExp(`\\b${escapeRegExp(country.toLowerCase())}\\b`, 'i');
+        if (pattern.test(remaining)) {
             matchedCountries.push(country);
-            remaining = remaining.replace(country.toLowerCase(), ' ').trim();
+            remaining = remaining.replace(pattern, ' ').trim();
         }
     }
 
     for (const city of [...cities].sort((a, b) => b.length - a.length)) {
-        if (remaining.includes(city.toLowerCase())) {
+        const pattern = new RegExp(`\\b${escapeRegExp(city.toLowerCase())}\\b`, 'i');
+        if (pattern.test(remaining)) {
             matchedCities.push(city);
-            remaining = remaining.replace(city.toLowerCase(), ' ').trim();
+            remaining = remaining.replace(pattern, ' ').trim();
         }
     }
 
@@ -239,6 +317,15 @@ function buildFilterConditions(parsed: ParsedQuery): Prisma.Sql[] {
     return conditions;
 }
 
+/**
+ * Shapes a raw row into the same DTO the rest of the API returns.
+ *
+ * `processingStatus` and `createdAt` are now included. They were omitted, so the
+ * client fabricated them: it hard-coded `processingStatus: 'COMPLETED'` (making a
+ * still-processing match render as a clickable tile that opened a permanent
+ * spinner) and `createdAt: takenAt || new Date()` (filing a taken_at-null match
+ * under "Today" in search but under its real upload date in the timeline).
+ */
 function mapSearchResult(r: SearchResult) {
     return {
         id: r.id,
@@ -250,53 +337,69 @@ function mapSearchResult(r: SearchResult) {
         height: r.height,
         durationSeconds: r.duration_seconds,
         takenAt: r.taken_at,
-        ...(r.similarity != null && { similarity: r.similarity }),
-        ...(r.rank != null && { rank: r.rank }),
+        takenAtLocal: r.taken_at_local,
+        createdAt: r.created_at,
+        processingStatus: r.processing_status,
+        ...(r.similarity !== undefined && { similarity: r.similarity }),
+        ...(r.rank !== undefined && { rank: r.rank }),
     };
 }
 
 // ── CLIP Embedding ─────────────────────────────────────────────────────
 
+/**
+ * Fetch (and cache) a CLIP text embedding for a query.
+ *
+ * Semantic search is gated on SEMANTIC_SEARCH_ENABLED rather than the `return
+ * null` that used to sit at the top of this function. That early return left
+ * everything below it unreachable, made `searchWithClipAndFilters` dead code, and
+ * silently degraded every semantic query to FTS while the frontend still
+ * advertised `searchType: 'semantic'`. It also meant the worker kept computing and
+ * storing a 512-dim embedding for every photo that nothing could ever read.
+ */
 async function getQueryEmbedding(queryText: string): Promise<number[] | null> {
-    // Semantic search disabled: worker runs locally (Mac Mini) and is not reachable
-    // over HTTP from the backend. Returning null makes search fall back to FTS.
-    // To re-enable, remove this early return and expose the worker at WORKER_URL.
-    return null;
+    if (!env.SEMANTIC_SEARCH_ENABLED) return null;
+
+    // Case-insensitive so "Beach" and "beach" share one cache row; the column has
+    // a unique constraint, so the key must be normalised before lookup and insert.
+    const cacheKey = queryText.trim().toLowerCase();
 
     const cached = await prisma.$queryRaw<Array<{ embedding: string }>>`
-        SELECT embedding::text FROM query_embeddings
-        WHERE query_text = ${queryText}
+        SELECT embedding::text AS embedding FROM query_embeddings
+        WHERE query_text = ${cacheKey}
     `;
 
-    if (cached.length > 0 && cached[0].embedding) {
-        logger.debug({ queryText }, 'search: CLIP embedding cache hit');
-        return JSON.parse(cached[0].embedding);
+    if (cached.length > 0 && cached[0]!.embedding) {
+        return JSON.parse(cached[0]!.embedding) as number[];
     }
 
     try {
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (env.WORKER_SECRET) {
-            headers['X-Service-Secret'] = env.WORKER_SECRET;
-        }
-
         const response = await fetch(`${env.WORKER_URL}/embed/text`, {
             method: 'POST',
-            headers,
-            body: JSON.stringify({ text: queryText }),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Service-Secret': env.WORKER_SECRET,
+            },
+            body: JSON.stringify({ text: cacheKey }),
             signal: AbortSignal.timeout(5000),
         });
 
         if (!response.ok) {
-            logger.warn('CLIP encoder returned non-OK status');
+            logger.warn({ status: response.status }, 'CLIP encoder returned non-OK status');
             return null;
         }
 
-        const data = await response.json() as { embedding: number[] };
+        const data = (await response.json()) as { embedding: number[] };
+
+        if (!Array.isArray(data.embedding) || data.embedding.length !== 512) {
+            logger.warn('CLIP encoder returned a malformed embedding');
+            return null;
+        }
 
         const embeddingStr = toVectorLiteral(data.embedding);
         await prisma.$executeRaw`
             INSERT INTO query_embeddings (id, query_text, embedding)
-            VALUES (gen_random_uuid(), ${queryText}, ${embeddingStr}::vector)
+            VALUES (gen_random_uuid(), ${cacheKey}, ${embeddingStr}::vector)
             ON CONFLICT (query_text) DO UPDATE SET embedding = ${embeddingStr}::vector
         `;
 
@@ -309,6 +412,20 @@ async function getQueryEmbedding(queryText: string): Promise<number[] | null> {
 }
 
 // ── Search Strategies ──────────────────────────────────────────────────
+
+/**
+ * Shared projection for every raw-SQL search branch.
+ *
+ * This nine-column list was copied verbatim into four separate queries while a
+ * fifth branch used MEDIA_ITEM_SUMMARY_SELECT, so adding a column (e.g.
+ * processing_status, which the client needs and previously had to fabricate)
+ * required four identical edits and the copies had already diverged in shape.
+ */
+const SEARCH_PROJECTION = Prisma.sql`
+    m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
+    m.taken_at, m.taken_at_local, m.created_at, m.width, m.height,
+    m.duration_seconds, m.processing_status
+`;
 
 async function searchWithClipAndFilters(
     parsed: ParsedQuery,
@@ -323,23 +440,46 @@ async function searchWithClipAndFilters(
         ? Prisma.sql`AND ${Prisma.join(conditions, ' AND ')}`
         : Prisma.empty;
 
-    await prisma.$executeRaw`SELECT set_config('hnsw.ef_search', ${String(env.HNSW_EF_SEARCH)}, true)`;
+    /**
+     * `set_config(..., is_local => true)` is transaction-scoped, and $executeRaw
+     * runs standalone — so the value reverted the instant that statement committed
+     * and the following query could land on a different pooled connection. ANN
+     * search therefore always ran at pgvector's default ef_search regardless of
+     * HNSW_EF_SEARCH. Running both statements inside one interactive transaction
+     * pins them to the same connection and keeps the setting in scope.
+     *
+     * The candidate pool is also widened when filters are present, because the
+     * filters are post-applied to the ANN result: without this a selective filter
+     * returns far fewer than `limit` rows.
+     */
+    const candidateLimit = conditions.length > 0 ? Math.min((limit + offset) * 10, 2000) : limit + offset;
 
-    const results = await prisma.$queryRaw<SearchResult[]>`
-        SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
-               m.taken_at, m.width, m.height, m.duration_seconds,
-               1 - (m.clip_embedding <=> ${embeddingStr}::vector) AS similarity
-        FROM media_items m
-        WHERE m.clip_embedding IS NOT NULL
-          ${filterSql}
-          AND ${HIDDEN_NOT_EXISTS}
-        ORDER BY m.clip_embedding <=> ${embeddingStr}::vector
-        LIMIT ${limit} OFFSET ${offset}
-    `;
+    const results = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('hnsw.ef_search', ${String(env.HNSW_EF_SEARCH)}, true)`;
+
+        return tx.$queryRaw<SearchResult[]>`
+            WITH candidates AS (
+                SELECT m.id, m.clip_embedding <=> ${embeddingStr}::vector AS distance
+                FROM media_items m
+                WHERE m.clip_embedding IS NOT NULL
+                ORDER BY m.clip_embedding <=> ${embeddingStr}::vector
+                LIMIT ${candidateLimit}
+            )
+            SELECT ${SEARCH_PROJECTION}, 1 - c.distance AS similarity
+            FROM candidates c
+            JOIN media_items m ON m.id = c.id
+            WHERE TRUE
+              ${filterSql}
+              AND ${HIDDEN_NOT_EXISTS}
+            ORDER BY c.distance
+            LIMIT ${limit} OFFSET ${offset}
+        `;
+    });
 
     return {
         items: results.map(mapSearchResult),
-        total: results.length,
+        // Approximate by construction: an ANN search has no exact total.
+        total: offset + results.length + (results.length === limit ? 1 : 0),
         page,
         limit,
         searchType: 'semantic' as const,
@@ -357,21 +497,30 @@ async function searchWithFtsAndFilters(
         ? Prisma.sql`AND ${Prisma.join(conditions, ' AND ')}`
         : Prisma.empty;
 
-    const results = await prisma.$queryRaw<SearchResult[]>`
-        SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
-               m.taken_at, m.width, m.height, m.duration_seconds,
-               ts_rank(m.fts_vector, plainto_tsquery('english', ${parsed.clipText})) AS rank
-        FROM media_items m
-        WHERE m.fts_vector @@ plainto_tsquery('english', ${parsed.clipText})
-          ${filterSql}
-          AND ${HIDDEN_NOT_EXISTS}
-        ORDER BY rank DESC
-        LIMIT ${limit} OFFSET ${offset}
-    `;
+    const [results, countResult] = await Promise.all([
+        prisma.$queryRaw<SearchResult[]>`
+            SELECT ${SEARCH_PROJECTION},
+                   ts_rank(m.fts_vector, plainto_tsquery('english', ${parsed.clipText})) AS rank
+            FROM media_items m
+            WHERE m.fts_vector @@ plainto_tsquery('english', ${parsed.clipText})
+              ${filterSql}
+              AND ${HIDDEN_NOT_EXISTS}
+            -- m.id breaks rank ties so pagination is stable; without it two pages
+            -- could return the same row or skip one.
+            ORDER BY rank DESC, m.id
+            LIMIT ${limit} OFFSET ${offset}
+        `,
+        prisma.$queryRaw<[{ count: bigint }]>`
+            SELECT COUNT(*) AS count FROM media_items m
+            WHERE m.fts_vector @@ plainto_tsquery('english', ${parsed.clipText})
+              ${filterSql}
+              AND ${HIDDEN_NOT_EXISTS}
+        `,
+    ]);
 
     return {
         items: results.map(mapSearchResult),
-        total: results.length,
+        total: Number(countResult[0]!.count),
         page,
         limit,
         searchType: 'fts' as const,
@@ -391,11 +540,10 @@ async function searchWithFiltersOnly(
 
     const [results, countResult] = await Promise.all([
         prisma.$queryRaw<SearchResult[]>`
-            SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
-                   m.taken_at, m.width, m.height, m.duration_seconds
+            SELECT ${SEARCH_PROJECTION}
             FROM media_items m
             ${mainWhere}
-            ORDER BY m.taken_at DESC NULLS LAST, m.created_at DESC
+            ORDER BY m.taken_at DESC NULLS LAST, m.created_at DESC, m.id
             LIMIT ${limit} OFFSET ${offset}
         `,
         prisma.$queryRaw<[{ count: bigint }]>`
@@ -406,7 +554,7 @@ async function searchWithFiltersOnly(
 
     return {
         items: results.map(mapSearchResult),
-        total: Number(countResult[0].count),
+        total: Number(countResult[0]!.count),
         page,
         limit,
         searchType: 'filter' as const,
@@ -416,25 +564,29 @@ async function searchWithFiltersOnly(
 // ── Main Search ────────────────────────────────────────────────────────
 
 export async function search(params: SearchParams) {
-    const { q, page, limit } = params;
+    const { q, page, limit, type } = params;
     const offset = (page - 1) * limit;
 
     if (!q || q.trim().length === 0) {
+        const where = { ...HIDDEN_EXCLUSION, ...(type ? { type } : {}) };
         const [items, total] = await Promise.all([
             prisma.mediaItem.findMany({
-                where: HIDDEN_EXCLUSION,
-                orderBy: [{ takenAt: 'desc' }, { createdAt: 'desc' }],
+                where,
+                orderBy: [{ takenAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
                 take: limit,
                 skip: offset,
                 select: MEDIA_ITEM_SUMMARY_SELECT,
             }),
-            prisma.mediaItem.count({ where: HIDDEN_EXCLUSION }),
+            prisma.mediaItem.count({ where }),
         ]);
 
         return { items, total, page, limit, searchType: 'filter' as const };
     }
 
     const parsed = await parseSearchQuery(q);
+
+    // An explicit UI filter wins over one inferred from the query text.
+    if (type) parsed.mediaType = type;
 
     logger.info({
         raw: q,
@@ -473,21 +625,33 @@ export async function search(params: SearchParams) {
         return searchWithFiltersOnly(parsed, limit, offset, page);
     }
 
-    // Path 3: Nothing parsed — last-resort FTS on the original query
-    const results = await prisma.$queryRaw<SearchResult[]>`
-        SELECT m.id, m.type, m.file_name, m.thumbnail_key, m.blur_hash,
-               m.taken_at, m.width, m.height, m.duration_seconds,
-               ts_rank(m.fts_vector, plainto_tsquery('english', ${q})) AS rank
-        FROM media_items m
-        WHERE m.fts_vector @@ plainto_tsquery('english', ${q})
-          AND ${HIDDEN_NOT_EXISTS}
-        ORDER BY rank DESC
-        LIMIT ${limit} OFFSET ${offset}
-    `;
+    /**
+     * Path 3: nothing parsed — last-resort FTS on the original query.
+     *
+     * `total` used to be `results.length`, i.e. the length of the *current page*,
+     * so a 500-match query reported "50 results" and pagination was broken. It now
+     * runs a real count, and the sort has an id tiebreak so pages are stable.
+     */
+    const [results, countResult] = await Promise.all([
+        prisma.$queryRaw<SearchResult[]>`
+            SELECT ${SEARCH_PROJECTION},
+                   ts_rank(m.fts_vector, plainto_tsquery('english', ${q})) AS rank
+            FROM media_items m
+            WHERE m.fts_vector @@ plainto_tsquery('english', ${q})
+              AND ${HIDDEN_NOT_EXISTS}
+            ORDER BY rank DESC, m.id
+            LIMIT ${limit} OFFSET ${offset}
+        `,
+        prisma.$queryRaw<[{ count: bigint }]>`
+            SELECT COUNT(*) AS count FROM media_items m
+            WHERE m.fts_vector @@ plainto_tsquery('english', ${q})
+              AND ${HIDDEN_NOT_EXISTS}
+        `,
+    ]);
 
     return {
         items: results.map(mapSearchResult),
-        total: results.length,
+        total: Number(countResult[0]!.count),
         page,
         limit,
         searchType: 'fts' as const,

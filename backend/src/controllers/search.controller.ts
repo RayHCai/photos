@@ -10,7 +10,12 @@ export const search = asyncHandler(async (req: Request, res: Response) => {
 
     logger.info({ q, page, limit }, 'search requested');
 
-    const result = await searchService.search({ q, page, limit });
+    const result = await searchService.search({
+        q,
+        page,
+        limit,
+        ...(req.query.type ? { type: req.query.type as 'PHOTO' | 'VIDEO' } : {}),
+    });
 
     logger.info(
         { q, searchType: result.searchType, resultCount: result.items.length, total: result.total },
