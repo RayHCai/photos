@@ -50,7 +50,8 @@ function useCollectionPages(
     // the next page abort each other and pagination never advances.
     const { fetchNextPage } = query;
     const loadMore = useCallback(() => {
-        void fetchNextPage({ cancelRefetch: false });
+        // Result is ignored: errors surface through the query, not this promise.
+        fetchNextPage({ cancelRefetch: false });
     }, [fetchNextPage]);
 
     return {
