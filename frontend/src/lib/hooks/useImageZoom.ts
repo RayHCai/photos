@@ -28,6 +28,14 @@ export function useImageZoom(
 ) {
     const [scale, setScale] = useState(1);
     const [translate, setTranslate] = useState({ x: 0, y: 0 });
+    /**
+     * True for the live duration of a touch gesture (pinch or pan), set
+     * synchronously in the touch handlers rather than derived from `scale`.
+     * `scale` only updates via commitState() at gesture *end*, so gating
+     * will-change on it left the very first pinch — starting from scale 1 —
+     * with no compositor layer promoted until after the fingers lifted.
+     */
+    const [isGestureActive, setIsGestureActive] = useState(false);
 
     // Gesture tracking refs (no re-renders during gesture)
     const scaleRef = useRef(1);
@@ -101,6 +109,7 @@ export function useImageZoom(
                 // Pinch start
                 isPinching.current = true;
                 isPanning.current = false;
+                setIsGestureActive(true);
                 pinchBaseDistance.current = getTouchDistance(e.touches[0], e.touches[1]);
                 pinchBaseScale.current = scaleRef.current;
                 pinchBaseTranslate.current = { ...translateRef.current };
@@ -127,6 +136,7 @@ export function useImageZoom(
             else if (e.touches.length === 1 && scaleRef.current > 1.05) {
                 // Pan start (only when zoomed)
                 isPanning.current = true;
+                setIsGestureActive(true);
                 panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
                 panBaseTranslate.current = { ...translateRef.current };
             }
@@ -189,11 +199,15 @@ export function useImageZoom(
                     panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
                     panBaseTranslate.current = { ...translateRef.current };
                 }
+                else {
+                    setIsGestureActive(false);
+                }
                 return;
             }
 
             if (isPanning.current) {
                 isPanning.current = false;
+                setIsGestureActive(false);
                 commitState(scaleRef.current, translateRef.current.x, translateRef.current.y);
             }
 
@@ -249,6 +263,7 @@ export function useImageZoom(
         function handleTouchCancel() {
             isPinching.current = false;
             isPanning.current = false;
+            setIsGestureActive(false);
             commitState(scaleRef.current, translateRef.current.x, translateRef.current.y);
         }
 
@@ -368,8 +383,16 @@ export function useImageZoom(
     const containerStyle: CSSProperties = {
         transform: `scale(${scale}) translate(${translate.x}px, ${translate.y}px)`,
         transformOrigin: 'center center',
-        touchAction: isZoomed ? 'none' : undefined,
-        willChange: isZoomed ? 'transform' : undefined,
+        // Set unconditionally (not gated on isZoomed) so the browser never gets a
+        // chance to run its own native pinch-zoom on the very first gesture, which
+        // otherwise fought the JS-driven transform for the whole duration of the
+        // pinch — the touch-move handling below is fully manual regardless of
+        // zoom state, so opting out of native touch behavior is always safe here.
+        touchAction: enabled ? 'none' : undefined,
+        // isGestureActive (not just isZoomed) so a compositor layer is promoted
+        // from the first frame of a pinch that starts at scale 1, not only after
+        // the gesture commits and re-renders.
+        willChange: isZoomed || isGestureActive ? 'transform' : undefined,
         // Signals to a mouse user that the zoomed image can be dragged. Without any
         // desktop affordance, zoom was not merely hard to find — it did not exist.
         cursor: isZoomed ? 'grab' : undefined,

@@ -50,6 +50,127 @@ export function findMarkerAtFraction(markers: TimelineMarker[], fraction: number
     return markers[0];
 }
 
+/** Total item count a timeline describes. 0 when the timeline is unknown. */
+export function totalItemsInTimeline(timeline: TimelineMonth[] | undefined): number {
+    if (!timeline) return 0;
+    let total = 0;
+    for (const m of timeline) total += m.count;
+    return total;
+}
+
+// ---------------------------------------------------------------------------
+// Row ↔ item-index map
+//
+// The scrollbar addresses the library by *item index*, not by a fraction of the
+// scroll container. That distinction is the whole point: with pagination the
+// container only spans the pages fetched so far, while the markers come from
+// /media/timeline and span everything. Mapping a marker's fraction straight onto
+// `scrollHeight` therefore aimed at the wrong content — dragging to "May" landed
+// wherever May's fraction happened to fall inside the newest 2000 items, which is
+// why the gallery looked like it only held July and August.
+// ---------------------------------------------------------------------------
+
+export interface RowItemIndex {
+    /** Items preceding each row, plus a final total (length = rows + 1). */
+    itemStarts: number[];
+    /** Pixel offset of each row, plus a final total height (length = rows + 1). */
+    offsets: number[];
+    /** Items represented by the currently loaded rows. */
+    loadedItems: number;
+    totalHeight: number;
+}
+
+/**
+ * One O(n) pass turning virtual rows into parallel item-count and pixel-offset
+ * prefix sums. Memoize on `virtualRows`.
+ *
+ * Row heights are exact rather than estimated: the grid never calls
+ * `measureElement`, so the virtualizer positions every row from the same
+ * `row.height` accumulated here.
+ */
+export function buildRowItemIndex(
+    virtualRows: Array<{
+        type: string;
+        height: number;
+        rowData?: { row: { items: Array<unknown> } };
+    }>,
+): RowItemIndex {
+    const itemStarts: number[] = new Array(virtualRows.length + 1);
+    const offsets: number[] = new Array(virtualRows.length + 1);
+
+    let items = 0;
+    let height = 0;
+    for (let i = 0; i < virtualRows.length; i++) {
+        itemStarts[i] = items;
+        offsets[i] = height;
+        const row = virtualRows[i]!;
+        if (row.type === 'gallery-row' && row.rowData) {
+            items += row.rowData.row.items.length;
+        }
+        height += row.height;
+    }
+    itemStarts[virtualRows.length] = items;
+    offsets[virtualRows.length] = height;
+
+    return { itemStarts, offsets, loadedItems: items, totalHeight: height };
+}
+
+/** Index of the row holding `itemIndex`, or -1 when it is not loaded yet. */
+function rowForItemIndex(index: RowItemIndex, itemIndex: number): number {
+    const rows = index.itemStarts.length - 1;
+    if (rows <= 0 || itemIndex < 0 || itemIndex >= index.loadedItems) return -1;
+
+    let lo = 0;
+    let hi = rows - 1;
+    let result = 0;
+    while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        if (index.itemStarts[mid]! <= itemIndex) {
+            result = mid;
+            lo = mid + 1;
+        }
+        else {
+            hi = mid - 1;
+        }
+    }
+    return result;
+}
+
+/**
+ * Scroll offset that brings `itemIndex` to the top of the viewport, or null when
+ * that item lives in a page that has not been fetched.
+ *
+ * Lands on the item's date header when it opens a day, so a jump to a month shows
+ * that month's heading rather than starting mid-day.
+ */
+export function scrollTopForItemIndex(index: RowItemIndex, itemIndex: number): number | null {
+    let row = rowForItemIndex(index, itemIndex);
+    if (row < 0) return null;
+    if (row > 0 && index.itemStarts[row] === itemIndex) row -= 1;
+    return index.offsets[row]!;
+}
+
+/** Global item index visible at a scroll offset. */
+export function itemIndexAtScrollTop(index: RowItemIndex, scrollTop: number): number {
+    const rows = index.offsets.length - 1;
+    if (rows <= 0) return 0;
+
+    let lo = 0;
+    let hi = rows - 1;
+    let result = 0;
+    while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        if (index.offsets[mid]! <= scrollTop) {
+            result = mid;
+            lo = mid + 1;
+        }
+        else {
+            hi = mid - 1;
+        }
+    }
+    return index.itemStarts[result]!;
+}
+
 // ---------------------------------------------------------------------------
 // Binary-search date index (replaces O(n) findCurrentDate)
 // ---------------------------------------------------------------------------

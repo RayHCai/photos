@@ -40,6 +40,13 @@ interface PhotoGalleryProps {
 
     /** Override timeline data for the scrollbar (e.g. collection-scoped). */
     timeline?: import('@/lib/types/media').TimelineMonth[];
+
+    /** Called when the grid scrolls near the end of the loaded items. */
+    onLoadMore?: () => void;
+    /** Whether a further page exists beyond what's currently loaded. */
+    hasMore?: boolean;
+    /** Whether a page fetch triggered by onLoadMore is in flight. */
+    isLoadingMore?: boolean;
 }
 
 export function PhotoGallery({
@@ -53,6 +60,9 @@ export function PhotoGallery({
     renderLightbox,
     lightboxConfig,
     timeline,
+    onLoadMore,
+    hasMore,
+    isLoadingMore,
 }: PhotoGalleryProps) {
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
@@ -144,6 +154,9 @@ export function PhotoGallery({
                     thumbnailSrcFn={thumbnailSrcFn}
                     timeline={timeline}
                     dragSelect={dragSelect}
+                    onLoadMore={onLoadMore}
+                    hasMore={hasMore}
+                    isLoadingMore={isLoadingMore}
                 />
             </div>
 

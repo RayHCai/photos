@@ -10,9 +10,19 @@ interface TimelineScrollbarProps {
     containerRef: RefObject<HTMLDivElement | null>;
     virtualRows: VirtualRow[];
     timeline?: import('@/lib/types/media').TimelineMonth[];
+    /** Whether pages exist beyond the loaded rows. */
+    hasMore?: boolean;
+    /** Lets a jump to an unloaded month pull the pages it needs. */
+    onLoadMore?: () => void;
 }
 
-export function TimelineScrollbar({ containerRef, virtualRows, timeline: timelineProp }: TimelineScrollbarProps) {
+export function TimelineScrollbar({
+    containerRef,
+    virtualRows,
+    timeline: timelineProp,
+    hasMore,
+    onLoadMore,
+}: TimelineScrollbarProps) {
     const { data: globalTimeline } = useTimeline();
     const timeline = timelineProp ?? globalTimeline;
 
@@ -25,7 +35,7 @@ export function TimelineScrollbar({ containerRef, virtualRows, timeline: timelin
         trackRef,
         onTrackPointerDown,
         wrapperHeight,
-    } = useTimelineScrollbar(containerRef, virtualRows, timeline);
+    } = useTimelineScrollbar(containerRef, virtualRows, timeline, { hasMore, onLoadMore });
 
     const visibleLabels = useMemo(
         () => computeAdaptiveLabels(markers, wrapperHeight - 32),

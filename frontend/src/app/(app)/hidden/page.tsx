@@ -1,31 +1,26 @@
 'use client';
 
-import { useMemo, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import { Eye } from 'lucide-react';
 import { useHidden } from '@/lib/hooks/useHidden';
+import { useHiddenCollection } from '@/lib/hooks/useCollections';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { IconButton } from '@/components/ui/IconButton';
-import * as collectionsApi from '@/lib/api/collections';
-import { queryKeys } from '@/lib/queries/keys';
-import type { MediaShellItem } from '@/lib/types/media';
 
 export default function HiddenPage() {
-    const { data: hiddenCollection, isLoading } = useQuery({
-        queryKey: queryKeys.collections.hidden(),
-        queryFn: () => collectionsApi.getHiddenCollection(),
-    });
+    const {
+        items: mediaItems,
+        isLoading,
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+    } = useHiddenCollection();
 
     const { unhideItems } = useHidden();
     const selection = useMediaSelection();
     useEscapeKey(selection.clearSelection, selection.isSelecting);
-
-    const mediaItems = useMemo((): MediaShellItem[] => {
-        if (!hiddenCollection?.items) return [];
-        return hiddenCollection.items.map((i) => i.mediaItem);
-    }, [hiddenCollection]);
 
     // useSystemCollection reports success and failure itself (optimistic update
     // plus rollback plus toast), so no local try/catch or toast is needed here.
@@ -60,6 +55,9 @@ export default function HiddenPage() {
                 isLoading={isLoading}
                 selection={selection}
                 emptyMessage="No hidden items"
+                onLoadMore={fetchNextPage}
+                hasMore={hasNextPage}
+                isLoadingMore={isFetchingNextPage}
             />
         </div>
     );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getProcessingUpdates, getShellData } from '../api/media';
 import { queryKeys } from '../queries/keys';
@@ -94,12 +94,26 @@ export function useShellData() {
         // it is deliberately not a dependency.
     }, [updates, queryClient]);
 
+    /**
+     * `cancelRefetch: false` is load-bearing.
+     *
+     * React Query defaults it to true, so a second `fetchNextPage()` while one is
+     * in flight *aborts and restarts* it. Both the grid's scroll lookahead and the
+     * timeline scrollbar's jump-chasing ask for pages, and a jump asks on every
+     * drag frame — with the default the two livelocked, re-requesting the same
+     * cursor indefinitely and never advancing past it.
+     */
+    const { fetchNextPage } = query;
+    const loadMore = useCallback(() => {
+        void fetchNextPage({ cancelRefetch: false });
+    }, [fetchNextPage]);
+
     return {
         items,
         isLoading: query.isLoading,
         isError: query.isError,
         error: query.error,
-        fetchNextPage: query.fetchNextPage,
+        fetchNextPage: loadMore,
         hasNextPage: query.hasNextPage,
         isFetchingNextPage: query.isFetchingNextPage,
     };
