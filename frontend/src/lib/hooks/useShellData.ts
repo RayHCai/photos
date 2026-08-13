@@ -1,10 +1,25 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { getProcessingUpdates, getShellData } from '../api/media';
 import { queryKeys } from '../queries/keys';
+import {
+    appendShellPages,
+    countLoadedItems,
+    mapWithConcurrency,
+    missingPageOffsets,
+    SEEK_CONCURRENCY,
+    SHELL_PAGE_SIZE,
+} from '../utils/shellPaging';
 import type { MediaShellItem } from '../types/media';
+import type { CursorPaginatedResponse } from '../types/api';
+
+type ShellPages = {
+    pages: Array<CursorPaginatedResponse<MediaShellItem>>;
+    pageParams: Array<string | undefined>;
+};
 
 /**
  * The gallery's item list.
@@ -28,8 +43,11 @@ export function useShellData() {
 
     const query = useInfiniteQuery({
         queryKey: queryKeys.media.shell(),
+        // `limit` is explicit so every page holds exactly SHELL_PAGE_SIZE items,
+        // which is what makes the offsets a timeline jump computes land on real
+        // page boundaries.
         queryFn: ({ pageParam }) =>
-            getShellData(pageParam ? { cursor: pageParam } : {}),
+            getShellData({ limit: SHELL_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }),
         initialPageParam: undefined as string | undefined,
         getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
         staleTime: 60_000,
@@ -109,6 +127,60 @@ export function useShellData() {
         fetchNextPage({ cancelRefetch: false });
     }, [fetchNextPage]);
 
+    /**
+     * Bring the page holding a given *global* item index into the cache.
+     *
+     * This is what the timeline scrollbar calls when the month a user picked is
+     * below the loaded range. Walking there with `fetchNextPage` cost one round
+     * trip per 2000 items and rendered every page on the way; addressing the gap
+     * by offset collapses it into a couple of parallel batches.
+     *
+     * Rejects if the fetch fails, so the caller can release the jump it is holding
+     * rather than wait on a landing that will never come.
+     */
+    const seekInFlightRef = useRef(false);
+    const [isSeeking, setIsSeeking] = useState(false);
+
+    const seekToIndex = useCallback(
+        async (targetIndex: number) => {
+            if (seekInFlightRef.current) return;
+
+            const key = queryKeys.media.shell();
+            const cached = queryClient.getQueryData<ShellPages>(key);
+            if (!cached || cached.pages.length === 0) return;
+
+            const loaded = countLoadedItems(cached.pages);
+            const offsets = missingPageOffsets(loaded, targetIndex);
+            // Nothing missing, or the library ends before the target.
+            if (offsets.length === 0 || !cached.pages[cached.pages.length - 1]?.nextCursor) return;
+
+            seekInFlightRef.current = true;
+            setIsSeeking(true);
+            try {
+                // A page fetch already in flight would append itself on top of
+                // whatever this writes, duplicating rows.
+                await queryClient.cancelQueries({ queryKey: key });
+
+                const fetched = await mapWithConcurrency(offsets, SEEK_CONCURRENCY, (offset) =>
+                    getShellData({ offset, limit: SHELL_PAGE_SIZE }).then((page) => ({ offset, page }))
+                );
+
+                queryClient.setQueryData<ShellPages>(key, (previous) =>
+                    previous ? appendShellPages(previous, fetched) : previous
+                );
+            }
+            catch (err) {
+                toast.error('Could not jump to that date');
+                throw err;
+            }
+            finally {
+                seekInFlightRef.current = false;
+                setIsSeeking(false);
+            }
+        },
+        [queryClient]
+    );
+
     return {
         items,
         isLoading: query.isLoading,
@@ -117,5 +189,7 @@ export function useShellData() {
         fetchNextPage: loadMore,
         hasNextPage: query.hasNextPage,
         isFetchingNextPage: query.isFetchingNextPage,
+        seekToIndex,
+        isSeeking,
     };
 }

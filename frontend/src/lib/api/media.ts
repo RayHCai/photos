@@ -30,10 +30,16 @@ export function batchDeleteMedia(ids: string[]): Promise<{ deleted: number }> {
     });
 }
 
-/** Paginated: the endpoint no longer returns the whole library in one response. */
-export function getShellData(params: { cursor?: string; limit?: number } = {}): Promise<
-    CursorPaginatedResponse<MediaShellItem>
-> {
+/**
+ * Paginated: the endpoint no longer returns the whole library in one response.
+ *
+ * `cursor` walks forward from a known page; `offset` addresses a page directly,
+ * which is what lets a timeline jump fetch the gap between here and the month it
+ * is aiming at in parallel instead of one round trip per page.
+ */
+export function getShellData(
+    params: { cursor?: string; offset?: number; limit?: number } = {}
+): Promise<CursorPaginatedResponse<MediaShellItem>> {
     const qs = buildQueryString(params);
     return apiFetch(`/media/shell${qs ? `?${qs}` : ''}`);
 }

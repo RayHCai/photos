@@ -26,6 +26,9 @@ router.get(
     validate({
         query: z.object({
             cursor: z.string().optional(),
+            // Direct address for a timeline jump, so the client does not have to
+            // walk every page between here and the month it wants.
+            offset: z.coerce.number().int().min(0).optional(),
             limit: z.coerce.number().min(1).max(2000).optional(),
         }),
     }),

@@ -14,6 +14,8 @@ interface TimelineScrollbarProps {
     hasMore?: boolean;
     /** Lets a jump to an unloaded month pull the pages it needs. */
     onLoadMore?: () => void;
+    /** Loads the page holding a global item index directly, skipping the rest. */
+    onSeekToIndex?: (index: number) => Promise<void>;
 }
 
 export function TimelineScrollbar({
@@ -22,6 +24,7 @@ export function TimelineScrollbar({
     timeline: timelineProp,
     hasMore,
     onLoadMore,
+    onSeekToIndex,
 }: TimelineScrollbarProps) {
     const { data: globalTimeline } = useTimeline();
     const timeline = timelineProp ?? globalTimeline;
@@ -29,13 +32,18 @@ export function TimelineScrollbar({
     const {
         isVisible,
         isDragging,
+        isJumping,
         thumbFraction,
         activeLabel,
         markers,
         trackRef,
         onTrackPointerDown,
         wrapperHeight,
-    } = useTimelineScrollbar(containerRef, virtualRows, timeline, { hasMore, onLoadMore });
+    } = useTimelineScrollbar(containerRef, virtualRows, timeline, {
+        hasMore,
+        onLoadMore,
+        onSeekToIndex,
+    });
 
     const visibleLabels = useMemo(
         () => computeAdaptiveLabels(markers, wrapperHeight - 32),
@@ -119,8 +127,12 @@ export function TimelineScrollbar({
                 />
             </div>
 
-            {/* Tooltip (visible while dragging) */}
-            {isDragging && activeLabel && (
+            {/*
+              * Tooltip — visible while dragging, and while a jump waits on its
+              * pages. The grid deliberately does not move until they arrive, so
+              * this is what tells the user the date they picked is coming.
+              */}
+            {(isDragging || isJumping) && activeLabel && (
                 <div
                     style={{
                         position: 'absolute',

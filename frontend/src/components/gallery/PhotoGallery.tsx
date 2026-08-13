@@ -47,6 +47,11 @@ interface PhotoGalleryProps {
     hasMore?: boolean;
     /** Whether a page fetch triggered by onLoadMore is in flight. */
     isLoadingMore?: boolean;
+    /**
+     * Loads the page holding a global item index directly. Lets the timeline jump
+     * to a month far below the loaded range without walking every page to it.
+     */
+    onSeekToIndex?: (index: number) => Promise<void>;
 }
 
 export function PhotoGallery({
@@ -63,6 +68,7 @@ export function PhotoGallery({
     onLoadMore,
     hasMore,
     isLoadingMore,
+    onSeekToIndex,
 }: PhotoGalleryProps) {
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
@@ -157,6 +163,7 @@ export function PhotoGallery({
                     onLoadMore={onLoadMore}
                     hasMore={hasMore}
                     isLoadingMore={isLoadingMore}
+                    onSeekToIndex={onSeekToIndex}
                 />
             </div>
 

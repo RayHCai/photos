@@ -20,6 +20,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
 export const shell = asyncHandler(async (req: Request, res: Response) => {
     const result = await mediaService.getShellData({
         ...(req.query.cursor ? { cursor: req.query.cursor as string } : {}),
+        ...(req.query.offset !== undefined ? { offset: Number(req.query.offset) } : {}),
         ...(req.query.limit ? { limit: Number(req.query.limit) } : {}),
     });
     res.json(result);
