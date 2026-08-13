@@ -46,14 +46,23 @@ export type WorkerWritablePrefix = (typeof WORKER_WRITABLE_PREFIXES)[number];
  */
 export const THUMBNAIL_WIDTHS = [200, 400, 800] as const;
 
-/** `originals/2026/08/<uuid>.<ext>` */
+/**
+ * `originals/2026/08/<uuid>.<ext>`
+ *
+ * Case-insensitive: extension casing is meaningless (legacy rows predate
+ * `safeExtension()`'s lowercasing and stored e.g. `.JPG` verbatim), and the
+ * fixed prefix/hex-digit/date character classes don't depend on case for
+ * their traversal protection either way.
+ */
 const KEY_PATTERN = new RegExp(
-    `^(${STORAGE_PREFIXES.join('|')})/\\d{4}/\\d{2}/[0-9a-f-]{36}\\.[a-z0-9]{1,12}$`
+    `^(${STORAGE_PREFIXES.join('|')})/\\d{4}/\\d{2}/[0-9a-f-]{36}\\.[a-z0-9]{1,12}$`,
+    'i'
 );
 
 /** As above, but allowing a responsive-variant suffix: `<uuid>@400w.webp`. */
 const VARIANT_KEY_PATTERN = new RegExp(
-    `^(${STORAGE_PREFIXES.join('|')})/\\d{4}/\\d{2}/[0-9a-f-]{36}(@\\d{2,5}w)?\\.[a-z0-9]{1,12}$`
+    `^(${STORAGE_PREFIXES.join('|')})/\\d{4}/\\d{2}/[0-9a-f-]{36}(@\\d{2,5}w)?\\.[a-z0-9]{1,12}$`,
+    'i'
 );
 
 /**

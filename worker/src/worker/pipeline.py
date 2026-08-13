@@ -95,18 +95,15 @@ async def _upload_thumbnail_ladder(
 ) -> None:
     """Generate and upload the responsive thumbnail widths.
 
-    Deliberately non-fatal: these are an optimisation, and losing them degrades
-    sharpness rather than correctness. The client falls back to the canonical
-    thumbnail whenever a variant is missing.
+    Raises on failure — callers decide whether that should be fatal. The main
+    content stage treats it as non-fatal (an optimisation whose loss degrades
+    sharpness, not correctness); the dedicated `thumbnail-ladder` backfill stage
+    does not, since producing the ladder is its entire job.
     """
-    try:
-        ladder = await _run_cpu(generate_thumbnail_ladder, image)
-        for width, data in ladder.items():
-            await s3.upload_bytes_to_derived_key(
-                thumb_key, f"@{width}w", data, "image/webp"
-            )
-    except Exception:
-        logger.exception("thumbnail_ladder_failed", media_item_id=media_item_id)
+    ladder = await _run_cpu(generate_thumbnail_ladder, image)
+    for width, data in ladder.items():
+        await s3.upload_bytes_to_derived_key(thumb_key, f"@{width}w", data, "image/webp")
+    logger.info("thumbnail_ladder_uploaded", media_item_id=media_item_id, widths=sorted(ladder))
 
 
 def _build_fts_document(meta: MediaMetadata, file_name: str) -> str:
@@ -216,8 +213,12 @@ async def _stage_content_photo(
     thumb_key = await s3.generate_key_and_upload("thumbnails", thumb_bytes, "image/webp")
 
     # Responsive ladder alongside the canonical thumbnail, at derived keys the client
-    # reconstructs from thumbnailKey alone.
-    await _upload_thumbnail_ladder(image, thumb_key, media_item_id)
+    # reconstructs from thumbnailKey alone. Best-effort: losing it degrades sharpness,
+    # not correctness, and shouldn't fail the whole photo.
+    try:
+        await _upload_thumbnail_ladder(image, thumb_key, media_item_id)
+    except Exception:
+        logger.exception("thumbnail_ladder_failed", media_item_id=media_item_id)
 
     logger.info("step_generate_blurhash", media_item_id=media_item_id)
     with Image.open(io.BytesIO(thumb_bytes)) as thumb_image:
@@ -503,6 +504,26 @@ async def _stage_web(image: Image.Image, media_item_id: str) -> None:
     logger.info("stage_web_done", media_item_id=media_item_id)
 
 
+# ─── Stage: Thumbnail ladder only ──────────────────────────────────────────
+
+
+async def _stage_thumbnail_ladder(image: Image.Image, media_item_id: str) -> None:
+    """Regenerate the responsive thumbnail widths for an item's existing thumbnail.
+
+    Unlike the ladder step folded into the main content stage, failures here are
+    not swallowed: producing the ladder is this stage's only job, so if it can't,
+    the item should land in FAILED and be visible to the retry-failed flow.
+    """
+    logger.info("step_get_thumbnail_key", media_item_id=media_item_id)
+    thumb_key = await api.get_thumbnail_key(media_item_id)
+    if not thumb_key:
+        logger.warning("stage_thumbnail_ladder_no_thumbnail", media_item_id=media_item_id)
+        return
+
+    await _upload_thumbnail_ladder(image, thumb_key, media_item_id)
+    logger.info("stage_thumbnail_ladder_done", media_item_id=media_item_id)
+
+
 # ─── Orchestrators ───────────────────────────────────────────────────────────
 
 
@@ -561,6 +582,9 @@ async def process_photo(
                 await api.set_processing_status(media_item_id, "COMPLETED")
             elif start_stage == "web":
                 await _stage_web(image, media_item_id)
+                await api.set_processing_status(media_item_id, "COMPLETED")
+            elif start_stage == "thumbnail-ladder":
+                await _stage_thumbnail_ladder(image, media_item_id)
                 await api.set_processing_status(media_item_id, "COMPLETED")
             elif start_stage == "metadata":
                 await _stage_metadata_only(meta, media_item_id, file_name)

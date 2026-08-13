@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-Stage = Literal["full", "clip", "faces", "blurhash", "transcode", "web", "metadata"]
+Stage = Literal[
+    "full", "clip", "faces", "blurhash", "transcode", "web", "thumbnail-ladder", "metadata"
+]
 
 #: Must equal backend PIPELINE_STAGES, in order.
 STAGES: tuple[Stage, ...] = (
@@ -24,6 +26,7 @@ STAGES: tuple[Stage, ...] = (
     "blurhash",
     "transcode",
     "web",
+    "thumbnail-ladder",
     "metadata",
 )
 
