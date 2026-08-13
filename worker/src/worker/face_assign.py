@@ -64,6 +64,32 @@ async def insert_face(
     return face_id
 
 
+async def resolve_person(
+    *,
+    confidence: float,
+    embedding: NDArray[np.float32],
+) -> str | None:
+    """Decide which person a face belongs to, without writing anything.
+
+    Returns a person id, or None when the face matched nobody and is not confident
+    enough to justify creating a new person.
+
+    Split out from assign_or_create so callers can find out whether a face will be
+    kept *before* spending a WEBP encode, a presign round trip and an S3 PUT on its
+    crop. Previously the crop was uploaded first and then discarded by this
+    decision, leaving an object referenced by nothing and never collected.
+    """
+    person_id = await find_nearest_person(embedding)
+
+    if person_id is None:
+        if confidence < settings.face_new_person_thresh:
+            logger.info("face_skipped_low_confidence", confidence=round(confidence, 3))
+            return None
+        person_id = await create_person()
+
+    return person_id
+
+
 async def assign_or_create(
     *,
     media_item_id: str,
@@ -75,19 +101,12 @@ async def assign_or_create(
     crop_key: str | None,
     embedding: NDArray[np.float32],
 ) -> str | None:
-    """Find nearest person or create a new one, then insert the face.
-
-    Returns face_id if inserted, None if skipped due to low confidence.
-    """
-    person_id = await find_nearest_person(embedding)
-
+    """Resolve a person and insert the face. Returns face_id, or None if skipped."""
+    person_id = await resolve_person(confidence=confidence, embedding=embedding)
     if person_id is None:
-        if confidence < settings.face_new_person_thresh:
-            logger.info("face_skipped_low_confidence", confidence=round(confidence, 3))
-            return None
-        person_id = await create_person()
+        return None
 
-    face_id = await insert_face(
+    return await insert_face(
         media_item_id=media_item_id,
         person_id=person_id,
         box_x=box_x,
@@ -98,4 +117,3 @@ async def assign_or_create(
         crop_key=crop_key,
         embedding=embedding,
     )
-    return face_id

@@ -9,6 +9,7 @@ import {
     Check,
     AlertCircle,
     Loader2,
+    RefreshCw,
 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
 
@@ -24,7 +25,7 @@ export function UploadProgress() {
     const hasCompleted = completed > 0;
     const allDone = completed + failed === total;
     return (
-        <div className="fixed bottom-5 right-5 z-40 w-80 rounded-lg bg-white/80 backdrop-blur-xl shadow-2xl shadow-black/8 border border-stone-200/60 overflow-hidden transition-all duration-300">
+        <div className="w-80 rounded-lg bg-white/80 backdrop-blur-xl shadow-2xl shadow-black/8 border border-stone-200/60 overflow-hidden transition-all duration-300">
             {/* Header */}
             <div
                 className="flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors duration-150 hover:bg-stone-50/80"
@@ -82,6 +83,9 @@ export function UploadProgress() {
                                 {item.status === 'uploading' && (
                                     <Loader2 className="w-4 h-4 text-stone-400 animate-spin" />
                                 )}
+                                {item.status === 'retrying' && (
+                                    <RefreshCw className="w-4 h-4 text-amber-500 animate-spin" />
+                                )}
                                 {item.status === 'pending' && (
                                     <div className="w-4 h-4 rounded-full border-2 border-stone-200" />
                                 )}
@@ -100,8 +104,14 @@ export function UploadProgress() {
                                         />
                                     </div>
                                 )}
-                                {item.status === 'pending' && (
+                                {(item.status === 'pending' || item.status === 'retrying') && (
                                     <div className="mt-1.5 h-0.5 w-full bg-stone-100 rounded-full" />
+                                )}
+                                {item.status === 'retrying' && (
+                                    <p className="text-[11px] text-amber-600 mt-0.5 truncate">
+                                        Upload failed — retrying ({item.retryAttempt} of{' '}
+                                        {item.retryMax})
+                                    </p>
                                 )}
                                 {item.error && (
                                     <p className="text-[11px] text-red-500 mt-0.5 truncate">

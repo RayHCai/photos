@@ -17,7 +17,7 @@ export function PageContainer({
     emptyMessage = 'Nothing here',
 }: PageContainerProps) {
     return (
-        <div className="h-screen flex flex-col">
+        <div className="h-[100dvh] flex flex-col">
             {/* Toolbar */}
             <div className="relative flex items-center justify-center gap-2 px-[30px] pt-3 pb-9">
                 {toolbar}

@@ -4,6 +4,8 @@ import * as personsService from '../services/persons.service.js';
 import * as s3Service from '../services/s3.service.js';
 import { asyncHandler } from '../utils/async.js';
 import { logger } from '../utils/logger.js';
+import { isManagedStorageKey } from '../constants/storage.js';
+import { AppError } from '../middleware/errorHandler.js';
 
 export const getFileName = asyncHandler(async (req: Request, res: Response) => {
     const result = await internalService.getFileName(req.params.id as string);
@@ -115,11 +117,19 @@ export const insertFace = asyncHandler(async (req: Request, res: Response) => {
     res.status(201).json(result);
 });
 
-export const getAllFaceEmbeddings = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('fetching all face embeddings for recluster');
-    const result = await internalService.getAllFaceEmbeddings();
-    logger.info({ faceCount: result.faces.length }, 'face embeddings fetched');
+export const getFaceEmbeddings = asyncHandler(async (req: Request, res: Response) => {
+    const cursor = req.query.cursor as string | undefined;
+    const result = await internalService.getFaceEmbeddingsPage(cursor);
+    logger.info(
+        { faceCount: result.faces.length, hasMore: result.nextCursor !== null },
+        'face embeddings page fetched'
+    );
     res.json(result);
+});
+
+export const markFacesScanned = asyncHandler(async (req: Request, res: Response) => {
+    await internalService.markFacesScanned(req.params.id as string);
+    res.status(204).send();
 });
 
 export const batchReassignFaces = asyncHandler(async (req: Request, res: Response) => {
@@ -128,6 +138,16 @@ export const batchReassignFaces = asyncHandler(async (req: Request, res: Respons
     const count = await internalService.batchReassignFaces(req.body.assignments);
     logger.info({ reassigned: count }, 'batch face reassignment completed');
     res.json({ reassigned: count });
+});
+
+/**
+ * Named persons, for the recluster job's name-preservation rule: a cluster that
+ * contains a named person must converge on that person rather than on whichever
+ * unnamed machine-generated group happens to hold more faces.
+ */
+export const listNamedPersons = asyncHandler(async (_req: Request, res: Response) => {
+    const persons = await internalService.listNamedPersons();
+    res.json({ persons });
 });
 
 export const createPerson = asyncHandler(async (_req: Request, res: Response) => {
@@ -156,13 +176,33 @@ export const queryMediaItemsForRetry = asyncHandler(async (req: Request, res: Re
 });
 
 export const getDownloadUrl = asyncHandler(async (req: Request, res: Response) => {
-    const url = await s3Service.getPresignedDownloadUrl(req.params.key as string);
+    const key = req.params.key as string;
+
+    /**
+     * This route takes a caller-supplied key and returns a presigned GET for it.
+     * Without a shape check it is an arbitrary-read primitive over the whole
+     * bucket, so restrict it to keys this application actually generated.
+     */
+    if (!isManagedStorageKey(key)) {
+        logger.warn({ key, ip: req.ip }, 'internal: rejected download for unmanaged key');
+        throw new AppError(400, 'Invalid storage key');
+    }
+
+    const url = await s3Service.getPresignedDownloadUrl(key);
     res.json({ url });
 });
 
 export const generateUploadUrl = asyncHandler(async (req: Request, res: Response) => {
     logger.debug({ prefix: req.body.prefix, contentType: req.body.contentType }, 'generating upload URL');
     const result = await internalService.generateUploadUrl(req.body.prefix, req.body.contentType);
+    res.json(result);
+});
+
+export const presignUploadForKey = asyncHandler(async (req: Request, res: Response) => {
+    const result = await internalService.presignUploadForKey(
+        req.body.key,
+        req.body.contentType
+    );
     res.json(result);
 });
 

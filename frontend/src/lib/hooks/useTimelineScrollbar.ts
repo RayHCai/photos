@@ -40,6 +40,8 @@ export function useTimelineScrollbar(
     const trackRef = useRef<HTMLDivElement | null>(null);
     const rafRef = useRef<number | null>(null);
     const isDraggingRef = useRef(false);
+    /** Detaches an in-flight drag's document listeners; see the drag effect below. */
+    const activeDragCleanupRef = useRef<(() => void) | null>(null);
     const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // Drag throttling: latest fraction + pending frame, separate from rafRef so
@@ -156,8 +158,25 @@ export function useTimelineScrollbar(
         const container = containerRef.current;
         if (!container) return;
 
+        /**
+         * The rect is cached and refreshed on resize/scroll rather than read per event.
+         *
+         * getBoundingClientRect forces a synchronous layout, and this listener is on
+         * `document` for the gallery's entire lifetime — so it fired during trackpad
+         * scrolling, interleaved with the virtualizer writing DOM, which is exactly the
+         * read-after-write pattern that produces layout thrash.
+         */
+        let rect = container.getBoundingClientRect();
+        const refreshRect = () => {
+            rect = container.getBoundingClientRect();
+        };
+
+        const observer = new ResizeObserver(refreshRect);
+        observer.observe(container);
+        window.addEventListener('resize', refreshRect, { passive: true });
+        window.addEventListener('scroll', refreshRect, { passive: true, capture: true });
+
         const handleMouseMove = (e: MouseEvent) => {
-            const rect = container.getBoundingClientRect();
             const nearRightEdge = e.clientX > rect.right - 60 && e.clientX <= rect.right;
             const insideVertical = e.clientY >= rect.top && e.clientY <= rect.bottom;
 
@@ -192,6 +211,9 @@ export function useTimelineScrollbar(
         return () => {
             document.removeEventListener('mousemove', handleMouseMove);
             container.removeEventListener('mouseleave', handleMouseLeave);
+            window.removeEventListener('resize', refreshRect);
+            window.removeEventListener('scroll', refreshRect, { capture: true });
+            observer.disconnect();
             if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
         };
     }, [containerRef]);
@@ -268,11 +290,36 @@ export function useTimelineScrollbar(
             }
             document.removeEventListener('pointermove', handlePointerMove);
             document.removeEventListener('pointerup', handlePointerUp);
+            document.removeEventListener('pointercancel', handlePointerUp);
+            activeDragCleanupRef.current = null;
         };
 
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
+        /**
+         * pointercancel was not handled, so an interrupted drag — the browser taking over
+         * the gesture, a phone call arriving, the pointer being captured elsewhere — left
+         * both document listeners attached for the lifetime of the page, still writing
+         * scrollTop on every subsequent pointer move.
+         */
+        document.addEventListener('pointercancel', handlePointerUp);
+
+        // Recorded so unmounting mid-drag also detaches them.
+        activeDragCleanupRef.current = () => {
+            document.removeEventListener('pointermove', handlePointerMove);
+            document.removeEventListener('pointerup', handlePointerUp);
+            document.removeEventListener('pointercancel', handlePointerUp);
+        };
     }, [applyFraction, scheduleDragFrame]);
+
+    // A drag in flight when the gallery unmounts would otherwise leak its listeners.
+    useEffect(
+        () => () => {
+            activeDragCleanupRef.current?.();
+            activeDragCleanupRef.current = null;
+        },
+        []
+    );
 
     const isVisible = (isHovering || isDragging || isScrolling) && canShow && markers.length > 0;
 

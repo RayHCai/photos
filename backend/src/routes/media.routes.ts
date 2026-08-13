@@ -21,8 +21,22 @@ router.get(
     mediaController.list
 );
 
-router.get('/shell', mediaController.shell);
+router.get(
+    '/shell',
+    validate({
+        query: z.object({
+            cursor: z.string().optional(),
+            limit: z.coerce.number().min(1).max(2000).optional(),
+        }),
+    }),
+    mediaController.shell
+);
 router.get('/timeline', mediaController.timeline);
+router.get(
+    '/processing-updates',
+    validate({ query: z.object({ since: z.string().datetime().optional() }) }),
+    mediaController.processingUpdates
+);
 
 router.post(
     '/thumbnail-urls',
@@ -40,7 +54,9 @@ router.post(
     '/upload/check-duplicates',
     validate({
         body: z.object({
-            fileNames: z.array(z.string().min(1)).min(1),
+            // Capped: this fans out one S3 HeadObject per name, so an uncapped
+            // array let a single request issue thousands of concurrent S3 calls.
+            fileNames: z.array(z.string().min(1)).min(1).max(500),
         }),
     }),
     mediaController.checkDuplicates

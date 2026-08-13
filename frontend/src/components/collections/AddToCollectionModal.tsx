@@ -19,7 +19,9 @@ interface AddToCollectionModalProps {
 export function AddToCollectionModal({ open, onClose, mediaItemIds }: AddToCollectionModalProps) {
     const router = useRouter();
     const { data: collections = [] } = useCollections();
-    const { data: memberOf = new Set<string>() } = useCollectionMembership(mediaItemIds);
+    // Gated on `open`: the guard below is what previously let this run while the
+    // modal was closed for the whole duration of a selection.
+    const { data: memberOf = new Set<string>() } = useCollectionMembership(mediaItemIds, open);
     const createCollection = useCreateCollection();
     const addItems = useAddCollectionItems();
     const removeItems = useRemoveCollectionItems();

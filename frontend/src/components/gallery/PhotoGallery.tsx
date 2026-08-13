@@ -56,31 +56,60 @@ export function PhotoGallery({
 }: PhotoGalleryProps) {
     const [lightboxId, setLightboxId] = useState<string | null>(null);
 
-    // Match the visual order produced by GalleryGrid's groupByDate sorting
-    const visualItems = useMemo(() => groupByDate(items).flatMap((g) => g.items), [items]);
+    /**
+     * Grouped once, here, and passed down to GalleryGrid.
+     *
+     * Both components used to call groupByDate(items) independently — two separate
+     * memo caches invalidated by the same input, so every change walked the whole
+     * library twice.
+     */
+    const groups = useMemo(() => groupByDate(items), [items]);
 
-    const { onPrev, onNext, prevMediaId, nextMediaId } = useLightboxNavigation(visualItems, lightboxId, setLightboxId);
+    // The visual order the grid will render, which is what lightbox navigation and
+    // shift-range selection must agree with.
+    const visualItems = useMemo(() => groups.flatMap((g) => g.items), [groups]);
+
+    const { onPrev, onNext, prevMediaId, nextMediaId } = useLightboxNavigation(
+        visualItems,
+        lightboxId,
+        setLightboxId
+    );
 
     const orderedIds = useMemo(() => visualItems.map((i) => i.id), [visualItems]);
 
+    /**
+     * id -> visual index, built once per ordering change.
+     *
+     * Range selection and touch drag-paint previously called
+     * `orderedIds.indexOf(...)` — twice per touchmove event, each a linear scan of
+     * the entire library. At 50k items that is 100k string comparisons per frame,
+     * which is why the selection highlight lagged hundreds of milliseconds behind
+     * the finger.
+     */
+    const indexById = useMemo(() => {
+        const map = new Map<string, number>();
+        orderedIds.forEach((id, i) => map.set(id, i));
+        return map;
+    }, [orderedIds]);
+
     const handleItemSelect = useCallback(
         (id: string, e: React.MouseEvent) => {
-            selection.handleSelect(id, orderedIds, e);
+            selection.handleSelect(id, orderedIds, indexById, e);
         },
-        [selection, orderedIds]
+        [selection, orderedIds, indexById]
     );
 
     // Bridge the touch drag-select gesture (resolved in GalleryGrid) to the
     // selection paint API. Stable across renders as long as the selection methods
-    // and visual order hold, so listeners aren't re-registered mid-gesture.
+    // and visual order hold, so listeners are not re-registered mid-gesture.
     const { beginDrag, updateDrag, endDrag } = selection;
     const dragSelect = useMemo(
         () => ({
             begin: (id: string) => beginDrag(id),
-            update: (id: string) => updateDrag(id, orderedIds),
+            update: (id: string) => updateDrag(id, orderedIds, indexById),
             end: () => endDrag(),
         }),
-        [beginDrag, updateDrag, endDrag, orderedIds]
+        [beginDrag, updateDrag, endDrag, orderedIds, indexById]
     );
 
     if (isLoading || items.length === 0) {
@@ -105,7 +134,7 @@ export function PhotoGallery({
         <>
             <div className="flex-1 min-h-0">
                 <GalleryGrid
-                    items={items}
+                    groups={groups}
                     onItemClick={(id) => setLightboxId(id)}
                     selectedIds={selection.selectedIds}
                     isSelecting={selection.isSelecting}
