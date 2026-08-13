@@ -4,8 +4,12 @@ import { useState, useCallback, useEffect, useRef, useMemo, type RefObject } fro
 import {
     buildTimelineMarkers,
     buildDateIndex,
+    buildRowItemIndex,
     findCurrentDateBinary,
     findMarkerAtFraction,
+    itemIndexAtScrollTop,
+    scrollTopForItemIndex,
+    totalItemsInTimeline,
     type TimelineMarker,
 } from '@/lib/utils/timelineMarkers';
 import { formatDate } from '@/lib/utils/format';
@@ -24,10 +28,34 @@ interface UseTimelineScrollbarResult {
     wrapperHeight: number;
 }
 
+interface UseTimelineScrollbarOptions {
+    /** Whether pages exist beyond the loaded rows. */
+    hasMore?: boolean;
+    /** Requests the next page. Called repeatedly while chasing a jump target. */
+    onLoadMore?: () => void;
+}
+
+/**
+ * The timeline scrollbar, addressed by *item index* rather than by a fraction of
+ * the scroll container.
+ *
+ * The distinction is the whole point once the gallery is paginated. The markers
+ * describe the entire library (`/media/timeline` month counts) while the scroll
+ * container only spans the pages fetched so far, so writing
+ * `scrollTop = fraction * scrollHeight` aimed at the wrong content: dragging to
+ * "May" landed at May's fraction *of the newest 2000 items*, i.e. still in July.
+ * With thousands of older photos unreachable that way, the library looked like it
+ * only held July and August.
+ *
+ * Now a fraction resolves to a global item index. If that item's page is loaded we
+ * scroll straight to its row; if not, the index is parked in `pendingIndexRef` and
+ * pages are pulled until it arrives.
+ */
 export function useTimelineScrollbar(
     containerRef: RefObject<HTMLDivElement | null>,
     virtualRows: VirtualRow[],
     timeline: TimelineMonth[] | undefined,
+    { hasMore = false, onLoadMore }: UseTimelineScrollbarOptions = {},
 ): UseTimelineScrollbarResult {
     const [thumbFraction, setThumbFraction] = useState(0);
     const [activeLabel, setActiveLabel] = useState<string | null>(null);
@@ -51,6 +79,12 @@ export function useTimelineScrollbar(
     // Last label we committed via setActiveLabel — lets us skip redundant
     // setState when the day label is unchanged between frames.
     const lastLabelRef = useRef<string | null>(null);
+    /**
+     * Global item index the user asked for that is not loaded yet. Pages are
+     * fetched until it materialises, then we land on it. Cleared if the user takes
+     * over with the wheel, or if the library runs out before reaching it.
+     */
+    const pendingIndexRef = useRef<number | null>(null);
 
     // Single label setter shared by the scroll + drag paths so lastLabelRef
     // stays in sync with the rendered label.
@@ -70,31 +104,26 @@ export function useTimelineScrollbar(
         [virtualRows],
     );
 
-    // Correct marker fractions to use actual scroll positions instead of item-count ratios.
-    // Item-count fractions drift from scroll fractions because date-headers (40px each)
-    // add height that isn't proportional to item counts.
-    const correctedMarkers = useMemo(() => {
-        if (markers.length === 0 || dateIndex.length === 0) return markers;
+    const rowIndex = useMemo(
+        () => buildRowItemIndex(virtualRows),
+        [virtualRows],
+    );
 
-        // Map each month to its first scroll position
-        const monthScrollMap = new Map<string, number>();
-        for (const entry of dateIndex) {
-            const monthKey = entry.date.substring(0, 7);
-            if (!monthScrollMap.has(monthKey)) {
-                monthScrollMap.set(monthKey, entry.scrollTop);
-            }
-        }
-
-        const totalHeight = virtualRows.reduce((sum, r) => sum + r.height, 0);
-        const maxScroll = totalHeight - wrapperHeight;
-        if (maxScroll <= 0) return markers;
-
-        return markers.map(marker => {
-            const scrollTop = monthScrollMap.get(marker.monthKey);
-            if (scrollTop === undefined) return marker;
-            return { ...marker, fraction: Math.max(0, Math.min(1, scrollTop / maxScroll)) };
-        });
-    }, [markers, dateIndex, virtualRows, wrapperHeight]);
+    /**
+     * Items the track spans. The timeline covers the whole library; the loaded row
+     * count is the floor for callers whose timeline is derived from loaded items
+     * only (collection views), where the two are the same number by construction.
+     *
+     * Marker fractions are used as published. They were previously rewritten from
+     * loaded-only scroll positions, which mixed two coordinate systems once
+     * pagination landed: loaded months got scroll-derived fractions while unloaded
+     * ones kept item-count fractions, so labels bunched together and moved on every
+     * page load. Item-count fractions are the same basis the drag now resolves
+     * against, so no correction is needed — and date-header height, the reason the
+     * correction existed, no longer distorts anything because a fraction maps to a
+     * row rather than to a pixel offset.
+     */
+    const totalItems = Math.max(totalItemsInTimeline(timeline), rowIndex.loadedItems);
 
     // Measure container height
     useEffect(() => {
@@ -121,13 +150,31 @@ export function useTimelineScrollbar(
             const maxScroll = container.scrollHeight - container.clientHeight;
             if (maxScroll <= 0) return;
 
-            const fraction = container.scrollTop / maxScroll;
-            setThumbFraction(Math.max(0, Math.min(1, fraction)));
+            // The drag owns the thumb while it is in progress, and a jump in flight
+            // owns it until its target page arrives — otherwise the position the
+            // user chose would be overwritten by the loaded-content position we are
+            // temporarily parked at.
+            if (!isDraggingRef.current && pendingIndexRef.current === null) {
+                const atEnd = maxScroll - container.scrollTop < 2;
+                const fraction = atEnd && !hasMore
+                    ? 1
+                    : totalItems > 1
+                        ? itemIndexAtScrollTop(rowIndex, container.scrollTop) / (totalItems - 1)
+                        : 0;
+                setThumbFraction(Math.max(0, Math.min(1, fraction)));
+            }
 
             const currentDate = findCurrentDateBinary(dateIndex, container.scrollTop);
             if (currentDate) {
                 commitLabel(formatDate(currentDate));
             }
+        };
+
+        // A deliberate scroll by the user supersedes a jump that is still fetching
+        // its pages; without this the grid would yank them away mid-scroll when the
+        // target finally arrived.
+        const cancelPendingJump = () => {
+            pendingIndexRef.current = null;
         };
 
         const handleScroll = () => {
@@ -146,12 +193,16 @@ export function useTimelineScrollbar(
 
         updatePosition();
         container.addEventListener('scroll', handleScroll, { passive: true });
+        container.addEventListener('wheel', cancelPendingJump, { passive: true });
+        container.addEventListener('touchstart', cancelPendingJump, { passive: true });
         return () => {
             container.removeEventListener('scroll', handleScroll);
+            container.removeEventListener('wheel', cancelPendingJump);
+            container.removeEventListener('touchstart', cancelPendingJump);
             if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
             if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
         };
-    }, [containerRef, markers, dateIndex, commitLabel]);
+    }, [containerRef, markers, dateIndex, rowIndex, totalItems, hasMore, commitLabel]);
 
     // Hover detection
     useEffect(() => {
@@ -218,26 +269,77 @@ export function useTimelineScrollbar(
         };
     }, [containerRef]);
 
-    // Apply a target fraction to the scroll container — writes scrollTop and
-    // updates the thumb + day label. Called synchronously on pointer-down and
-    // at most once per frame during drag (see scheduleDragFrame).
+    /**
+     * Resolve a track fraction to a library item and go there. Called
+     * synchronously on pointer-down and at most once per frame during a drag
+     * (see scheduleDragFrame).
+     */
     const applyFraction = useCallback((fraction: number) => {
         const container = containerRef.current;
         if (!container) return;
 
-        const maxScroll = container.scrollHeight - container.clientHeight;
-        if (maxScroll <= 0) return;
+        const clamped = Math.max(0, Math.min(1, fraction));
+        setThumbFraction(clamped);
+        if (totalItems <= 0) return;
 
-        container.scrollTop = fraction * maxScroll;
-        setThumbFraction(fraction);
+        const targetIndex = Math.min(totalItems - 1, Math.round(clamped * (totalItems - 1)));
+        const scrollTop = scrollTopForItemIndex(rowIndex, targetIndex);
 
-        // Show day-level label during drag
-        const currentDate = findCurrentDateBinary(dateIndex, container.scrollTop);
-        const nextLabel = currentDate
-            ? formatDate(currentDate)
-            : (findMarkerAtFraction(correctedMarkers, fraction)?.label ?? null);
-        commitLabel(nextLabel);
-    }, [containerRef, correctedMarkers, dateIndex, commitLabel]);
+        if (scrollTop === null) {
+            // The target is in a page we have not fetched. Hold it, park at the end
+            // of the loaded content so pages keep streaming, and land on it in the
+            // effect below as soon as it arrives.
+            pendingIndexRef.current = targetIndex;
+            const maxScroll = container.scrollHeight - container.clientHeight;
+            if (maxScroll > 0 && container.scrollTop < maxScroll) container.scrollTop = maxScroll;
+            commitLabel(findMarkerAtFraction(markers, clamped)?.label ?? null);
+            onLoadMore?.();
+            return;
+        }
+
+        pendingIndexRef.current = null;
+        container.scrollTop = scrollTop;
+
+        const currentDate = findCurrentDateBinary(dateIndex, scrollTop);
+        commitLabel(
+            currentDate
+                ? formatDate(currentDate)
+                : (findMarkerAtFraction(markers, clamped)?.label ?? null)
+        );
+    }, [containerRef, markers, dateIndex, rowIndex, totalItems, onLoadMore, commitLabel]);
+
+    /**
+     * Chase a jump target across page loads.
+     *
+     * Re-runs on every new page (`rowIndex` changes), landing on the target the
+     * moment its page is in, and giving up cleanly if the library ends first.
+     */
+    useEffect(() => {
+        const target = pendingIndexRef.current;
+        if (target === null) return;
+
+        const container = containerRef.current;
+        if (!container) return;
+
+        const scrollTop = scrollTopForItemIndex(rowIndex, target);
+        if (scrollTop !== null) {
+            pendingIndexRef.current = null;
+            container.scrollTop = scrollTop;
+            const currentDate = findCurrentDateBinary(dateIndex, scrollTop);
+            if (currentDate) commitLabel(formatDate(currentDate));
+            return;
+        }
+
+        if (hasMore) {
+            onLoadMore?.();
+        }
+        else {
+            // Ran out of library before reaching the target — settle at the end.
+            pendingIndexRef.current = null;
+            const maxScroll = container.scrollHeight - container.clientHeight;
+            if (maxScroll > 0) container.scrollTop = maxScroll;
+        }
+    }, [containerRef, rowIndex, dateIndex, hasMore, onLoadMore, commitLabel]);
 
     // rAF-throttle drag updates: pointermove fires far more often than the
     // display refreshes, so coalesce to at most one scrollTop write per frame.
@@ -328,7 +430,7 @@ export function useTimelineScrollbar(
         isDragging,
         thumbFraction,
         activeLabel,
-        markers: correctedMarkers,
+        markers,
         trackRef,
         onTrackPointerDown,
         canShow,
