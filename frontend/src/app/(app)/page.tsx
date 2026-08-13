@@ -22,7 +22,13 @@ import { searchResultToShellItem } from '@/lib/utils/searchResults';
 import type { MediaShellItem } from '@/lib/types/media';
 
 export default function GalleryPage() {
-    const { items: shellItems, isLoading } = useShellData();
+    const {
+        items: shellItems,
+        isLoading,
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+    } = useShellData();
     const [search, setSearch] = useState('');
     const selection = useMediaSelection();
     const { openFilePicker, openFolderPicker } = useFilePicker();
@@ -107,6 +113,9 @@ export default function GalleryPage() {
                     favoriteIds={favoriteIds}
                     onToggleFavorite={handleToggleFavorite}
                     emptyMessage={isSearchActive ? 'No results found' : undefined}
+                    onLoadMore={isSearchActive ? undefined : fetchNextPage}
+                    hasMore={isSearchActive ? false : hasNextPage}
+                    isLoadingMore={isSearchActive ? false : isFetchingNextPage}
                 />
             </ErrorBoundary>
         </FileDropZone>

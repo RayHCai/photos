@@ -57,7 +57,25 @@ interface GalleryGridProps {
     timeline?: import('@/lib/types/media').TimelineMonth[];
     /** Enables press-and-drag multi-select + edge auto-scroll on touch devices. */
     dragSelect?: DragSelectController;
+    /** Called when the scroll position nears the end of the loaded rows. */
+    onLoadMore?: () => void;
+    /** Whether a further page exists beyond what's currently loaded. */
+    hasMore?: boolean;
+    /** Whether a page fetch triggered by onLoadMore is in flight. */
+    isLoadingMore?: boolean;
 }
+
+/**
+ * How close to the end of the loaded rows a fetch is triggered, as a multiple of
+ * the viewport height.
+ *
+ * Measured in pixels rather than rows on purpose. A row-count threshold meant a
+ * 2000-item page had to be scrolled to within ~10 of its ~400 rows — about 97% of
+ * the way down — before the next page was even requested, so scrolling dead-ended
+ * at the bottom of each page and waited for a round trip. Three viewports of
+ * lookahead keeps the next page arriving before the user can reach the end.
+ */
+const LOAD_MORE_VIEWPORT_LOOKAHEAD = 3;
 
 export function GalleryGrid({
     groups,
@@ -71,6 +89,9 @@ export function GalleryGrid({
     thumbnailSrcFn,
     timeline,
     dragSelect,
+    onLoadMore,
+    hasMore,
+    isLoadingMore,
 }: GalleryGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const hasTouch = useHasTouch();
@@ -258,6 +279,26 @@ export function GalleryGrid({
         // own identity would loop.
     }, [virtualRows]);
 
+    const virtualItems = virtualizer.getVirtualItems();
+
+    /**
+     * Fetch the next page while the end of the loaded rows is still a few viewports
+     * away, so scrolling never stalls at a page boundary.
+     *
+     * Recomputed per render, which the virtualizer already triggers on scroll.
+     */
+    const totalSize = virtualizer.getTotalSize();
+    const scrollOffset = virtualizer.scrollOffset ?? 0;
+    const viewportHeight = containerRef.current?.clientHeight ?? 0;
+    const distanceToEnd = totalSize - scrollOffset - viewportHeight;
+
+    useEffect(() => {
+        if (!hasMore || isLoadingMore || totalSize <= 0) return;
+        if (distanceToEnd <= viewportHeight * LOAD_MORE_VIEWPORT_LOOKAHEAD) {
+            onLoadMore?.();
+        }
+    }, [distanceToEnd, viewportHeight, totalSize, hasMore, isLoadingMore, onLoadMore]);
+
     return (
         <div className="h-full relative">
             <div
@@ -283,7 +324,7 @@ export function GalleryGrid({
                         ...(isPinching && { willChange: 'transform' }),
                     }}
                 >
-                    {virtualizer.getVirtualItems().map((virtualItem) => {
+                    {virtualItems.map((virtualItem) => {
                         const row = virtualRows[virtualItem.index];
                         if (!row) return null;
                         return (
@@ -324,10 +365,22 @@ export function GalleryGrid({
                 </div>
             </div>
 
+            {/*
+              * Jumping to a month whose page is not loaded yet pulls pages until it
+              * arrives, so this can run for a beat on a long jump.
+              */}
+            {isLoadingMore && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-stone-800/80 text-white text-xs font-sans px-3 py-1.5 rounded-full shadow-lg">
+                    Loading more…
+                </div>
+            )}
+
             <TimelineScrollbar
                 containerRef={containerRef}
                 virtualRows={virtualRows}
                 timeline={timeline}
+                hasMore={hasMore}
+                onLoadMore={onLoadMore}
             />
         </div>
     );

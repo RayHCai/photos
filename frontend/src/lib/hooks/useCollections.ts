@@ -1,9 +1,12 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo } from 'react';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useMutationWithInvalidation } from './useMutationWithInvalidation';
 import * as collectionsApi from '../api/collections';
 import { queryKeys } from '../queries/keys';
+import type { CollectionWithItems } from '../types/collections';
+import type { MediaShellItem } from '../types/media';
 
 export function useCollections() {
     return useQuery({
@@ -12,12 +15,67 @@ export function useCollections() {
     });
 }
 
-export function useCollection(id: string | undefined) {
-    return useQuery({
-        queryKey: ['collections', id],
-        queryFn: () => collectionsApi.getCollection(id!),
-        enabled: !!id,
+/**
+ * A collection's items, paged as the gallery scrolls.
+ *
+ * `GET /collections/:id` and the system-collection endpoints have always been
+ * cursor-paginated server-side (`COLLECTION_ITEMS_PAGE_SIZE`, 500), but they were
+ * read through a plain `useQuery` that only ever requested the first page. Any
+ * collection larger than that rendered its newest 500 items and offered no way to
+ * reach the rest — the same truncation the main gallery had, minus the symptom
+ * being obvious, because nothing told the user items were missing.
+ */
+function useCollectionPages(
+    queryKey: readonly unknown[],
+    fetchPage: (params: { cursor?: string }) => Promise<CollectionWithItems>,
+    enabled = true,
+) {
+    const query = useInfiniteQuery({
+        queryKey,
+        queryFn: ({ pageParam }) => fetchPage(pageParam ? { cursor: pageParam } : {}),
+        initialPageParam: undefined as string | undefined,
+        getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+        enabled,
     });
+
+    // Metadata (name, share links, total count) is identical on every page.
+    const collection = query.data?.pages[0];
+
+    const items = useMemo<MediaShellItem[]>(
+        () => query.data?.pages.flatMap((p) => p.items.map((i) => i.mediaItem)) ?? [],
+        [query.data]
+    );
+
+    // See useShellData: without `cancelRefetch: false`, overlapping requests for
+    // the next page abort each other and pagination never advances.
+    const { fetchNextPage } = query;
+    const loadMore = useCallback(() => {
+        void fetchNextPage({ cancelRefetch: false });
+    }, [fetchNextPage]);
+
+    return {
+        collection,
+        items,
+        isLoading: query.isLoading,
+        fetchNextPage: loadMore,
+        hasNextPage: query.hasNextPage,
+        isFetchingNextPage: query.isFetchingNextPage,
+    };
+}
+
+export function useCollection(id: string | undefined) {
+    return useCollectionPages(
+        ['collections', id],
+        (params) => collectionsApi.getCollection(id!, params),
+        !!id
+    );
+}
+
+export function useHiddenCollection() {
+    return useCollectionPages(
+        queryKeys.collections.hidden(),
+        collectionsApi.getHiddenCollection
+    );
 }
 
 export function useCreateCollection() {
