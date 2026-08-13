@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useRef, useState } from 'react';
 
 const MIN_COLUMNS = 2;
@@ -11,6 +13,21 @@ function getTouchDistance(t1: Touch, t2: Touch): number {
     return Math.sqrt(dx * dx + dy * dy);
 }
 
+/**
+ * Pinch to change grid density.
+ *
+ * The gesture is now *visual only* while the fingers are down: it reports a
+ * `gestureScale` the caller applies as a CSS transform, and commits a new column
+ * count once on release.
+ *
+ * Previously it drove `setColumns` and a `gestureCellSize` on every rAF during the
+ * gesture, both of which fed the caller's layout memo — so each frame re-ran the
+ * whole library's date grouping and justified layout, re-measured the virtualizer,
+ * re-armed the thumbnail prefetcher, and made the timeline scrollbar rebuild its
+ * index while reading clientHeight. The result on the low-end phones this feature
+ * exists for was that the pinch did not animate at all: the grid froze for the
+ * duration and snapped to a new density seconds after the fingers lifted.
+ */
 export function usePinchToZoom(
     containerRef: React.RefObject<HTMLElement | null>,
     enabled: boolean,
@@ -18,19 +35,19 @@ export function usePinchToZoom(
     gap: number
 ) {
     const [columns, setColumns] = useState(DEFAULT_COLUMNS);
-    const [gestureCellSize, setGestureCellSize] = useState<number | null>(null);
+    /** Live visual scale during a pinch, or null when no gesture is in flight. */
+    const [gestureScale, setGestureScale] = useState<number | null>(null);
+    const [isPinching, setIsPinching] = useState(false);
 
-    // Refs for stable event handlers (avoid re-registering listeners during gesture)
-    const isPinching = useRef(false);
+    const pinchingRef = useRef(false);
     const baseDistance = useRef(0);
-    const baseCellSize = useRef(0);
     const rafId = useRef(0);
     const wheelAccumulator = useRef(0);
+    /** Latest scale seen during the gesture, used to decide the committed columns. */
+    const latestScale = useRef(1);
 
     const colsRef = useRef(columns);
     colsRef.current = columns;
-    const cellSizeRef = useRef(gestureCellSize);
-    cellSizeRef.current = gestureCellSize;
     const widthRef = useRef(availableWidth);
     widthRef.current = availableWidth;
     const gapRef = useRef(gap);
@@ -41,52 +58,59 @@ export function usePinchToZoom(
         if (!el || !enabled) return;
 
         const onTouchStart = (e: TouchEvent) => {
-            if (e.touches.length === 2) {
-                isPinching.current = true;
-                baseDistance.current = getTouchDistance(e.touches[0], e.touches[1]);
-                const cols = colsRef.current;
-                const gcs = cellSizeRef.current;
-                const w = widthRef.current;
-                const g = gapRef.current;
-                baseCellSize.current = gcs ?? (w - (cols - 1) * g) / cols;
-            }
+            if (e.touches.length !== 2) return;
+            pinchingRef.current = true;
+            baseDistance.current = getTouchDistance(e.touches[0]!, e.touches[1]!);
+            latestScale.current = 1;
+            setIsPinching(true);
+            setGestureScale(1);
         };
 
         const onTouchMove = (e: TouchEvent) => {
-            if (!isPinching.current || e.touches.length !== 2) return;
+            if (!pinchingRef.current || e.touches.length !== 2) return;
             e.preventDefault();
+
+            // Read the touch positions synchronously: by the time a rAF callback runs
+            // the TouchEvent's touch list may already have been recycled.
+            const distance = getTouchDistance(e.touches[0]!, e.touches[1]!);
 
             cancelAnimationFrame(rafId.current);
             rafId.current = requestAnimationFrame(() => {
-                const currentDist = getTouchDistance(e.touches[0], e.touches[1]);
-                const scale = currentDist / baseDistance.current;
-                const newSize = baseCellSize.current * scale;
-
-                const w = widthRef.current;
-                const g = gapRef.current;
-                const maxSize = (w - (MIN_COLUMNS - 1) * g) / MIN_COLUMNS;
-                const minSize = (w - (MAX_COLUMNS - 1) * g) / MAX_COLUMNS;
-                const clamped = Math.max(minSize, Math.min(maxSize, newSize));
-
-                // Derive best column count from current cell size
-                const bestCols = Math.round((w + g) / (clamped + g));
-                const clampedCols = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, bestCols));
-
-                setGestureCellSize(clamped);
-                setColumns(clampedCols);
+                if (baseDistance.current === 0) return;
+                // Clamped to the range the column count can actually express, so the
+                // visual feedback never promises a density that will not be committed.
+                const raw = distance / baseDistance.current;
+                const scale = Math.max(0.5, Math.min(2.5, raw));
+                latestScale.current = scale;
+                setGestureScale(scale);
             });
         };
 
+        const commit = () => {
+            pinchingRef.current = false;
+            cancelAnimationFrame(rafId.current);
+
+            const w = widthRef.current;
+            const g = gapRef.current;
+            const cols = colsRef.current;
+
+            // Translate the final scale into a column count once.
+            const currentCellSize = (w - (cols - 1) * g) / cols;
+            const targetCellSize = currentCellSize * latestScale.current;
+            const bestCols = Math.round((w + g) / (targetCellSize + g));
+            const clampedCols = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, bestCols));
+
+            setGestureScale(null);
+            setIsPinching(false);
+            setColumns(clampedCols);
+        };
+
         const onTouchEnd = (e: TouchEvent) => {
-            if (e.touches.length < 2) {
-                isPinching.current = false;
-                cancelAnimationFrame(rafId.current);
-                setGestureCellSize(null);
-            }
+            if (e.touches.length < 2 && pinchingRef.current) commit();
         };
 
         const onWheel = (e: WheelEvent) => {
-            if (!e.ctrlKey) return;
+            if (!e.ctrlKey && !e.metaKey) return;
             e.preventDefault();
             wheelAccumulator.current += e.deltaY;
             if (Math.abs(wheelAccumulator.current) >= WHEEL_THRESHOLD) {
@@ -99,16 +123,18 @@ export function usePinchToZoom(
         el.addEventListener('touchstart', onTouchStart, { passive: true });
         el.addEventListener('touchmove', onTouchMove, { passive: false });
         el.addEventListener('touchend', onTouchEnd, { passive: true });
+        el.addEventListener('touchcancel', onTouchEnd, { passive: true });
         el.addEventListener('wheel', onWheel, { passive: false });
 
         return () => {
             el.removeEventListener('touchstart', onTouchStart);
             el.removeEventListener('touchmove', onTouchMove);
             el.removeEventListener('touchend', onTouchEnd);
+            el.removeEventListener('touchcancel', onTouchEnd);
             el.removeEventListener('wheel', onWheel);
             cancelAnimationFrame(rafId.current);
         };
     }, [containerRef, enabled]);
 
-    return { columns, gestureCellSize };
+    return { columns, gestureScale, isPinching };
 }

@@ -1,143 +1,239 @@
-const CACHE_NAME = 'photos-v1';
-// Dedicated, size-capped cache for thumbnail image objects.
-const THUMB_CACHE = 'photos-thumbs-v1';
-const THUMB_MAX_ENTRIES = 400;
+/**
+ * Service worker.
+ *
+ * Fixes over the previous version:
+ *  - CACHE_NAME is versioned, so a deploy retires old caches instead of accumulating
+ *    hashed chunks from every release forever.
+ *  - The thumbnail cache is bounded by *bytes*, not by a 400-entry count. 400 entries is
+ *    about ten desktop screenfuls, so everything the user scrolled past was evicted long
+ *    before they scrolled back — the persistent cache delivered almost nothing.
+ *  - Cache hits no longer re-fetch. Every hit fired a background revalidation for an
+ *    object whose key is a random UUID and whose response is stamped immutable, so a
+ *    scroll through 500 thumbnails made 500 pointless requests.
+ *  - Every cache.put is guarded: a quota error used to reject unhandled.
+ */
 
-// Assets to precache on install
-const PRECACHE_URLS = [
-  '/',
-  '/manifest.json',
-  '/icon.svg',
-];
+// Bump on each deploy. Anything not in CURRENT_CACHES is deleted on activate.
+const VERSION = 'v2';
+const CACHE_NAME = `photos-app-${VERSION}`;
+const THUMB_CACHE = `photos-thumbs-${VERSION}`;
+
+const CURRENT_CACHES = [CACHE_NAME, THUMB_CACHE];
+
+/**
+ * Byte budget for cached thumbnails. Enough to hold a few thousand ~25 KB WebP
+ * thumbnails — deep enough that scrolling back is a cache hit — while staying well inside
+ * a mobile origin's storage quota.
+ */
+const THUMB_MAX_BYTES = 120 * 1024 * 1024;
+/** Trim in batches so a single put does not pay for a full sweep. */
+const THUMB_TRIM_TARGET_BYTES = 100 * 1024 * 1024;
+/** An opaque cross-origin response reports no length; charge it a nominal size. */
+const OPAQUE_SIZE_ESTIMATE = 30 * 1024;
+
+const PRECACHE_URLS = ['/', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
-  );
-  self.skipWaiting();
+    event.waitUntil(
+        caches
+            .open(CACHE_NAME)
+            // Individually, so one 404 does not abort the entire install.
+            .then((cache) => Promise.allSettled(PRECACHE_URLS.map((url) => cache.add(url))))
+            .then(() => self.skipWaiting())
+    );
 });
 
 self.addEventListener('activate', (event) => {
-  // Remove old caches, but keep the current app + thumbnail caches.
-  event.waitUntil(
-    caches.keys().then((names) =>
-      Promise.all(
-        names
-          .filter((name) => name !== CACHE_NAME && name !== THUMB_CACHE)
-          .map((name) => caches.delete(name))
-      )
-    )
-  );
-  self.clients.claim();
+    event.waitUntil(
+        caches
+            .keys()
+            .then((names) =>
+                Promise.all(
+                    names
+                        .filter((name) => !CURRENT_CACHES.includes(name))
+                        .map((name) => caches.delete(name))
+                )
+            )
+            .then(() => self.clients.claim())
+    );
 });
 
-// A stable, query-stripped cache key so a re-signed presigned URL (rotating
-// X-Amz-Signature) still hits the bytes already cached for the same object.
+/**
+ * A stable, query-stripped cache key, so a re-signed presigned URL (rotating
+ * X-Amz-Signature) still hits the bytes already cached for the same object.
+ */
 function thumbCacheKey(url) {
-  return url.origin + url.pathname;
+    return url.origin + url.pathname;
 }
 
-// Is this request for a thumbnail image we want to persist?
+/**
+ * Is this a request whose bytes the browser's download manager owns? These redirect to a
+ * presigned S3 URL, and a service worker in the middle of that redirect can only get in
+ * the way — there is nothing to cache either.
+ */
+function isDownloadRequest(url) {
+    return (
+        /\/media\/[^/]+\/download$/.test(url.pathname) ||
+        url.searchParams.get('download') === '1'
+    );
+}
+
 function isThumbnailRequest(url) {
-  if (url.origin === self.location.origin) {
-    // Same-origin proxy/redirect endpoint: /api/v1/media/{id}/thumbnail
-    return /\/media\/[^/]+\/thumbnail$/.test(url.pathname);
-  }
-  // Cross-origin CDN/S3 thumbnail objects live under a thumbnails/ prefix
-  // (virtual-hosted or path-style URLs both contain it).
-  return url.pathname.includes('/thumbnails/');
+    if (url.origin === self.location.origin) {
+        // Same-origin proxy/redirect endpoint: /api/v1/media/{id}/thumbnail
+        return /\/media\/[^/]+\/thumbnail$/.test(url.pathname);
+    }
+    // Cross-origin CDN/S3 thumbnail objects live under a thumbnails/ prefix
+    // (virtual-hosted and path-style URLs both contain it).
+    return url.pathname.includes('/thumbnails/');
 }
 
-// Trim the thumbnail cache to a soft cap. cache.keys() returns insertion order,
-// so deleting from the front evicts the oldest entries; revalidation re-puts on
-// each hit, refreshing recency (≈ LRU).
+/** Best-effort put: a quota error must not reject into the void. */
+async function safePut(cache, key, response) {
+    try {
+        await cache.put(key, response);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+
+/**
+ * Evict oldest-first until the cache is back under the target.
+ *
+ * cache.keys() returns insertion order, so deleting from the front is FIFO.
+ */
 async function trimThumbCache(cache) {
-  const keys = await cache.keys();
-  const excess = keys.length - THUMB_MAX_ENTRIES;
-  for (let i = 0; i < excess; i++) {
-    await cache.delete(keys[i]);
-  }
+    const keys = await cache.keys();
+
+    let total = 0;
+    const sizes = [];
+    for (const request of keys) {
+        const response = await cache.match(request);
+        const length = Number(response?.headers.get('Content-Length') ?? 0);
+        const size = length > 0 ? length : OPAQUE_SIZE_ESTIMATE;
+        sizes.push({ request, size });
+        total += size;
+    }
+
+    if (total <= THUMB_MAX_BYTES) return;
+
+    for (const { request, size } of sizes) {
+        if (total <= THUMB_TRIM_TARGET_BYTES) break;
+        await cache.delete(request);
+        total -= size;
+    }
 }
 
-// Cache-first + stale-while-revalidate for thumbnails: return the cached copy
-// instantly and refresh it in the background; otherwise fetch, cache, return.
-// Caches opaque cross-origin (no-cors) responses too — both CDN objects and the
-// same-origin /thumbnail redirect resolve to opaque image responses.
+/**
+ * Cache-first for thumbnails.
+ *
+ * Deliberately *not* stale-while-revalidate: object keys are random UUIDs and responses
+ * are immutable, so the bytes behind a key never change. Revalidating on every hit was
+ * pure waste, and on a mobile connection it competed with the thumbnails actually being
+ * scrolled into view.
+ */
 async function thumbnailStrategy(event, url) {
-  const { request } = event;
-  const cache = await caches.open(THUMB_CACHE);
-  const key = thumbCacheKey(url);
-  const cached = await cache.match(key);
+    const { request } = event;
+    const cache = await caches.open(THUMB_CACHE);
+    const key = thumbCacheKey(url);
 
-  const networkFetch = fetch(request)
-    .then((response) => {
-      // Persist only fully-formed responses: a redirected (e.g. same-origin 302)
-      // or partial (206) response makes cache.put throw. Fire-and-forget so a put
-      // rejection can never null out the response we hand back to the page.
-      if ((response.ok || response.type === 'opaque') && !response.redirected && response.status !== 206) {
-        cache.put(key, response.clone())
-          .then(() => trimThumbCache(cache))
-          .catch(() => {});
-      }
-      return response;
-    })
-    .catch(() => null);
+    const cached = await cache.match(key);
+    if (cached) return cached;
 
-  if (cached) {
-    // Revalidate in the background without blocking the response.
-    event.waitUntil(networkFetch.catch(() => {}));
-    return cached;
-  }
+    let response;
+    try {
+        response = await fetch(request);
+    }
+    catch {
+        return Response.error();
+    }
 
-  const response = await networkFetch;
-  return response || Response.error();
+    // Persist only fully-formed responses: a redirected (same-origin 302) or partial
+    // (206) response makes cache.put throw.
+    if (
+        (response.ok || response.type === 'opaque') &&
+        !response.redirected &&
+        response.status !== 206
+    ) {
+        const copy = response.clone();
+        event.waitUntil(
+            safePut(cache, key, copy).then((stored) => (stored ? trimThumbCache(cache) : undefined))
+        );
+    }
+
+    return response;
 }
 
 self.addEventListener('fetch', (event) => {
-  const { request } = event;
-  if (request.method !== 'GET') return;
+    const { request } = event;
+    if (request.method !== 'GET') return;
 
-  const url = new URL(request.url);
+    const url = new URL(request.url);
 
-  // Thumbnails → dedicated size-capped cache (cache-first SWR). Checked before
-  // the same-origin guard (so cross-origin CDN thumbnails qualify) and before
-  // the /api network-first branch (same-origin thumbnails live under /api/v1).
-  if (isThumbnailRequest(url)) {
-    event.respondWith(thumbnailStrategy(event, url));
-    return;
-  }
+    // File saves go straight to the network, untouched.
+    if (isDownloadRequest(url)) return;
 
-  // Skip cross-origin (non-thumbnail) requests
-  if (url.origin !== self.location.origin) return;
+    // Thumbnails → dedicated byte-capped cache. Checked before the same-origin guard (so
+    // cross-origin CDN thumbnails qualify) and before the /api branch (same-origin
+    // thumbnails live under /api/v1).
+    if (isThumbnailRequest(url)) {
+        event.respondWith(thumbnailStrategy(event, url));
+        return;
+    }
 
-  // Network-first for API calls and navigation
-  if (url.pathname.startsWith('/api/') || request.mode === 'navigate') {
+    // Skip cross-origin non-thumbnail requests.
+    if (url.origin !== self.location.origin) return;
+
+    // Never cache API responses: they are per-session and authenticated, and a stale one
+    // is worse than an error.
+    if (url.pathname.startsWith('/api/')) return;
+
+    if (request.mode === 'navigate') {
+        event.respondWith(
+            fetch(request)
+                .then((response) => {
+                    if (response.ok) {
+                        const copy = response.clone();
+                        event.waitUntil(
+                            caches.open(CACHE_NAME).then((cache) => safePut(cache, request, copy))
+                        );
+                    }
+                    return response;
+                })
+                // Falls back to cache so the shell still opens offline.
+                .catch(async () => (await caches.match(request)) ?? Response.error())
+        );
+        return;
+    }
+
+    // Cache-first for static assets. Next.js content-hashes these filenames, so a hit can
+    // never be stale for a given URL, and activate drops the whole versioned cache on
+    // deploy.
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          // Cache successful navigation responses
-          if (request.mode === 'navigate' && response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
-          return response;
+        caches.match(request).then((cached) => {
+            if (cached) return cached;
+            return fetch(request).then((response) => {
+                if (response.ok) {
+                    const copy = response.clone();
+                    event.waitUntil(
+                        caches.open(CACHE_NAME).then((cache) => safePut(cache, request, copy))
+                    );
+                }
+                return response;
+            });
         })
-        .catch(() => caches.match(request))
     );
-    return;
-  }
+});
 
-  // Cache-first for static assets (JS, CSS, images, fonts)
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        }
-        return response;
-      });
-    })
-  );
+/**
+ * Lets the app clear cached photo bytes — on sign-out, for instance, where a browser
+ * storage's worth of the previous session's thumbnails would otherwise remain readable
+ * offline.
+ */
+self.addEventListener('message', (event) => {
+    if (event.data?.type === 'CLEAR_MEDIA_CACHE') {
+        event.waitUntil(caches.delete(THUMB_CACHE));
+    }
 });

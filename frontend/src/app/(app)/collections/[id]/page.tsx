@@ -15,7 +15,7 @@ import { CenteredSpinner } from '@/components/ui/CenteredSpinner';
 import { Button } from '@/components/ui/Button';
 import { FileDropZone } from '@/components/upload/UploadDropzone';
 import { UploadMenu } from '@/components/upload/UploadMenu';
-import { Settings } from 'lucide-react';
+import { ImagePlus, Settings } from 'lucide-react';
 import { pluralize } from '@/lib/utils/pluralize';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -93,7 +93,7 @@ export default function CollectionDetailPage() {
     }
 
     return (
-        <FileDropZone className="h-screen flex flex-col">
+        <FileDropZone className="h-[100dvh] flex flex-col">
             {/* Toolbar */}
             <div className="relative flex items-center justify-between px-[30px] pt-3 pb-9">
                 <div className="flex-1" />
@@ -120,6 +120,22 @@ export default function CollectionDetailPage() {
                                 onUploadFiles={() => openFilePicker(id)}
                                 onUploadFolder={() => openFolderPicker(id)}
                             />
+                            {/*
+                              * The only way to reach CollectionItemPicker.
+                              * `setPickerOpen(true)` was never called from anywhere, so
+                              * the picker was unreachable and adding an *existing* photo
+                              * to a collection was only possible from the gallery's
+                              * add-to-collection modal.
+                              */}
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setPickerOpen(true)}
+                                title="Add photos from your library"
+                                aria-label="Add photos from your library"
+                            >
+                                <ImagePlus className="w-4 h-4" />
+                            </Button>
                             <Button
                                 variant="ghost"
                                 size="sm"

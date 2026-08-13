@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 
 type DragMode = 'add' | 'remove';
+
+/** Resolves an item id to its position in the current visual order. */
+export type IndexLookup = ReadonlyMap<string, number>;
 
 export function useMediaSelection() {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -22,44 +25,44 @@ export function useMediaSelection() {
     const dragAnchorRef = useRef<string | null>(null);
     const dragBaseRef = useRef<Set<string>>(new Set());
     const dragModeRef = useRef<DragMode>('add');
+    const dragRafRef = useRef(0);
+    const pendingDragRef = useRef<{
+        currentId: string;
+        orderedIds: string[];
+        index: IndexLookup;
+    } | null>(null);
 
     const toggle = useCallback((id: string) => {
         lastSelectedIdRef.current = id;
         setSelectedIds((prev) => {
             const next = new Set(prev);
-            if (next.has(id)) {
-                next.delete(id);
-            }
-            else {
-                next.add(id);
-            }
-            if (next.size === 0) {
-                setIsSelecting(false);
-            }
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            if (next.size === 0) setIsSelecting(false);
             return next;
         });
     }, []);
 
-    const addRange = useCallback((toId: string, orderedIds: string[]) => {
+    const addRange = useCallback((toId: string, orderedIds: string[], index: IndexLookup) => {
         const fromId = lastSelectedIdRef.current;
         if (!fromId) {
             lastSelectedIdRef.current = toId;
-            setSelectedIds((prev) => {
-                const next = new Set(prev);
-                next.add(toId);
-                return next;
-            });
+            setSelectedIds((prev) => new Set(prev).add(toId));
             return;
         }
-        const fromIndex = orderedIds.indexOf(fromId);
-        const toIndex = orderedIds.indexOf(toId);
-        if (fromIndex === -1 || toIndex === -1) return;
+
+        // Map lookups rather than two O(n) indexOf scans over the whole library.
+        const fromIndex = index.get(fromId);
+        const toIndex = index.get(toId);
+        if (fromIndex === undefined || toIndex === undefined) return;
+
         const start = Math.min(fromIndex, toIndex);
         const end = Math.max(fromIndex, toIndex);
         setSelectedIds((prev) => {
             const next = new Set(prev);
             for (let i = start; i <= end; i++) {
-                next.add(orderedIds[i]);
+                const id = orderedIds[i];
+                if (id) next.add(id);
             }
             return next;
         });
@@ -81,22 +84,17 @@ export function useMediaSelection() {
         setIsSelecting(true);
     }, []);
 
-    const handleSelect = useCallback((id: string, orderedIds: string[], e: React.MouseEvent) => {
-        if (!isSelecting) setIsSelecting(true);
-        if (e.shiftKey) {
-            addRange(id, orderedIds);
-        }
-        else {
-            toggle(id);
-        }
-    }, [isSelecting, addRange, toggle]);
+    const handleSelect = useCallback(
+        (id: string, orderedIds: string[], index: IndexLookup, e: React.MouseEvent) => {
+            if (!isSelecting) setIsSelecting(true);
+            if (e.shiftKey) addRange(id, orderedIds, index);
+            else toggle(id);
+        },
+        [isSelecting, addRange, toggle]
+    );
 
     // --- Drag-to-select ("paint") ---------------------------------------------
-    // Begin a paint gesture anchored at `anchorId`. Snapshots the current
-    // selection so the swept range can be applied non-destructively and updated
-    // live (reversing direction un-paints). The anchor's current state decides the
-    // mode: dragging from an unselected photo adds, from a selected photo removes
-    // (matching iOS Photos).
+
     const beginDrag = useCallback((anchorId: string) => {
         const base = new Set(selectedIdsRef.current);
         const mode: DragMode = base.has(anchorId) ? 'remove' : 'add';
@@ -112,52 +110,106 @@ export function useMediaSelection() {
         setSelectedIds(next);
     }, []);
 
-    // Update the paint to the item currently under the finger. Applies the mode to
-    // every item in the visual range [anchor..current], layered over the snapshot
-    // so items swept then abandoned revert.
-    const updateDrag = useCallback((currentId: string, orderedIds: string[]) => {
+    const commitDrag = useCallback(() => {
+        dragRafRef.current = 0;
+        const pending = pendingDragRef.current;
+        pendingDragRef.current = null;
+        if (!pending) return;
+
         const anchorId = dragAnchorRef.current;
         if (anchorId === null) return;
 
-        const anchorIndex = orderedIds.indexOf(anchorId);
-        const currentIndex = orderedIds.indexOf(currentId);
-        if (anchorIndex === -1 || currentIndex === -1) return;
+        const anchorIndex = pending.index.get(anchorId);
+        const currentIndex = pending.index.get(pending.currentId);
+        if (anchorIndex === undefined || currentIndex === undefined) return;
 
         const start = Math.min(anchorIndex, currentIndex);
         const end = Math.max(anchorIndex, currentIndex);
         const mode = dragModeRef.current;
+
         const next = new Set(dragBaseRef.current);
         for (let i = start; i <= end; i++) {
-            if (mode === 'add') next.add(orderedIds[i]);
-            else next.delete(orderedIds[i]);
+            const id = pending.orderedIds[i];
+            if (!id) continue;
+            if (mode === 'add') next.add(id);
+            else next.delete(id);
         }
         setSelectedIds(next);
-        lastSelectedIdRef.current = currentId;
+        lastSelectedIdRef.current = pending.currentId;
     }, []);
 
-    // End a paint gesture. Leaves the selection as painted; only drops out of
-    // selection mode if the gesture cleared everything.
+    /**
+     * Extend the paint to the item under the finger.
+     *
+     * rAF-coalesced: touchmove fires far more often than the display refreshes, and
+     * each raw event previously ran two full-library `indexOf` scans, cloned the
+     * entire existing selection, and committed a state update that re-rendered every
+     * visible cell. At most one commit per frame now, and the range lookup is O(1).
+     */
+    const updateDrag = useCallback(
+        (currentId: string, orderedIds: string[], index: IndexLookup) => {
+            if (dragAnchorRef.current === null) return;
+            pendingDragRef.current = { currentId, orderedIds, index };
+            if (dragRafRef.current === 0) {
+                dragRafRef.current = requestAnimationFrame(commitDrag);
+            }
+        },
+        [commitDrag]
+    );
+
     const endDrag = useCallback(() => {
+        if (dragRafRef.current !== 0) {
+            cancelAnimationFrame(dragRafRef.current);
+            dragRafRef.current = 0;
+            // Apply whatever the last move asked for, so the gesture does not end a
+            // frame short of where the finger actually was.
+            commitDrag();
+        }
         dragAnchorRef.current = null;
         dragBaseRef.current = new Set();
         if (selectedIdsRef.current.size === 0) {
             setIsSelecting(false);
             lastSelectedIdRef.current = null;
         }
-    }, []);
+    }, [commitDrag]);
 
-    return {
-        selectedIds,
-        isSelecting,
-        toggle,
-        addRange,
-        selectAll,
-        clearSelection,
-        startSelecting,
-        handleSelect,
-        beginDrag,
-        updateDrag,
-        endDrag,
-        count: selectedIds.size,
-    };
+    useEffect(
+        () => () => {
+            if (dragRafRef.current !== 0) cancelAnimationFrame(dragRafRef.current);
+        },
+        []
+    );
+
+    // Memoized so the object identity is stable. It used to be a fresh literal on
+    // every render, which changed the identity of every callback derived from it and
+    // defeated `memo` on every gallery row.
+    return useMemo(
+        () => ({
+            selectedIds,
+            isSelecting,
+            toggle,
+            addRange,
+            selectAll,
+            clearSelection,
+            startSelecting,
+            handleSelect,
+            beginDrag,
+            updateDrag,
+            endDrag,
+            count: selectedIds.size,
+        }),
+        [
+            selectedIds,
+            isSelecting,
+            toggle,
+            addRange,
+            selectAll,
+            clearSelection,
+            startSelecting,
+            handleSelect,
+            beginDrag,
+            updateDrag,
+            endDrag,
+        ]
+    );
 }

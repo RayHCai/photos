@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useCallback } from 'react';
-import { sharedThumbnailUrl, sharedOriginalUrl } from '@/lib/api/share';
+import { sharedThumbnailUrl, sharedOriginalUrl, sharedDownloadUrl } from '@/lib/api/share';
 import { PhotoGallery, type LightboxConfig } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
@@ -30,7 +30,7 @@ export function SharedCollectionView({
     );
 
     const downloadUrlFn = useCallback(
-        (id: string) => sharedOriginalUrl(slug, id),
+        (id: string) => sharedDownloadUrl(slug, id),
         [slug]
     );
 
@@ -42,14 +42,14 @@ export function SharedCollectionView({
                 thumbnail: (id: string) => sharedThumbnailUrl(slug, id),
                 web: (id: string) => sharedOriginalUrl(slug, id),
                 original: (id: string) => sharedOriginalUrl(slug, id),
-                download: (id: string) => sharedOriginalUrl(slug, id),
+                download: (id: string) => sharedDownloadUrl(slug, id),
             },
         }),
         [slug]
     );
 
     return (
-        <div className="h-screen bg-stone-50 select-none flex flex-col">
+        <div className="h-[100dvh] bg-stone-50 select-none flex flex-col">
             <header className="relative bg-stone-50 px-6 py-4">
                 <h1 className="text-xl font-serif text-stone-900">
                     {collection.name}

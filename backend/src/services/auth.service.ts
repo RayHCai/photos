@@ -4,19 +4,17 @@ import { env } from '../config/env.js';
 import { cacheSession } from '../config/redis.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { logger } from '../utils/logger.js';
+import { secretEquals } from '../utils/crypto.js';
 
 export async function login(
     password: string,
     userAgent?: string,
     ipAddress?: string
 ) {
-    const expected = Buffer.from(env.APP_PASSWORD);
-    const received = Buffer.from(password);
-
-    if (
-        expected.length !== received.length ||
-        !crypto.timingSafeEqual(expected, received)
-    ) {
+    // secretEquals hashes both sides to a fixed width before comparing, so the
+    // comparison stays constant-time without a length check that would leak the
+    // expected password length.
+    if (!secretEquals(password, env.APP_PASSWORD)) {
         logger.warn({ ipAddress }, 'auth: invalid password attempt');
         throw new AppError(401, 'Invalid password');
     }

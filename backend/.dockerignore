@@ -1,0 +1,10 @@
+# Keeps build context small and prevents secrets or host artefacts from entering a
+# layer. There was no .dockerignore, so `COPY` pulled in node_modules and any .env.
+node_modules
+dist
+.env
+.env.*
+*.log
+.git
+.DS_Store
+coverage

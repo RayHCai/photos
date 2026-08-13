@@ -1,35 +1,45 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
+import { z } from 'zod';
 import * as jobsController from '../controllers/jobs.controller.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { serviceAuthMiddleware } from '../middleware/serviceAuth.js';
-
-/** Accept either user session auth or service secret. */
-const eitherAuth = (req: Request, res: Response, next: NextFunction) => {
-    // Try service secret first (no cookie needed)
-    const hasServiceSecret = !!req.headers['x-service-secret'];
-    if (hasServiceSecret) {
-        return serviceAuthMiddleware(req, res, next);
-    }
-    return authMiddleware(req, res, next);
-};
+import { validate } from '../middleware/validate.js';
 
 const router = Router();
 
-router.post('/enqueue-pending', serviceAuthMiddleware, jobsController.enqueuePending);
-router.post('/backfill-blurhash', serviceAuthMiddleware, jobsController.backfillBlurHashes);
-router.post('/backfill-all-blurhash', serviceAuthMiddleware, jobsController.backfillAllMissingBlurHashes);
-router.post('/fix-orphaned-processing', serviceAuthMiddleware, jobsController.fixOrphanedProcessing);
-router.post('/backfill-transcode', eitherAuth, jobsController.backfillTranscoding);
-router.post('/backfill-web', eitherAuth, jobsController.backfillWebOptimized);
-router.post('/recluster', eitherAuth, jobsController.triggerRecluster);
-router.post('/rerun-missing-faces', eitherAuth, jobsController.rerunMissingFaces);
-router.post('/backfill-geocode', eitherAuth, jobsController.backfillGeocoding);
-router.post('/backfill-metadata', eitherAuth, jobsController.backfillMetadata);
-
-router.post('/retry-failed', eitherAuth, jobsController.retryFailed);
-router.post('/retry', eitherAuth, jobsController.batchRetry);
-
+/**
+ * Every route here is operator-triggered maintenance, so all of them require a
+ * user session.
+ *
+ * There used to be an `eitherAuth` helper that branched on the mere *presence*
+ * of an `x-service-secret` header and, if present, delegated to
+ * serviceAuthMiddleware. Combined with the old fail-open service auth, sending
+ * `x-service-secret: anything` replaced session auth entirely on this router.
+ * The worker never calls these routes (it uses /internal), so there is no reason
+ * for a service-secret path here at all.
+ */
 router.use(authMiddleware);
+
+router.post('/enqueue-pending', jobsController.enqueuePending);
+router.post('/backfill-blurhash', jobsController.backfillBlurHashes);
+router.post('/backfill-all-blurhash', jobsController.backfillAllMissingBlurHashes);
+router.post('/fix-orphaned-processing', jobsController.fixOrphanedProcessing);
+router.post('/backfill-transcode', jobsController.backfillTranscoding);
+router.post('/backfill-web', jobsController.backfillWebOptimized);
+router.post('/recluster', jobsController.triggerRecluster);
+router.post('/rerun-missing-faces', jobsController.rerunMissingFaces);
+router.post('/backfill-geocode', jobsController.backfillGeocoding);
+router.post('/backfill-metadata', jobsController.backfillMetadata);
+router.post('/retry-failed', jobsController.retryFailed);
+
+router.post(
+    '/retry',
+    validate({
+        body: z.object({
+            ids: z.array(z.string().min(1)).min(1).max(1000),
+        }),
+    }),
+    jobsController.batchRetry
+);
 
 router.get('/stats', jobsController.getStats);
 router.get('/storage-stats', jobsController.getStorageStats);

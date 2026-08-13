@@ -2,14 +2,14 @@
 
 import Link from 'next/link';
 import { FolderOpen } from 'lucide-react';
-import type { Collection } from '@/lib/types/collections';
+import type { CollectionSummary } from '@/lib/types/collections';
 import { thumbnailUrl } from '@/lib/api/media';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { useSelectableItem } from '@/lib/hooks/useSelectableItem';
 import { pluralize } from '@/lib/utils/pluralize';
 
 interface CollectionCardProps {
-    collection: Collection;
+    collection: CollectionSummary;
     isSelected?: boolean;
     isSelecting?: boolean;
     onSelect?: (e: React.MouseEvent) => void;

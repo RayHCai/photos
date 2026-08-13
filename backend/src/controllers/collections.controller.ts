@@ -16,18 +16,50 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
     res.status(201).json(collection);
 });
 
-export const getHidden = asyncHandler(async (_req: Request, res: Response) => {
-    const collection = await collectionsService.getOrCreateSystemCollection('HIDDEN', 'Hidden');
+function paginationFrom(req: Request) {
+    return {
+        ...(req.query.cursor ? { cursor: req.query.cursor as string } : {}),
+        ...(req.query.limit ? { limit: Number(req.query.limit) } : {}),
+    };
+}
+
+export const getHidden = asyncHandler(async (req: Request, res: Response) => {
+    const collection = await collectionsService.getOrCreateSystemCollection(
+        'HIDDEN',
+        'Hidden',
+        paginationFrom(req)
+    );
     res.json(collection);
 });
 
-export const getFavorites = asyncHandler(async (_req: Request, res: Response) => {
-    const collection = await collectionsService.getOrCreateSystemCollection('FAVORITES', 'Favorites');
+export const getFavorites = asyncHandler(async (req: Request, res: Response) => {
+    const collection = await collectionsService.getOrCreateSystemCollection(
+        'FAVORITES',
+        'Favorites',
+        paginationFrom(req)
+    );
     res.json(collection);
 });
+
+/**
+ * Just the member ids. The favorites/hidden hooks only ever built a Set of ids
+ * from these, but fetched the full item payload — complete media rows — on every
+ * home-page mount and on every ['collections'] invalidation.
+ */
+export const getSystemCollectionIds = (systemType: 'FAVORITES' | 'HIDDEN') =>
+    asyncHandler(async (_req: Request, res: Response) => {
+        const ids = await collectionsService.getSystemCollectionIds(systemType);
+        res.json({ ids });
+    });
+
+export const getFavoriteIds = getSystemCollectionIds('FAVORITES');
+export const getHiddenIds = getSystemCollectionIds('HIDDEN');
 
 export const getById = asyncHandler(async (req: Request, res: Response) => {
-    const collection = await collectionsService.getCollection(req.params.id as string);
+    const collection = await collectionsService.getCollection(
+        req.params.id as string,
+        paginationFrom(req)
+    );
     res.json(collection);
 });
 

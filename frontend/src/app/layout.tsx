@@ -16,8 +16,12 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
     width: 'device-width',
     initialScale: 1,
-    maximumScale: 1,
-    userScalable: false,
+    // User zoom is deliberately NOT disabled. maximumScale:1 + userScalable:false
+    // failed WCAG 1.4.4 across the whole app, including the login form and the
+    // 10-11px timeline labels, and the app's own pinch gestures only cover grid
+    // density and the lightbox image. Gesture surfaces opt out locally via
+    // touch-action instead.
+    maximumScale: 5,
     themeColor: '#292524',
 };
 

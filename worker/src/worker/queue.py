@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bullmq import Queue
 
 from worker import backend_client as api
 from worker.consumer import get_redis_opts
 from worker.log import get_logger
-from worker.pipeline import Stage
+
+if TYPE_CHECKING:
+    from worker.stages import Stage
 
 logger = get_logger(__name__)
 

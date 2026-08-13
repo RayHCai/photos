@@ -22,5 +22,8 @@ __pycache__/
 # Terraform
 .terraform/
 *.tfstate
-*.tfstate.backup
+*.tfstate.*
 *.tfplan
+# State holds the IAM secret in plaintext; backend/tfvars hold deployment specifics.
+infra/backend.hcl
+infra/terraform.tfvars

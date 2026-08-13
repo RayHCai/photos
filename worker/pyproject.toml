@@ -22,6 +22,17 @@ dependencies = [
     "blurhash-python>=1.1",
 ]
 
+[project.optional-dependencies]
+# Declared so CI can install the toolchain the repo already claims to enforce.
+# ruff and mypy were configured below but installed by nothing, so neither had ever
+# actually run against this code.
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
 [project.scripts]
 worker = "worker.main:run"
 
@@ -49,3 +60,25 @@ plugins = ["pydantic.mypy"]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+# torch, insightface, open_clip, hdbscan and blurhash ship no type information, and
+# stubs do not exist. Without this, strict mode fails on the import lines alone and
+# the check is unrunnable — which is why it had never been run.
+[[tool.mypy.overrides]]
+module = [
+    "blurhash.*",
+    "bullmq.*",
+    "hdbscan.*",
+    "insightface.*",
+    "open_clip.*",
+    "pillow_heif.*",
+    "structlog.*",
+    "torch.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Importing worker.config at collection time constructs Settings, which now *requires*
+# WORKER_SECRET. tests/conftest.py sets it before any worker module is imported, which
+# keeps the suite independent of the developer's .env.
