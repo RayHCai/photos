@@ -24,7 +24,14 @@ import type { TimelineMonth } from '@/lib/types/media';
 export default function CollectionDetailPage() {
     const params = useParams();
     const id = params.id as string;
-    const { data: collection, isLoading } = useCollection(id);
+    const {
+        collection,
+        items: mediaItems,
+        isLoading,
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+    } = useCollection(id);
     const [pickerOpen, setPickerOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const selection = useMediaSelection();
@@ -57,11 +64,6 @@ export default function CollectionDetailPage() {
             );
         });
     }, [id, removeItems]);
-
-    const mediaItems = useMemo(
-        () => collection?.items.map((i) => i.mediaItem) || [],
-        [collection]
-    );
 
     const existingIds = useMemo(
         () => new Set(mediaItems.map((i) => i.id)),
@@ -101,8 +103,9 @@ export default function CollectionDetailPage() {
                     <h1 className="text-xl font-serif text-stone-900 truncate">
                         {collection.name}
                     </h1>
+                    {/* The true total, not the number of pages fetched so far. */}
                     <p className="text-xs text-stone-400 mt-0.5">
-                        {pluralize(mediaItems.length, 'item')}
+                        {pluralize(collection._count?.items ?? mediaItems.length, 'item')}
                     </p>
                 </div>
                 <div className="flex-1 flex items-center justify-end gap-2">
@@ -155,6 +158,9 @@ export default function CollectionDetailPage() {
                 favoriteIds={favoriteIds}
                 onToggleFavorite={handleToggleFavorite}
                 timeline={collectionTimeline}
+                onLoadMore={fetchNextPage}
+                hasMore={hasNextPage}
+                isLoadingMore={isFetchingNextPage}
             />
 
             <CollectionItemPicker
