@@ -151,6 +151,18 @@ export const backfillMissingThumbnailLadders = asyncHandler(
     }
 );
 
+/**
+ * Synchronous, unlike its neighbours, because it is a batched UPDATE over an
+ * indexed `taken_at IS NULL` predicate rather than a job per row — there is nothing
+ * to hand to the worker and nothing to poll for afterwards. Answering with the real
+ * count is what makes the Settings button meaningful.
+ */
+export const backfillTakenAt = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('taken_at backfill requested');
+    const count = await mediaService.backfillMissingTakenAt();
+    res.json({ count });
+});
+
 export const backfillGeocoding = asyncHandler(async (_req: Request, res: Response) => {
     logger.info('geocode backfill requested');
     await queueService.maintenanceQueue.add('geocode-backfill', { triggeredBy: 'manual' as const });

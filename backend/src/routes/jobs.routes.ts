@@ -32,6 +32,7 @@ router.post('/recluster', jobsController.triggerRecluster);
 router.post('/rerun-missing-faces', jobsController.rerunMissingFaces);
 router.post('/backfill-geocode', jobsController.backfillGeocoding);
 router.post('/backfill-metadata', jobsController.backfillMetadata);
+router.post('/backfill-taken-at', jobsController.backfillTakenAt);
 router.post('/retry-failed', jobsController.retryFailed);
 
 router.post(

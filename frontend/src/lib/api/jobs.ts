@@ -47,3 +47,5 @@ export const backfillMissingThumbnailLadders = postJob<
 >('backfill-missing-thumbnail-ladder');
 export const backfillGeocoding = postJob<{ status: string }>('backfill-geocode');
 export const backfillMetadata = postJob('backfill-metadata');
+// Answers with a real count rather than 202: it is a direct UPDATE, not a job fan-out.
+export const backfillTakenAt = postJob('backfill-taken-at');
