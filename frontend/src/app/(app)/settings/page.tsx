@@ -16,6 +16,8 @@ import {
     backfillWebOptimized,
     backfillThumbnailLadder,
     backfillThumbnailLadderVideos,
+    backfillMissingThumbnailLadders,
+    auditThumbnailLadders,
     backfillGeocoding,
     backfillMetadata,
 } from '@/lib/api/jobs';
@@ -131,9 +133,45 @@ export default function SettingsPage() {
             },
         },
         {
+            label: 'Check Thumbnail Coverage',
+            description:
+                'Report how many items are missing responsive thumbnail sizes, without changing anything. Lists the bucket and compares it against the library, which takes a few seconds.',
+            onClick: async () => {
+                const audit = await auditThumbnailLadders();
+                if (audit.incomplete === 0) {
+                    toast.success(
+                        `All ${pluralize(audit.total, 'item')} have a complete thumbnail ladder`
+                    );
+                    return;
+                }
+                toast.warning(
+                    `${pluralize(audit.incomplete, 'item')} incomplete of ${audit.total}` +
+                        ` — ${audit.missingSome} partial, ${audit.missingAll} with no sizes at all`
+                );
+            },
+        },
+        {
+            label: 'Repair Missing Thumbnail Sizes',
+            description:
+                'Regenerate responsive sizes for only the items that are actually missing them. Prefer this over the two below: it re-encodes a handful of items instead of the whole library.',
+            onClick: async () => {
+                const audit = await backfillMissingThumbnailLadders();
+                if (audit.enqueued === 0) {
+                    toast.success(
+                        `Nothing to repair — all ${pluralize(audit.total, 'item')} are complete`
+                    );
+                    return;
+                }
+                toast.success(
+                    `Repairing ${pluralize(audit.enqueued, 'item')}` +
+                        ` (${audit.missingSome} partial, ${audit.missingAll} with no sizes at all)`
+                );
+            },
+        },
+        {
             label: 'Backfill Thumbnail Ladder',
             description:
-                'Regenerate responsive thumbnail sizes (200/400/800px) for all photos and videos. Re-enqueues every completed item, since nothing tracks which ones are missing it.',
+                'Regenerate responsive thumbnail sizes (200/400/800px) for all photos and videos. Re-enqueues every completed item — use the targeted repair above unless you want to force a full rebuild.',
             onClick: async () => {
                 const { count } = await backfillThumbnailLadder();
                 toast.success(`Enqueued ${pluralize(count, 'item')} for thumbnail ladder`);

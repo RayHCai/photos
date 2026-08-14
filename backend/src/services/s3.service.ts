@@ -6,6 +6,8 @@ import {
     CreateMultipartUploadCommand,
     UploadPartCommand,
     CompleteMultipartUploadCommand,
+    ListObjectsV2Command,
+    type ListObjectsV2CommandOutput,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
@@ -212,6 +214,49 @@ export async function getObjectState(key: string): Promise<ObjectState> {
         logger.warn({ err, key }, 's3: HeadObject failed with a non-404 error');
         return 'error';
     }
+}
+
+/**
+ * Streams every key under a prefix to a callback, one page at a time.
+ *
+ * A callback rather than a returned array because the thumbnail prefix holds one
+ * object per item *per rung* — four keys per photo — and the only caller wants a
+ * compact derived summary, not the strings themselves. Materialising the full
+ * list first would hold hundreds of megabytes of key text for a large library to
+ * build something a few bytes wide per item.
+ *
+ * HeadObject-per-key is the alternative and is far worse: one round trip per
+ * object instead of per thousand.
+ */
+export async function forEachKey(
+    prefix: string,
+    onKey: (key: string) => void
+): Promise<number> {
+    let token: string | undefined;
+    let seen = 0;
+
+    do {
+        const page: ListObjectsV2CommandOutput = await s3Client.send(
+            new ListObjectsV2Command({
+                Bucket: env.S3_BUCKET,
+                Prefix: prefix,
+                ContinuationToken: token,
+                MaxKeys: 1000,
+            })
+        );
+
+        for (const object of page.Contents ?? []) {
+            if (object.Key) {
+                onKey(object.Key);
+                seen++;
+            }
+        }
+
+        token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+
+    logger.info({ prefix, count: seen }, 's3: listed prefix');
+    return seen;
 }
 
 /**

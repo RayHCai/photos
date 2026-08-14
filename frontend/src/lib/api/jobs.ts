@@ -12,6 +12,21 @@ export function getProcessingStats(): Promise<{ pending: number; processing: num
     return apiFetch('/jobs/processing-stats');
 }
 
+export interface ThumbnailLadderAudit {
+    /** Completed items that have a thumbnail at all. */
+    total: number;
+    complete: number;
+    /** Some rungs present but not all. */
+    missingSome: number;
+    /** No rungs at all — every srcset candidate fails and the cell renders blank. */
+    missingAll: number;
+    incomplete: number;
+}
+
+export function auditThumbnailLadders(): Promise<ThumbnailLadderAudit> {
+    return apiFetch('/jobs/thumbnail-ladder-audit');
+}
+
 function postJob<T = { count: number }>(path: string): () => Promise<T> {
     return () => apiFetch(`/jobs/${path}`, { method: 'POST' });
 }
@@ -27,5 +42,8 @@ export const backfillTranscoding = postJob('backfill-transcode');
 export const backfillWebOptimized = postJob('backfill-web');
 export const backfillThumbnailLadder = postJob('backfill-thumbnail-ladder');
 export const backfillThumbnailLadderVideos = postJob('backfill-thumbnail-ladder-videos');
+export const backfillMissingThumbnailLadders = postJob<
+    ThumbnailLadderAudit & { status: string; enqueued: number }
+>('backfill-missing-thumbnail-ladder');
 export const backfillGeocoding = postJob<{ status: string }>('backfill-geocode');
 export const backfillMetadata = postJob('backfill-metadata');

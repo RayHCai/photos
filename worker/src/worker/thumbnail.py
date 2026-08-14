@@ -50,22 +50,40 @@ def generate_photo_thumbnail(image: Image.Image) -> bytes:
 def generate_thumbnail_ladder(image: Image.Image) -> dict[int, bytes]:
     """Encode one thumbnail per THUMBNAIL_WIDTHS entry.
 
-    A width larger than the source is skipped rather than upscaled: upscaling costs
-    bytes and adds no detail, and the browser falls back to the next candidate.
+    Every rung is emitted, even when the source cannot fill it. A rung used to be
+    skipped when it exceeded the source, on the assumption that the browser would
+    fall back to the next srcset candidate — it does not. It renders a broken
+    image, and since the CDN's bucket policy grants GetObject without ListBucket,
+    the absent object answers 403 rather than 404, so the failure read as a
+    permissions problem.
+
+    The comparison was against `image.width` alone, which dropped the 800 rung for
+    every vertical source narrower than 800 px even though `thumbnail()` fits one
+    inside an 800 box with no upscaling at all — a 720x1280 phone video supplies a
+    450x800 rung and was refused one, while a 1920x1080 landscape kept all three.
+
+    Nothing is upscaled: a rung larger than the source's longest edge is encoded at
+    the source's own size, and rungs that clamp to the same box share one encode.
     """
+    longest_edge = max(image.width, image.height)
+
     out: dict[int, bytes] = {}
+    by_box: dict[int, bytes] = {}
     for width in THUMBNAIL_WIDTHS:
-        if width > image.width and width != THUMBNAIL_WIDTHS[0]:
-            continue
-        img = image.copy()
-        img.thumbnail((width, width), Image.Resampling.LANCZOS)
-        out[width] = _encode_webp(img)
-        img.close()
+        box = min(width, longest_edge)
+        if box not in by_box:
+            img = image.copy()
+            img.thumbnail((box, box), Image.Resampling.LANCZOS)
+            by_box[box] = _encode_webp(img)
+            img.close()
+        out[width] = by_box[box]
 
     logger.info(
         "thumbnail_ladder_generated",
         widths=sorted(out),
-        total_bytes=sum(len(v) for v in out.values()),
+        source_longest_edge=longest_edge,
+        clamped_widths=sorted(w for w in out if w > longest_edge),
+        total_bytes=sum(len(v) for v in by_box.values()),
     )
     return out
 
