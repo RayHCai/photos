@@ -130,6 +130,43 @@ export async function queryAndEnqueue(
     return total;
 }
 
+/**
+ * Row fields shared by both upload entry points.
+ *
+ * `takenAt` seeds to the upload time rather than staying null, and this is
+ * load-bearing for the gallery. Listings page the library by
+ * `taken_at DESC NULLS LAST` while the client buckets items by day using
+ * `takenAtLocal ?? takenAt ?? createdAt` — so a null `taken_at` sorted the row
+ * behind every dated photo in the library (last page fetched, if ever) while the
+ * grid wanted to render it under today, at the very top. The photo then appeared
+ * nowhere: absent from the top of the gallery because it had not been fetched, and
+ * unreachable by scrolling because its render position was the top. It stayed
+ * visible in person albums only because those result sets fit in one page.
+ *
+ * EXIF still wins: `persistContent` COALESCEs a real `DateTimeOriginal` over this
+ * seed once the worker has parsed the file. `takenAtLocal` is deliberately left
+ * null — the camera's wall clock is genuinely unknown, every reader already
+ * COALESCEs down to `takenAt`, and `backfillMetadata` keys off
+ * `takenAtLocal IS NULL` to find rows still worth re-extracting.
+ */
+function newMediaItemData(
+    fileName: string,
+    mimeType: string,
+    fileSize: number,
+    originalKey: string
+) {
+    const now = new Date();
+    return {
+        type: getMediaType(mimeType),
+        originalKey,
+        fileName,
+        mimeType,
+        fileSize,
+        createdAt: now,
+        takenAt: now,
+    };
+}
+
 export async function createPresignedUpload(
     fileName: string,
     mimeType: string,
@@ -140,7 +177,6 @@ export async function createPresignedUpload(
 
     const ext = safeExtension(fileName);
     const originalKey = s3Service.generateOriginalKey(ext);
-    const type = getMediaType(mimeType);
 
     const presignedUrl = await s3Service.getPresignedUploadUrl(
         originalKey,
@@ -149,13 +185,7 @@ export async function createPresignedUpload(
     );
 
     const mediaItem = await prisma.mediaItem.create({
-        data: {
-            type,
-            originalKey,
-            fileName,
-            mimeType,
-            fileSize,
-        },
+        data: newMediaItemData(fileName, mimeType, fileSize, originalKey),
     });
 
     return { id: mediaItem.id, presignedUrl, s3Key: originalKey };
@@ -182,18 +212,11 @@ export async function initMultipartUpload(
 
     const ext = safeExtension(fileName);
     const originalKey = s3Service.generateOriginalKey(ext);
-    const type = getMediaType(mimeType);
 
     const uploadId = await s3Service.initMultipartUpload(originalKey, mimeType);
 
     const mediaItem = await prisma.mediaItem.create({
-        data: {
-            type,
-            originalKey,
-            fileName,
-            mimeType,
-            fileSize,
-        },
+        data: newMediaItemData(fileName, mimeType, fileSize, originalKey),
     });
 
     return { id: mediaItem.id, uploadId, s3Key: originalKey };
@@ -923,6 +946,48 @@ export async function backfillThumbnailLadderVideos() {
         'thumbnail-ladder',
         'thumbnail ladder backfill (videos) enqueued',
     );
+}
+
+/** Rows repaired per statement, so no single transaction holds the table long. */
+const TAKEN_AT_BACKFILL_BATCH = 10_000;
+
+/**
+ * Give every row with a null `taken_at` its upload time.
+ *
+ * Repairs the rows that predate `newMediaItemData` seeding `takenAt` at creation —
+ * see that function for why a null here made a photo unreachable in the gallery.
+ * Unlike the other backfills this touches no S3 object and enqueues no work: the
+ * value is already on the row, so it is a straight UPDATE rather than a trip
+ * through the worker.
+ *
+ * `taken_at_local` is left alone on purpose. Every reader COALESCEs down to
+ * `taken_at`, and `backfillMetadata` uses `takenAtLocal IS NULL` to find rows whose
+ * EXIF is still worth re-extracting — filling it with a fabricated wall clock would
+ * hide exactly the rows that could still recover a real capture date.
+ */
+export async function backfillMissingTakenAt() {
+    let total = 0;
+
+    for (;;) {
+        const count = await prisma.$executeRaw`
+            UPDATE media_items SET taken_at = created_at, updated_at = now()
+            WHERE id IN (
+                SELECT id FROM media_items
+                WHERE taken_at IS NULL
+                LIMIT ${TAKEN_AT_BACKFILL_BATCH}
+            )
+        `;
+        total += count;
+        if (count < TAKEN_AT_BACKFILL_BATCH) break;
+    }
+
+    // Month buckets are derived from COALESCE(taken_at_local, taken_at, created_at),
+    // so the values themselves are unchanged — but the cache was computed before
+    // these rows were addressable and is cheap to rebuild.
+    if (total > 0) await invalidateTimelineCache();
+
+    logger.info({ count: total }, 'media: taken_at backfill completed');
+    return total;
 }
 
 export async function backfillMetadata() {

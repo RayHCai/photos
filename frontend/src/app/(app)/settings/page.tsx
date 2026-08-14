@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     getStorageStats,
     getProcessingStats,
@@ -20,11 +20,13 @@ import {
     auditThumbnailLadders,
     backfillGeocoding,
     backfillMetadata,
+    backfillTakenAt,
 } from '@/lib/api/jobs';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
 import { formatFileSize } from '@/lib/utils/format';
 import { pluralize } from '@/lib/utils/pluralize';
+import { invalidationsFor } from '@/lib/queries/keys';
 
 interface ActionButtonProps {
     label: string;
@@ -63,6 +65,8 @@ function ActionButton({ label, description, onClick }: ActionButtonProps) {
 }
 
 export default function SettingsPage() {
+    const queryClient = useQueryClient();
+
     const { data: storageStats, isLoading: storageLoading } = useQuery({
         queryKey: ['storage-stats'],
         queryFn: getStorageStats,
@@ -98,6 +102,25 @@ export default function SettingsPage() {
             onClick: async () => {
                 const { count } = await fixOrphanedProcessing();
                 toast.success(`Reconciled ${pluralize(count, 'item')}`);
+            },
+        },
+        {
+            label: 'Backfill Capture Dates',
+            description:
+                'Set the capture date to the upload date for any item that has none. Without one, a photo sorts behind the entire library and never reaches the gallery, even though it still shows up under People.',
+            onClick: async () => {
+                const { count } = await backfillTakenAt();
+                if (count === 0) {
+                    toast.success('No items were missing a capture date');
+                    return;
+                }
+                // Unlike the enqueue-style actions, this one has already changed the
+                // rows by the time it answers — so the cached gallery pages and
+                // timeline are stale right now, not eventually.
+                for (const key of invalidationsFor(['media-content'])) {
+                    queryClient.invalidateQueries({ queryKey: key }).catch(() => undefined);
+                }
+                toast.success(`Dated ${pluralize(count, 'item')}`);
             },
         },
         {
