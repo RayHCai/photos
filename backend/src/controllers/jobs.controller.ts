@@ -107,6 +107,50 @@ export const backfillMetadata = bulkJobHandler(
     'metadata backfill',
 );
 
+/** Read-only: reports ladder coverage without enqueueing anything. */
+export const auditThumbnailLadders = asyncHandler(async (_req: Request, res: Response) => {
+    logger.info('thumbnail ladder audit requested');
+    const audit = await mediaService.auditThumbnailLadders();
+
+    // incompleteIds is the actionable payload for the backfill, not something the
+    // settings page renders — a library mid-repair could return thousands.
+    const { incompleteIds, ...counts } = audit;
+    res.json({ ...counts, incomplete: incompleteIds.length });
+});
+
+/**
+ * Deliberately not a bulkJobHandler.
+ *
+ * The others have nothing to report at accept time, so they answer 202 and page
+ * over the library detached. Here the audit *is* the answer — how many items are
+ * actually broken — and reporting it is the whole reason to prefer this over the
+ * unscoped backfill. So the listing is awaited (seconds: one round trip per
+ * thousand objects) and only the enqueue runs detached.
+ */
+export const backfillMissingThumbnailLadders = asyncHandler(
+    async (_req: Request, res: Response) => {
+        logger.info('missing thumbnail ladder backfill requested');
+        const audit = await mediaService.auditThumbnailLadders();
+
+        res.status(202).json({
+            status: 'accepted',
+            total: audit.total,
+            complete: audit.complete,
+            missingSome: audit.missingSome,
+            missingAll: audit.missingAll,
+            enqueued: audit.incompleteIds.length,
+        });
+
+        fireAndForget(
+            async () => {
+                const count = await mediaService.enqueueThumbnailLadders(audit.incompleteIds);
+                logger.info({ count }, 'missing thumbnail ladder backfill completed');
+            },
+            (err) => logger.error({ err }, 'missing thumbnail ladder backfill failed')
+        );
+    }
+);
+
 export const backfillGeocoding = asyncHandler(async (_req: Request, res: Response) => {
     logger.info('geocode backfill requested');
     await queueService.maintenanceQueue.add('geocode-backfill', { triggeredBy: 'manual' as const });

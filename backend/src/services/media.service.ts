@@ -14,7 +14,7 @@ import { MEDIA_ITEM_SUMMARY_SELECT, MEDIA_ITEM_SHELL_SELECT } from '../utils/sel
 import { HIDDEN_EXCLUSION, HIDDEN_NOT_EXISTS } from '../utils/filters.js';
 import { collectMediaS3Keys, MEDIA_S3_KEY_SELECT } from '../utils/s3.js';
 import { isSupportedMimeType } from '../constants/mediaFormats.js';
-import { safeExtension } from '../constants/storage.js';
+import { safeExtension, THUMBNAIL_WIDTHS } from '../constants/storage.js';
 import type { PipelineStage } from '../constants/pipeline.js';
 
 
@@ -762,6 +762,150 @@ export async function backfillThumbnailLadder() {
         'thumbnail-ladder',
         'thumbnail ladder backfill enqueued',
     );
+}
+
+/**
+ * Rungs a complete ladder has, as a bitmask — one bit per THUMBNAIL_WIDTHS entry.
+ *
+ * A bitmask keyed by the thumbnail's UUID rather than a Set of full keys: the
+ * prefix holds four objects per item, so a Set costs four ~40-character strings
+ * per item where this costs one small integer. At 500k items that is the
+ * difference between a listing that fits in memory and one that does not.
+ */
+const ALL_RUNGS = THUMBNAIL_WIDTHS.reduce((mask, _width, i) => mask | (1 << i), 0);
+
+/** `thumbnails/2026/05/<uuid>.webp` or `…/<uuid>@400w.webp`. */
+const LADDER_KEY_PATTERN =
+    /^thumbnails\/\d{4}\/\d{2}\/([0-9a-f-]{36})(?:@(\d{2,5})w)?\.[a-z0-9]{1,12}$/i;
+
+export interface ThumbnailLadderAudit {
+    /** Completed items that have a thumbnail at all. */
+    total: number;
+    complete: number;
+    /** Has some rungs but not all — a source narrower than the top rung, historically. */
+    missingSome: number;
+    /** Has none, so every srcset candidate fails and the cell renders blank. */
+    missingAll: number;
+    incompleteIds: string[];
+}
+
+/**
+ * Reports which items are missing responsive thumbnail rungs.
+ *
+ * Nothing records ladder state — the variants exist only as S3 objects at keys
+ * derived from thumbnailKey — so the only way to know is to ask the bucket. One
+ * paged listing of the whole prefix costs a round trip per thousand objects,
+ * against one per object for HeadObject, and unlike probing the CDN it cannot
+ * confuse a cached error for a missing file.
+ *
+ * This is what makes a *scoped* repair possible: `backfillThumbnailLadder` has to
+ * re-encode the entire library because it cannot tell which items need it.
+ */
+export async function auditThumbnailLadders(): Promise<ThumbnailLadderAudit> {
+    const rungsByUuid = new Map<string, number>();
+    // Map<number, …> rather than the literal union THUMBNAIL_WIDTHS infers: the
+    // lookup key is parsed out of an object key, so it is an arbitrary number.
+    const widthBit = new Map<number, number>(THUMBNAIL_WIDTHS.map((width, i) => [width, 1 << i]));
+
+    const objectCount = await s3Service.forEachKey('thumbnails/', (key) => {
+        const match = LADDER_KEY_PATTERN.exec(key);
+        if (!match) return;
+
+        const [, uuid, width] = match;
+        // The base key carries no width. It contributes no rung, but it does
+        // establish the entry so an item with a thumbnail and no ladder at all is
+        // still counted rather than silently absent.
+        const bit = width ? (widthBit.get(Number(width)) ?? 0) : 0;
+        rungsByUuid.set(uuid.toLowerCase(), (rungsByUuid.get(uuid.toLowerCase()) ?? 0) | bit);
+    });
+
+    const audit: ThumbnailLadderAudit = {
+        total: 0,
+        complete: 0,
+        missingSome: 0,
+        missingAll: 0,
+        incompleteIds: [],
+    };
+
+    let cursor: string | undefined;
+    for (;;) {
+        const page = await prisma.mediaItem.findMany({
+            where: { thumbnailKey: { not: null }, processingStatus: 'COMPLETED' },
+            select: { id: true, thumbnailKey: true },
+            orderBy: { id: 'asc' },
+            take: BULK_ENQUEUE_PAGE_SIZE,
+            ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+        });
+        if (page.length === 0) break;
+
+        for (const item of page) {
+            const match = LADDER_KEY_PATTERN.exec(item.thumbnailKey ?? '');
+            // A thumbnailKey that does not parse (a legacy layout, say) has no
+            // derivable variants, so the ladder concept does not apply to it.
+            if (!match) continue;
+
+            audit.total++;
+            const present = rungsByUuid.get(match[1].toLowerCase()) ?? 0;
+
+            if (present === ALL_RUNGS) {
+                audit.complete++;
+                continue;
+            }
+
+            if (present === 0) audit.missingAll++;
+            else audit.missingSome++;
+            audit.incompleteIds.push(item.id);
+        }
+
+        cursor = page[page.length - 1].id;
+    }
+
+    logger.info(
+        {
+            objectCount,
+            total: audit.total,
+            complete: audit.complete,
+            missingSome: audit.missingSome,
+            missingAll: audit.missingAll,
+        },
+        'media: thumbnail ladder audit complete'
+    );
+    return audit;
+}
+
+/**
+ * Enqueues the ladder stage for an explicit set of ids.
+ *
+ * Takes ids rather than re-running the audit so the caller can report the audit's
+ * numbers and enqueue from the same listing — auditing twice would mean two full
+ * bucket listings per click, and the second could disagree with what the operator
+ * was just shown.
+ *
+ * Against the unscoped backfill this pays one listing to avoid re-encoding every
+ * completed item. On a mostly-healthy library that is a handful of items instead
+ * of the whole library — and for videos, each of which must be downloaded and
+ * have a poster frame pulled with ffmpeg, the difference is hours versus seconds.
+ */
+export async function enqueueThumbnailLadders(ids: string[]): Promise<number> {
+    if (ids.length === 0) {
+        logger.info('media: no items missing thumbnail rungs, nothing to enqueue');
+        return 0;
+    }
+
+    // Chunked so the generated `IN (…)` stays a sane size when a large library has
+    // never had a successful ladder run.
+    let enqueued = 0;
+    for (let i = 0; i < ids.length; i += BULK_ENQUEUE_PAGE_SIZE) {
+        const chunk = ids.slice(i, i + BULK_ENQUEUE_PAGE_SIZE);
+        enqueued += await queryAndEnqueue(
+            { id: { in: chunk } },
+            'thumbnail-ladder',
+            'missing thumbnail ladder chunk enqueued',
+        );
+    }
+
+    logger.info({ enqueued }, 'media: missing thumbnail ladder backfill enqueued');
+    return enqueued;
 }
 
 /**

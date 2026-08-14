@@ -27,6 +27,7 @@ router.post('/backfill-transcode', jobsController.backfillTranscoding);
 router.post('/backfill-web', jobsController.backfillWebOptimized);
 router.post('/backfill-thumbnail-ladder', jobsController.backfillThumbnailLadder);
 router.post('/backfill-thumbnail-ladder-videos', jobsController.backfillThumbnailLadderVideos);
+router.post('/backfill-missing-thumbnail-ladder', jobsController.backfillMissingThumbnailLadders);
 router.post('/recluster', jobsController.triggerRecluster);
 router.post('/rerun-missing-faces', jobsController.rerunMissingFaces);
 router.post('/backfill-geocode', jobsController.backfillGeocoding);
@@ -44,6 +45,7 @@ router.post(
 );
 
 router.get('/stats', jobsController.getStats);
+router.get('/thumbnail-ladder-audit', jobsController.auditThumbnailLadders);
 router.get('/storage-stats', jobsController.getStorageStats);
 router.get('/processing-stats', jobsController.getProcessingStats);
 

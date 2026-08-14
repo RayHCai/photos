@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { PlayCircle, Star } from 'lucide-react';
 import { CDN_CONFIGURED, thumbnailSrcSet, thumbnailUrlFromKey } from '@/lib/api/media';
 import { blurhashToDataUrl } from '@/lib/utils/blurhashCache';
@@ -73,6 +73,23 @@ export const GalleryItem = memo(function GalleryItem({
      */
     const useCors = CDN_CONFIGURED && !thumbnailSrc;
 
+    /**
+     * The srcset advertises every width in the ladder, but the ladder lives only in
+     * S3 — no column records which rungs an item actually has, so an item processed
+     * before a ladder fix (vertical sources used to lose their 800w rung) is missing
+     * the candidate a large cell picks. The browser does not try another candidate
+     * when the chosen one fails; it renders an empty cell.
+     *
+     * Dropping the srcset on error falls back to `src`, the canonical thumbnail,
+     * which always exists. Slightly soft in a large cell, which beats blank.
+     *
+     * Keyed by thumbnailKey rather than a boolean so a recycled cell (this grid is
+     * virtualised, components are reused across items) does not inherit the previous
+     * item's failure.
+     */
+    const [ladderFailedFor, setLadderFailedFor] = useState<string | null>(null);
+    const useSrcSet = !thumbnailSrc && ladderFailedFor !== item.thumbnailKey;
+
     return (
         <div
             data-media-id={item.id}
@@ -106,8 +123,14 @@ export const GalleryItem = memo(function GalleryItem({
                      * could show. `sizes` is the measured cell width, which is exact
                      * here because the layout is computed rather than CSS-driven.
                      */
-                    srcSet={thumbnailSrc ? undefined : thumbnailSrcSet(item.thumbnailKey!)}
+                    srcSet={useSrcSet ? thumbnailSrcSet(item.thumbnailKey!) : undefined}
                     sizes={`${Math.round(width)}px`}
+                    /**
+                     * Re-renders once with no srcset. If `src` itself is what failed,
+                     * the state is already set to this key, so React bails out and no
+                     * further request is made — no retry loop.
+                     */
+                    onError={() => setLadderFailedFor(item.thumbnailKey)}
                     crossOrigin={useCors ? 'anonymous' : undefined}
                     alt={item.fileName ?? (item.type === 'VIDEO' ? 'Video' : 'Photo')}
                     loading="lazy"
