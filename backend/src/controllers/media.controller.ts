@@ -1,9 +1,11 @@
 import { Request, Response } from 'express';
 import * as mediaService from '../services/media.service.js';
+import * as archiveService from '../services/archive.service.js';
 import { asyncHandler } from '../utils/async.js';
 import { extractPagination } from '../utils/db.js';
 import { cachedRedirect } from '../utils/response.js';
 import { logger } from '../utils/logger.js';
+import { AppError } from '../middleware/errorHandler.js';
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
     const params = {
@@ -148,6 +150,32 @@ export const getWeb = asyncHandler(async (req: Request, res: Response) => {
 export const download = asyncHandler(async (req: Request, res: Response) => {
     const { url, expiresInSeconds } = await mediaService.getDownloadUrl(req.params.id as string);
     cachedRedirect(res, url, expiresInSeconds);
+});
+
+/**
+ * Stream a zip of the requested items.
+ *
+ * Reached by a form POST navigation rather than fetch(), which is the whole point
+ * of it: the browser's download manager owns the transfer, so it survives the page
+ * being backgrounded, needs no bytes in the page, and — unlike a save the page
+ * performs after awaiting a fetch — is a download the browser will actually
+ * accept. See DownloadProvider on the client side.
+ *
+ * Sent as a stream, so a failure after the first byte can only end the response.
+ * Everything that can be validated is validated before streamArchive is called.
+ */
+export const archive = asyncHandler(async (req: Request, res: Response) => {
+    const ids = archiveService.parseArchiveIds(req.body.ids);
+    logger.info({ count: ids.length }, 'archive requested');
+
+    const entries = await mediaService.getArchiveEntries(ids);
+    if (entries.length === 0) throw new AppError(404, 'None of these items exist');
+
+    await archiveService.streamArchive(
+        res,
+        entries,
+        archiveService.archiveFileName(entries.length)
+    );
 });
 
 export const checkDuplicates = asyncHandler(async (req: Request, res: Response) => {
