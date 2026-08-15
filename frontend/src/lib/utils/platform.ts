@@ -1,30 +1,29 @@
 /**
- * True on browsers where the page cannot be the thing that saves a file, and the
- * download has to be handed to the browser's own download manager instead.
+ * True on browsers where the page cannot be the thing that saves a file, and each
+ * download has to be handed to the browser's own download manager in a tab of its
+ * own.
  *
- * Every save in this app is behind a click, so the distinction is not clicked vs
- * not clicked — it is *when*. A browser attributes a download to a live user
- * activation on the document, not to whichever element JS clicked, and activation
- * is transient. A `.click()` synthesized after `await fetch(...)` carries none of
- * its own, so the tap that started it has already expired.
+ * The rule being worked around is Chrome's download limiter, and its state is per
+ * *tab*. A tab starts at ALLOW_ONE_DOWNLOAD; once that is spent it moves to
+ * PROMPT_BEFORE_DOWNLOAD, where every later download waits for the user to allow
+ * multiple downloads for the site. An installed PWA has nowhere to show that
+ * request, so the download manager accepts the download, posts a notification, and
+ * then waits forever. Modern Chromium resets the state only on a user-initiated
+ * navigation — which is why a reload buys exactly one more download.
  *
- * Chrome runs such a download through a per-tab state machine: a fresh navigation
- * starts at ALLOW_ONE_DOWNLOAD, so the first one lands, and it then moves to
- * PROMPT_BEFORE_DOWNLOAD, where the rest need the user to allow multiple downloads
- * — a tab shows a permission bubble, an installed PWA has nowhere to show it. That
- * is the whole shape of the bug this exists for: the first save of a page load
- * works, the second is refused, a reload buys exactly one more, and in a batch only
- * file one arrives.
+ * Three things were tried inside one tab before that was understood, and they fail
+ * identically because they all spend the same single allowance: saving a fetched
+ * blob (the original bug), saving a blob from inside a tap (notification, no file),
+ * and a top-level navigation to an attachment URL (notification, then a hang).
+ * Frames do not have their own state either; they share the tab's.
  *
- * Restructuring the page's own save path does not fix it. Moving the save into a
- * tap, with the bytes already in hand, still failed on Android Chrome as an
- * installed PWA — the download manager posted a notification and no file appeared.
- * A page-held blob is simply not a first-class download there.
+ * A page-held blob turned out not to be a first-class download here regardless, so
+ * both halves matter: the bytes come from a URL the server marks as an attachment,
+ * and the navigation to it happens in a new tab. See DownloadProvider.
  *
- * So on these platforms the page does not save anything. It points the browser at a
- * URL the server marks as an attachment and the download manager does the rest,
- * which is the one path that is reliable, repeatable, and visible to the user. See
- * DownloadProvider's handOffToBrowser.
+ * The other way out is the site's "Automatic downloads" permission, which stops the
+ * limiter asking at all — but it is a per-device setting a page can neither request
+ * nor detect, so it cannot be what this depends on.
  *
  * Deliberately platform-based rather than viewport-based: rotating a phone into
  * landscape can push it past a width breakpoint, and the download policy does not

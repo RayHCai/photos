@@ -156,15 +156,13 @@ interface QueueEntry {
 const SAVE_CLEANUP_DELAY_MS = 10_000;
 
 /**
- * How long a handoff frame is left in the document.
+ * How long a submitted form is left in the document.
  *
- * Until the response headers arrive the request belongs to the frame, and removing
- * it cancels the download — for an archive that window is however long the server
- * takes to open the first object, not milliseconds. Once the browser has decided
- * the response is a download it owns the transfer outright and the frame no longer
- * matters, so this only has to be longer than the slowest plausible first byte.
+ * Until the response headers arrive the request belongs to the form's target, and
+ * tearing the form out early can cancel it — for an archive that window is however
+ * long the server takes to open the first object, not milliseconds.
  */
-const HANDOFF_FRAME_TTL_MS = 10 * 60_000;
+const HANDOFF_CLEANUP_DELAY_MS = 60_000;
 
 function errorMessage(err: unknown, fallback: string): string {
     return (err instanceof Error && err.message) || fallback;
@@ -228,72 +226,51 @@ function saveBlob(blob: Blob, fileName: string) {
 }
 
 /**
- * Point the whole window at the file and let the download manager take it.
+ * Every download gets its own tab.
  *
- * A response marked `attachment` never commits its navigation, so this does not
- * leave the page: the browser peels the download off and the app is still here.
- * The plainest download mechanism there is, which is the point — it is the one
- * every ordinary download link on the web uses.
+ * Chrome's download limiter keeps its state per *tab*: a tab starts at
+ * ALLOW_ONE_DOWNLOAD, and once it has spent that, every later download needs the
+ * user to allow multiple downloads for the site. An installed PWA has nowhere to
+ * show that request, so the download manager takes the download, posts its
+ * notification, and then waits on a decision that can never arrive — the download
+ * hangs. Modern Chromium only resets the state on a user-initiated *navigation*,
+ * which is why a reload buys exactly one more download and a tap does not.
  *
- * Not done in a hidden frame, which would otherwise be nicer (see
- * postArchiveInFrame): this endpoint redirects to a presigned S3 URL, and framed
- * navigation is checked against `frame-src`, which falls back to `default-src
- * 'self'` in the app's CSP. The redirect would be blocked at the second hop.
+ * Nothing inside this tab escapes that: a gestured save, a hidden frame, and a
+ * top-level navigation are all one tab's single allowance (frames do not get their
+ * own state — they share the tab's). A tab that does not exist yet, however, has
+ * its full allowance, and Chrome closes a tab whose only navigation turned into a
+ * download. So each download opens one, spends its allowance, and disappears.
  *
- * The cost of the top level is that a response which *is* renderable replaces the
- * app with it — raw JSON from a 401 after the session expired, or a 404 for an item
- * deleted from another device. Recoverable with Back, and the alternative is a
- * download that silently does not happen, which is what got us here.
+ * The visible cost is a tab that flickers open and shut. The alternative is
+ * granting the site's "Automatic downloads" permission, which makes the limiter
+ * stop asking — but that is a setting on each device, not something the page can
+ * ask for or detect.
  */
-function navigateToDownload(url: string) {
-    window.location.href = url;
+function openDownloadTab(url: string) {
+    const tab = window.open(url, '_blank');
+    // Popup blocked despite the gesture. Downloading in place spends this tab's
+    // allowance, which at least works once, and is better than doing nothing.
+    if (!tab) window.location.href = url;
 }
 
 /**
- * Post the selection to the archive endpoint from a hidden frame.
+ * Post the selection to the archive endpoint, targeting a new tab for the same
+ * reason as openDownloadTab.
  *
- * Same-origin with no redirect, so unlike navigateToDownload this can be framed —
- * and framing is worth it here, because it makes a failure both visible and
- * harmless. A download never commits a navigation, so on success the frame stays on
- * its empty document and no load event fires; if the server answers with something
- * renderable instead, the frame loads it out of sight and the text is read out and
- * reported. A selection is also the case where an error is most likely to be worth
- * explaining — too many items, none of them still existing.
+ * `_blank` on every call rather than a fixed window name: a name would reuse one
+ * tab, and a reused tab brings its spent allowance with it.
+ *
+ * An error response is rendered in that tab rather than reported here — a JSON body
+ * the user has to read, which is poor, but this is a tab they can close and not the
+ * app being replaced. A hidden frame would let us read the error out and toast it,
+ * and cost every download after the first.
  */
-function postArchiveInFrame(action: string, ids: string[]) {
-    const frame = document.createElement('iframe');
-    frame.name = `download-${crypto.randomUUID()}`;
-    frame.style.display = 'none';
-    document.body.appendChild(frame);
-
-    frame.addEventListener('load', () => {
-        let text: string;
-        try {
-            const doc = frame.contentDocument;
-            // The frame's own initial empty document, before any response.
-            if (!doc || doc.URL === 'about:blank') return;
-            text = doc.body?.textContent?.trim() ?? '';
-        }
-        catch {
-            // Not readable, so not reportable. Should not happen same-origin.
-            return;
-        }
-
-        let message = 'Download failed';
-        try {
-            message = (JSON.parse(text) as { error?: string }).error ?? message;
-        }
-        catch {
-            // Not JSON — a proxy's HTML error page, or nothing at all.
-        }
-        toast.error(message);
-        frame.remove();
-    });
-
+function postArchiveInNewTab(action: string, ids: string[]) {
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = action;
-    form.target = frame.name;
+    form.target = '_blank';
     form.style.display = 'none';
 
     // One field rather than one input per id: a selection of two thousand would
@@ -306,9 +283,8 @@ function postArchiveInFrame(action: string, ids: string[]) {
 
     document.body.appendChild(form);
     form.submit();
-    form.remove();
 
-    window.setTimeout(() => frame.remove(), HANDOFF_FRAME_TTL_MS);
+    window.setTimeout(() => form.remove(), HANDOFF_CLEANUP_DELAY_MS);
 }
 
 /**
@@ -438,30 +414,35 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     }, [processOne]);
 
     /**
-     * Give the whole job to the browser's download manager, in the tap.
+     * Give the whole job to the browser's download manager, in a tab of its own.
      *
-     * The page fetching bytes and then saving them cannot work here, and no amount
-     * of restructuring on this side changes that: by the time a fetch resolves there
-     * is no activation left, and a save without one is refused — silently, and
-     * whether or not a tap is what asked for it. The way out is for the page not to
-     * hold the bytes at all. A URL the server marks as an attachment is a download
-     * the browser performs itself, which is the one path it treats as first-class:
-     * it survives the app being backgrounded, reports progress and failure in the
-     * system UI, costs no memory here, and can be done again without a reload.
+     * Two separate limits are being worked around here, and missing either one looks
+     * the same to a user — a download that never arrives, with nothing said about it.
      *
-     * One activation authorizes one download, so a selection cannot be N of these.
-     * It goes to the archive endpoint as a single zip instead. Returns false when
-     * there is no archive endpoint to use, leaving the caller to fall back.
+     * The page must not be what saves the file. A save performed after `await
+     * fetch(...)` has no live activation behind it, and beyond that a page-held blob
+     * is simply not a first-class download on Android Chrome as a PWA: it produced a
+     * notification and no file even when a tap was what asked for it. A URL the
+     * server marks as an attachment is a download the browser performs itself, which
+     * costs no memory here, survives the app being backgrounded, and reports progress
+     * and failure in the system UI.
+     *
+     * And each download needs a tab of its own, because the limiter's allowance is
+     * per tab — see openDownloadTab.
+     *
+     * One tab yields one download, so a selection cannot be N of these. It goes to
+     * the archive endpoint as a single zip instead. Returns false when there is no
+     * archive endpoint to use, leaving the caller to fall back.
      */
     const handOffToBrowser = useCallback(
         (requests: DownloadRequest[], options: DownloadOptions): boolean => {
             if (requests.length === 1) {
                 toast.success('Saving to your downloads');
-                navigateToDownload(requests[0]!.url);
+                openDownloadTab(requests[0]!.url);
                 return true;
             }
             if (options.archiveUrl) {
-                postArchiveInFrame(options.archiveUrl, requests.map((r) => r.id));
+                postArchiveInNewTab(options.archiveUrl, requests.map((r) => r.id));
                 // The zip is built as it is sent, so the browser has nothing to show
                 // until the first object is open. Without this the tap looks ignored.
                 toast.success(`Preparing ${requests.length} files as a zip…`);
