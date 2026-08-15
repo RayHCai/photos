@@ -16,6 +16,7 @@ import { collectMediaS3Keys, MEDIA_S3_KEY_SELECT } from '../utils/s3.js';
 import { isSupportedMimeType } from '../constants/mediaFormats.js';
 import { safeExtension, THUMBNAIL_WIDTHS } from '../constants/storage.js';
 import type { PipelineStage } from '../constants/pipeline.js';
+import type { ArchiveEntry } from './archive.service.js';
 
 
 function getMediaType(mimeType: string): 'PHOTO' | 'VIDEO' {
@@ -571,6 +572,33 @@ export async function getDownloadUrl(id: string) {
         'Media item'
     );
     return s3Service.getPresignedDownloadUrlWithExpiry(item.originalKey, item.fileName);
+}
+
+/**
+ * Resolve ids to the objects an archive should contain, in the order asked for.
+ *
+ * `findMany` returns rows in whatever order the query planner likes, so the
+ * archive would otherwise be ordered arbitrarily rather than the way the user
+ * selected. Ids with no row are dropped rather than raising: a selection can name
+ * an item that was deleted between the tap and the request, and losing one photo
+ * from an archive of fifty is a better outcome than losing the archive.
+ */
+export async function getArchiveEntries(ids: string[]): Promise<ArchiveEntry[]> {
+    const items = await prisma.mediaItem.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, originalKey: true, fileName: true },
+    });
+
+    const byId = new Map(items.map((item) => [item.id, item]));
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length > 0) {
+        logger.warn({ count: missing.length }, 'archive requested ids that no longer exist');
+    }
+
+    return ids
+        .map((id) => byId.get(id))
+        .filter((item): item is NonNullable<typeof item> => item !== undefined)
+        .map((item) => ({ key: item.originalKey, fileName: item.fileName }));
 }
 
 /** Grace period before a row with no S3 object is considered an abandoned upload. */

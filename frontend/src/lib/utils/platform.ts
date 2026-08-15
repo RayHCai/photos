@@ -1,32 +1,34 @@
 /**
- * True on browsers that will not save a file unless a user activation is live at
- * the moment the save starts.
+ * True on browsers where the page cannot be the thing that saves a file, and the
+ * download has to be handed to the browser's own download manager instead.
  *
  * Every save in this app is behind a click, so the distinction is not clicked vs
- * not clicked — it is *when*. A browser attributes a download to a live
- * activation on the document, not to whichever element JS clicked, and an
- * activation is transient (Chrome's window is about five seconds, and some APIs
- * consume it outright). A `.click()` synthesized after `await fetch(...)` carries
- * none of its own, so the tap that started it has already expired: the download
- * arrives with no gesture behind it.
+ * not clicked — it is *when*. A browser attributes a download to a live user
+ * activation on the document, not to whichever element JS clicked, and activation
+ * is transient. A `.click()` synthesized after `await fetch(...)` carries none of
+ * its own, so the tap that started it has already expired.
  *
- * Chrome then runs it through a per-tab state machine. A fresh navigation starts
- * at ALLOW_ONE_DOWNLOAD, so the first such save goes through; it then moves to
- * PROMPT_BEFORE_DOWNLOAD, where every later one needs the user to allow multiple
- * downloads — a tab shows a permission bubble, an installed PWA has nowhere to
- * show it and the save is refused. Mobile WebKit reaches the same place by its
- * own route. Neither reports any of this: the fetch succeeded, the click was
- * accepted, and no file exists.
+ * Chrome runs such a download through a per-tab state machine: a fresh navigation
+ * starts at ALLOW_ONE_DOWNLOAD, so the first one lands, and it then moves to
+ * PROMPT_BEFORE_DOWNLOAD, where the rest need the user to allow multiple downloads
+ * — a tab shows a permission bubble, an installed PWA has nowhere to show it. That
+ * is the whole shape of the bug this exists for: the first save of a page load
+ * works, the second is refused, a reload buys exactly one more, and in a batch only
+ * file one arrives.
  *
- * So the bytes have to already be in hand when the user taps, which is the whole
- * reason DownloadProvider parks finished blobs instead of saving them. One
- * activation authorizes one download, so a loop of clicks inside a single tap
- * still saves a single file — a batch is either one tap per file or one
- * navigator.share() call.
+ * Restructuring the page's own save path does not fix it. Moving the save into a
+ * tap, with the bytes already in hand, still failed on Android Chrome as an
+ * installed PWA — the download manager posted a notification and no file appeared.
+ * A page-held blob is simply not a first-class download there.
+ *
+ * So on these platforms the page does not save anything. It points the browser at a
+ * URL the server marks as an attachment and the download manager does the rest,
+ * which is the one path that is reliable, repeatable, and visible to the user. See
+ * DownloadProvider's handOffToBrowser.
  *
  * Deliberately platform-based rather than viewport-based: rotating a phone into
- * landscape can push it past a width breakpoint, and the download policy does
- * not change when it does.
+ * landscape can push it past a width breakpoint, and the download policy does not
+ * change when it does.
  */
 export function blocksAutomaticDownloads(): boolean {
     if (typeof navigator === 'undefined') return false;

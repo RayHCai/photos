@@ -139,3 +139,12 @@ export function webUrl(id: string): string {
 export function downloadUrl(id: string): string {
     return apiUrl(`/media/${id}/download`);
 }
+
+/**
+ * Endpoint that streams a zip of the given ids. Posted to as a form navigation
+ * rather than fetched, so it takes ids in the body instead of the path — see
+ * DownloadProvider.
+ */
+export function archiveUrl(): string {
+    return apiUrl('/media/archive');
+}

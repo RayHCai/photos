@@ -12,6 +12,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import crypto from 'node:crypto';
+import type { Readable } from 'node:stream';
 import { s3Client, cloudFrontClient } from '../config/s3.js';
 import { env } from '../config/env.js';
 import { redisConnection } from '../config/redis.js';
@@ -115,7 +116,7 @@ export function isCdnServable(key: string): boolean {
  * the quoted string, and non-ASCII names (accents, CJK, emoji) are not
  * representable in the plain parameter at all.
  */
-function contentDisposition(fileName: string): string {
+export function contentDisposition(fileName: string): string {
     const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
     const encoded = encodeURIComponent(fileName);
     return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
@@ -185,6 +186,25 @@ export async function getMediaUrlWithExpiry(
         return { url: getCdnUrl(key), expiresInSeconds: 31536000 };
     }
     return getPresignedDownloadUrlWithExpiry(key, fileName);
+}
+
+/**
+ * Open an object for reading as a Node stream.
+ *
+ * Every other read path here hands the browser a URL and lets it fetch the bytes
+ * itself, which is what should happen for a single file. This exists for the one
+ * case that cannot work that way — building an archive of many objects, where the
+ * bytes have to pass through a process that can frame them. Nothing is buffered:
+ * the caller pipes this straight into the archive and on to the response.
+ */
+export async function getObjectStream(key: string): Promise<Readable> {
+    const res = await s3Client.send(
+        new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key })
+    );
+    if (!res.Body) throw new Error(`S3 object ${key} returned no body`);
+    // The SDK types Body as a union covering browser and Node runtimes; in Node it
+    // is always a Readable.
+    return res.Body as Readable;
 }
 
 export type ObjectState = 'exists' | 'missing' | 'error';

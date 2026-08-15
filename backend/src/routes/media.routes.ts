@@ -51,6 +51,18 @@ router.post(
     mediaController.batchThumbnails
 );
 
+/**
+ * Reached by a form POST navigation from the client, so the ids arrive as one
+ * comma-joined form field and the response is a zip stream rather than JSON.
+ * Declared ahead of `/:id` for readability only — the methods differ, so there is
+ * no route to shadow.
+ */
+router.post(
+    '/archive',
+    validate({ body: z.object({ ids: z.string().min(1) }) }),
+    mediaController.archive
+);
+
 router.get('/:id', mediaController.getById);
 
 router.post(

@@ -61,6 +61,10 @@ export function SharedCollectionView({
                     selection={selection}
                     showDownload
                     downloadUrlFn={downloadUrlFn}
+                    // A guest has no session, so the library's archive endpoint would
+                    // answer 401. There is no public equivalent, so a multi-file
+                    // download here stays a file-at-a-time fetch.
+                    archiveUrlFn={null}
                 />
             </header>
 

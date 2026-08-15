@@ -6,7 +6,7 @@ import { X, Trash2, FolderPlus, FolderMinus, Download, RotateCcw, EyeOff, Share2
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddToCollectionModal } from '@/components/collections/AddToCollectionModal';
-import { downloadUrl, originalUrl } from '@/lib/api/media';
+import { archiveUrl, downloadUrl, originalUrl } from '@/lib/api/media';
 import { useDownload } from '@/lib/hooks/useDownload';
 import type { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 
@@ -28,6 +28,13 @@ interface SelectionToolbarProps {
     onRetry?: (ids: string[]) => void | Promise<void>;
     /** Custom URL function for downloads (defaults to originalUrl) */
     downloadUrlFn?: (id: string) => string;
+    /**
+     * Endpoint that streams the selection as one zip, which is how a multi-file
+     * download reaches a phone at all (see DownloadProvider). Defaults to the
+     * library's; pass null in a context that has no such endpoint, such as a public
+     * share link, and the selection is downloaded file by file instead.
+     */
+    archiveUrlFn?: (() => string) | null;
     /** Loading state for delete action */
     deleteLoading?: boolean;
     /** Show "Hide" button (eye-off icon) */
@@ -50,6 +57,7 @@ export function SelectionToolbar({
     showRetry,
     onRetry,
     downloadUrlFn,
+    archiveUrlFn,
     deleteLoading,
     showHide,
     onHide,
@@ -107,14 +115,22 @@ export function SelectionToolbar({
         }
     }, [selection.selectedIds]);
 
+    // Undefined means "not overridden" and null means "there isn't one here", so the
+    // default cannot be a parameter default.
+    const getArchiveUrl = archiveUrlFn === undefined ? archiveUrl : archiveUrlFn;
+
+    // Not async, and nothing awaited before triggerDownload: on a phone the download
+    // is handed to the browser inside this tap, and an await would spend the
+    // activation that allows it.
     const handleDownload = useCallback(() => {
         triggerDownload(
             Array.from(selection.selectedIds).map((id) => ({
                 id,
                 url: getDownloadUrl(id),
-            }))
+            })),
+            getArchiveUrl ? { archiveUrl: getArchiveUrl() } : {}
         );
-    }, [selection.selectedIds, getDownloadUrl, triggerDownload]);
+    }, [selection.selectedIds, getDownloadUrl, getArchiveUrl, triggerDownload]);
 
     if (!selection.isSelecting) return null;
 
