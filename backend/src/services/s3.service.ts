@@ -13,7 +13,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import crypto from 'node:crypto';
 import type { Readable } from 'node:stream';
-import { s3Client, cloudFrontClient } from '../config/s3.js';
+import { s3Client, s3StreamingUploadClient, cloudFrontClient } from '../config/s3.js';
 import { env } from '../config/env.js';
 import { redisConnection } from '../config/redis.js';
 import { logger } from '../utils/logger.js';
@@ -75,7 +75,8 @@ export function generateWebKey(ext: string): string {
 export async function getPresignedUploadUrl(
     key: string,
     mimeType: string,
-    fileSize?: number
+    fileSize?: number,
+    { streamedBody = false }: { streamedBody?: boolean } = {}
 ) {
     const command = new PutObjectCommand({
         Bucket: env.S3_BUCKET,
@@ -84,7 +85,10 @@ export async function getPresignedUploadUrl(
         ...(fileSize !== undefined && { ContentLength: fileSize }),
     });
 
-    return getSignedUrl(s3Client, command, {
+    // A streamed (chunked, no Content-Length) PUT is incompatible with the
+    // default integrity checksum the SDK bakes into the signature, so sign those
+    // with the checksum disabled. See s3StreamingUploadClient.
+    return getSignedUrl(streamedBody ? s3StreamingUploadClient : s3Client, command, {
         expiresIn: env.PRESIGNED_URL_EXPIRY_SECONDS,
     });
 }

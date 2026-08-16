@@ -551,7 +551,12 @@ export async function generateUploadUrl(
                 : prefix === 'web' ? s3Service.generateWebKey(ext)
                     : s3Service.generateStreamingKey('mp4');
 
-    const url = await s3Service.getPresignedUploadUrl(key, contentType);
+    // The worker streams video to the 'streaming' URL as a chunked body; the
+    // others receive fixed-length in-memory bytes. Only the streamed one must
+    // drop the SDK's default integrity checksum (see getPresignedUploadUrl).
+    const url = await s3Service.getPresignedUploadUrl(key, contentType, undefined, {
+        streamedBody: prefix === 'streaming',
+    });
     return { key, url };
 }
 
