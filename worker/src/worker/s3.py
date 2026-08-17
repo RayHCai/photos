@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Literal
 
 import httpx
@@ -76,11 +77,22 @@ async def download_to_file(key: str, path: str) -> None:
     logger.info("s3_downloaded_to_file", key=key, path=path)
 
 
-async def _put(url: str, content: bytes | AsyncIterator[bytes], content_type: str) -> None:
+async def _put(
+    url: str,
+    content: bytes | AsyncIterator[bytes],
+    content_type: str,
+    content_length: int | None = None,
+) -> None:
+    headers = {"Content-Type": content_type}
+    # For a streamed (async-iterator) body httpx otherwise falls back to
+    # `Transfer-Encoding: chunked`, which S3's REST PUT rejects with 501 Not
+    # Implemented. Supplying Content-Length makes httpx send a fixed-length body
+    # while still streaming it from disk. `bytes` bodies get Content-Length from
+    # httpx automatically, so callers only pass it for the streaming path.
+    if content_length is not None:
+        headers["Content-Length"] = str(content_length)
     async with httpx.AsyncClient(timeout=_UPLOAD_TIMEOUT) as client:
-        response = await client.put(
-            url, content=content, headers={"Content-Type": content_type}
-        )
+        response = await client.put(url, content=content, headers=headers)
         response.raise_for_status()
 
 
@@ -127,6 +139,7 @@ async def upload_file_to_key(
     whole thing as one bytes object before sending it.
     """
     key, url = await _presign_upload(prefix, content_type)
+    content_length = os.path.getsize(file_path)
 
     async def body() -> AsyncIterator[bytes]:
         with open(file_path, "rb") as f:
@@ -136,7 +149,7 @@ async def upload_file_to_key(
                     return
                 yield chunk
 
-    await _put(url, body(), content_type)
+    await _put(url, body(), content_type, content_length=content_length)
 
     logger.info("s3_file_uploaded", key=key, prefix=prefix, content_type=content_type)
     return key
