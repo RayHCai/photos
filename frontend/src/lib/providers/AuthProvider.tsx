@@ -60,6 +60,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         setUnauthorizedHandler(() => {
             setIsAuthenticated(false);
+
+            // Public, unauthenticated routes — the shared /s/[slug] page and /login
+            // itself — must never be bounced to login on a 401. A logged-out visitor
+            // is the expected state there: the shared page is world-viewable, and
+            // AuthProvider's own /auth/status probe 401s for every guest. Without this
+            // guard that probe redirected anyone opening a share link to /login,
+            // making public links effectively require authentication.
+            const path = window.location.pathname;
+            if (path === '/login' || path.startsWith('/s/')) return;
+
             queryClient.clear();
             router.replace('/login');
         });
