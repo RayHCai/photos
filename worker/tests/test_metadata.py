@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -29,6 +30,7 @@ from worker.metadata import (
     _parse_exif_datetime,
     _parse_exif_offset,
     extract_photo_metadata,
+    extract_raw_metadata,
 )
 
 # Tag ids, so intent is legible at the call site.
@@ -174,3 +176,33 @@ def test_no_exif_yields_dimensions_only() -> None:
     assert (meta.width, meta.height) == (12, 7)
     assert meta.taken_at is None
     assert meta.taken_at_local is None
+
+
+def test_raw_reads_sub_ifds_after_the_file_is_closed(tmp_path: Path) -> None:
+    """A raw original's Exif and GPS sub-IFDs must survive the file being closed.
+
+    `Image.Exif` resolves sub-IFDs lazily by seeking the file object it was loaded
+    from, so reading them after the `with open(...)` block raised
+    "ValueError: seek of closed file" and failed the whole job for every DNG that
+    carries an Exif sub-IFD — i.e. essentially all of them. (The sample.dng fixture
+    has no sub-IFD, so nothing caught it.)
+    """
+    exif = Image.Exif()
+    exif[0x010F] = "Acme"
+    exif[0x0110] = "TestCam Raw"
+    exif.get_ifd(IFD.Exif)[_DATETIME_ORIGINAL] = "2024:06:15 20:30:45"
+    gps = exif.get_ifd(IFD.GPSInfo)
+    gps[1], gps[2] = "N", (51.0, 30.0, 0.0)
+    gps[3], gps[4] = "W", (0.0, 7.0, 0.0)
+
+    # A DNG is TIFF-based, and `tobytes()` minus its "Exif\x00\x00" prefix is exactly
+    # the TIFF header + IFD stream that `load_from_fp` walks in a real one.
+    raw_path = tmp_path / "with_sub_ifd.dng"
+    raw_path.write_bytes(exif.tobytes()[6:])
+
+    meta = extract_raw_metadata(str(raw_path))
+
+    assert meta.camera_model == "TestCam Raw"
+    assert meta.taken_at_local == datetime(2024, 6, 15, 20, 30, 45)
+    assert meta.latitude == pytest.approx(51.5, abs=1e-4)
+    assert meta.longitude == pytest.approx(-7 / 60, abs=1e-4)
