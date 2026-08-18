@@ -5,14 +5,11 @@ import re
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 
+from PIL import Image
 from PIL.ExifTags import GPSTAGS, IFD, TAGS
 
 from worker.log import get_logger
-
-if TYPE_CHECKING:
-    from PIL import Image
 
 logger = get_logger(__name__)
 
@@ -95,8 +92,38 @@ def _parse_exif_offset(value: object) -> int | None:
 
 def extract_photo_metadata(image: Image.Image) -> MediaMetadata:
     meta = MediaMetadata(width=image.width, height=image.height)
+    _populate_from_exif(meta, image.getexif())
+    return meta
 
-    exif_data = image.getexif()
+
+def extract_raw_metadata(file_path: str) -> MediaMetadata:
+    """EXIF for a raw original (DNG and other rawpy-decodable formats).
+
+    Pillow cannot decode a raw mosaic, so the pixels are demosaiced by rawpy in
+    `worker.raw.decode_raw` — but the container is TIFF-based and its IFD0 / Exif /
+    GPS structure is exactly what `Image.Exif` parses, so a raw photo reuses the same
+    capture-time / GPS / camera logic as every other format instead of a bespoke path.
+
+    width/height stay None and are filled from the decoded image by the caller, the
+    same way the normal photo path takes its dimensions from the (possibly transposed)
+    decode rather than the header.
+    """
+    meta = MediaMetadata()
+    exif = Image.Exif()
+    try:
+        with open(file_path, "rb") as fp:
+            exif.load_from_fp(fp)
+    except (OSError, SyntaxError, ValueError) as exc:
+        # A raw file with no parseable EXIF still yields a perfectly good photo; it
+        # simply has no capture time, GPS or camera fields.
+        logger.warning("raw_exif_read_failed", error=str(exc))
+        return meta
+    _populate_from_exif(meta, exif)
+    return meta
+
+
+def _populate_from_exif(meta: MediaMetadata, exif_data: Image.Exif) -> MediaMetadata:
+    """Fill `meta` from a loaded EXIF block, whichever container it came from."""
     if not exif_data:
         return meta
 

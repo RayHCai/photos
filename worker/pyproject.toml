@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.27",
     "pillow>=11.0",
     "pillow-heif>=0.18",
+    "rawpy>=0.22",
     "open-clip-torch>=2.26",
     "torch>=2.4",
     "insightface>=0.7",
@@ -71,6 +72,7 @@ module = [
     "insightface.*",
     "open_clip.*",
     "pillow_heif.*",
+    "rawpy.*",
     "structlog.*",
     "torch.*",
 ]
