@@ -113,6 +113,16 @@ def extract_raw_metadata(file_path: str) -> MediaMetadata:
     try:
         with open(file_path, "rb") as fp:
             exif.load_from_fp(fp)
+            # Sub-IFDs are resolved lazily by seeking the file object Pillow kept a
+            # reference to, so they have to be materialised (and cached in the Exif
+            # object) before this `with` closes it — otherwise the first get_ifd()
+            # in _populate_from_exif raises "seek of closed file" and takes the
+            # whole job down.
+            for sub_ifd in (IFD.Exif, IFD.GPSInfo):
+                try:
+                    exif.get_ifd(sub_ifd)
+                except (KeyError, AttributeError, OSError, ValueError):
+                    continue
     except (OSError, SyntaxError, ValueError) as exc:
         # A raw file with no parseable EXIF still yields a perfectly good photo; it
         # simply has no capture time, GPS or camera fields.
@@ -142,7 +152,7 @@ def _populate_from_exif(meta: MediaMetadata, exif_data: Image.Exif) -> MediaMeta
     # simply never got the same treatment.)
     try:
         exif_ifd = exif_data.get_ifd(IFD.Exif)
-    except (KeyError, AttributeError, OSError):
+    except (KeyError, AttributeError, OSError, ValueError):
         exif_ifd = {}
 
     for tag_id, value in exif_ifd.items():
@@ -206,7 +216,10 @@ def _populate_from_exif(meta: MediaMetadata, exif_data: Image.Exif) -> MediaMeta
         break
 
     # GPS coordinates
-    gps_info = exif_data.get_ifd(IFD.GPSInfo)
+    try:
+        gps_info = exif_data.get_ifd(IFD.GPSInfo)
+    except (KeyError, AttributeError, OSError, ValueError):
+        gps_info = {}
     if gps_info:
         gps_decoded: dict[str, object] = {}
         for tag_id, value in gps_info.items():
