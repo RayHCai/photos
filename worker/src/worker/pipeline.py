@@ -19,7 +19,13 @@ from worker.face_assign import resolve_person
 from worker.face_detect import DetectedFace, detect_faces
 from worker.geocode import reverse_geocode
 from worker.log import get_logger
-from worker.metadata import MediaMetadata, extract_photo_metadata, extract_video_metadata
+from worker.metadata import (
+    MediaMetadata,
+    extract_photo_metadata,
+    extract_raw_metadata,
+    extract_video_metadata,
+)
+from worker.raw import decode_raw, is_raw_photo
 from worker.thumbnail import (
     extract_thumbnail_frame,
     extract_video_frames,
@@ -567,12 +573,21 @@ async def process_photo(
     try:
         await s3.download_to_file(original_key, tmp_path)
 
-        with Image.open(tmp_path) as opened:
-            # Metadata BEFORE exif_transpose: transposing strips the GPS sub-IFD.
+        if is_raw_photo(file_name):
+            # A raw original (DNG) is a Bayer mosaic Pillow cannot open. rawpy
+            # demosaics it into an upright RGB image — already oriented, so no
+            # exif_transpose — and its metadata is read straight from the file's
+            # TIFF/EXIF structure rather than from the decoded image (which has none).
             logger.info("step_extract_metadata", media_item_id=media_item_id)
-            meta = await _run_cpu(extract_photo_metadata, opened)
+            meta = await _run_cpu(extract_raw_metadata, tmp_path)
+            image = await _run_cpu(decode_raw, tmp_path)
+        else:
+            with Image.open(tmp_path) as opened:
+                # Metadata BEFORE exif_transpose: transposing strips the GPS sub-IFD.
+                logger.info("step_extract_metadata", media_item_id=media_item_id)
+                meta = await _run_cpu(extract_photo_metadata, opened)
 
-            image = await _run_cpu(_transpose, opened)
+                image = await _run_cpu(_transpose, opened)
 
         # Dimensions come from the transposed image: they may be swapped.
         meta.width = image.width

@@ -26,6 +26,7 @@ const PHOTO_FORMATS: readonly FormatSpec[] = [
     { mime: 'image/heif', extensions: ['heif'] },
     { mime: 'image/tiff', extensions: ['tif', 'tiff'] },
     { mime: 'image/avif', extensions: ['avif'] },
+    { mime: 'image/x-adobe-dng', extensions: ['dng'] },
 ];
 
 const VIDEO_FORMATS: readonly FormatSpec[] = [
