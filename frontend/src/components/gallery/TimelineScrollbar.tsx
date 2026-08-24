@@ -14,6 +14,8 @@ interface TimelineScrollbarProps {
     hasMore?: boolean;
     /** Lets a jump to an unloaded month pull the pages it needs. */
     onLoadMore?: () => void;
+    /** Global index of the first loaded row; the loaded window's absolute start. */
+    windowStart?: number;
     /** Loads the page holding a global item index directly, skipping the rest. */
     onSeekToIndex?: (index: number) => Promise<void>;
 }
@@ -24,6 +26,7 @@ export function TimelineScrollbar({
     timeline: timelineProp,
     hasMore,
     onLoadMore,
+    windowStart,
     onSeekToIndex,
 }: TimelineScrollbarProps) {
     const { data: globalTimeline } = useTimeline();
@@ -42,6 +45,7 @@ export function TimelineScrollbar({
     } = useTimelineScrollbar(containerRef, virtualRows, timeline, {
         hasMore,
         onLoadMore,
+        windowStart,
         onSeekToIndex,
     });
 

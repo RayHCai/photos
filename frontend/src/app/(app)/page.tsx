@@ -24,10 +24,14 @@ import type { MediaShellItem } from '@/lib/types/media';
 export default function GalleryPage() {
     const {
         items: shellItems,
+        windowStart,
         isLoading,
         fetchNextPage,
         hasNextPage,
         isFetchingNextPage,
+        fetchPreviousPage,
+        hasPreviousPage,
+        isFetchingPreviousPage,
         seekToIndex,
         isSeeking,
     } = useShellData();
@@ -121,6 +125,13 @@ export default function GalleryPage() {
                     // "more is coming" state as a scroll-driven page fetch, and it
                     // also keeps the grid's scroll lookahead from racing it.
                     isLoadingMore={isSearchActive ? false : isFetchingNextPage || isSeeking}
+                    // The window slides both ways: scrolling back up past the
+                    // evicted edge refetches the page above. `isSeeking` blocks the
+                    // top lookahead during a jump for the same reason as the bottom.
+                    onLoadPrevious={isSearchActive ? undefined : fetchPreviousPage}
+                    hasPrevious={isSearchActive ? false : hasPreviousPage}
+                    isLoadingPrevious={isSearchActive ? false : isFetchingPreviousPage || isSeeking}
+                    windowStart={isSearchActive ? 0 : windowStart}
                     onSeekToIndex={isSearchActive ? undefined : seekToIndex}
                 />
             </ErrorBoundary>
