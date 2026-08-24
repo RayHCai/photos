@@ -6,50 +6,61 @@ import { toast } from 'sonner';
 import { getProcessingUpdates, getShellData } from '../api/media';
 import { queryKeys } from '../queries/keys';
 import {
-    appendShellPages,
     countLoadedItems,
     mapWithConcurrency,
-    missingPageOffsets,
+    seekWindowOffsets,
     SEEK_CONCURRENCY,
     SHELL_PAGE_SIZE,
+    WINDOW_PAGES,
 } from '../utils/shellPaging';
 import type { MediaShellItem } from '../types/media';
 import type { CursorPaginatedResponse } from '../types/api';
 
 type ShellPages = {
     pages: Array<CursorPaginatedResponse<MediaShellItem>>;
-    pageParams: Array<string | undefined>;
+    // Each page's param is its offset (the global index of its first item), which
+    // is what makes the loaded set a window that can start anywhere rather than a
+    // prefix from index 0.
+    pageParams: number[];
 };
 
 /**
- * The gallery's item list.
+ * The gallery's item list, as a *sliding window* over the library.
  *
- * Two architectural fixes here.
+ * Three architectural fixes here.
  *
- * 1. Paginated. `/media/shell` used to return the entire library in one response, so
- *    nothing painted until the whole thing had transferred, parsed, grouped and laid
- *    out, and the array was then retained for the session. Pages now arrive as the
- *    user scrolls, and the timeline-counts endpoint supplies total scroll height so
- *    the scrollbar is correct from the first frame.
+ * 1. Windowed. `/media/shell` used to return the entire library in one response;
+ *    then it was paginated but every page was retained for the session, so memory
+ *    and per-append layout cost grew without bound until the tab crashed. React
+ *    Query's `maxPages` now caps retention at `WINDOW_PAGES` and drops the far page
+ *    as the user scrolls, so the held item count is bounded no matter how far the
+ *    library is scrolled. Pages are addressed by *offset* so the window can be
+ *    rebuilt anywhere for a timeline jump.
  *
  * 2. The processing poll is a *narrow* query. It used to re-fetch the entire shell
- *    payload every 5 seconds while any item was PENDING/PROCESSING — so one row
- *    wedged in PROCESSING (which nothing could reconcile) made every open tab
- *    re-download and re-lay-out the whole library indefinitely. A small changed-ids
- *    feed now patches the cached pages in place.
+ *    payload every 5 seconds while any item was PENDING/PROCESSING. A small
+ *    changed-ids feed now patches the cached pages in place.
  */
 export function useShellData() {
     const queryClient = useQueryClient();
 
     const query = useInfiniteQuery({
         queryKey: queryKeys.media.shell(),
-        // `limit` is explicit so every page holds exactly SHELL_PAGE_SIZE items,
-        // which is what makes the offsets a timeline jump computes land on real
-        // page boundaries.
+        // Offset addressing (not cursor): a window can start at any page, and
+        // `getPreviousPageParam` needs to walk backwards, which a forward-only
+        // cursor cannot. Offsets are exact against an unchanged table; an upload
+        // mid-session shifts them by one at a window edge, which the `['media']`
+        // invalidation on mutation resets.
         queryFn: ({ pageParam }) =>
-            getShellData({ limit: SHELL_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }),
-        initialPageParam: undefined as string | undefined,
-        getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+            getShellData({ offset: pageParam, limit: SHELL_PAGE_SIZE }),
+        initialPageParam: 0,
+        getNextPageParam: (lastPage, _all, lastParam) =>
+            lastPage.nextCursor ? lastParam + SHELL_PAGE_SIZE : undefined,
+        getPreviousPageParam: (_firstPage, _all, firstParam) =>
+            firstParam > 0 ? Math.max(0, firstParam - SHELL_PAGE_SIZE) : undefined,
+        // The window. `maxPages` requires both param getters above to be defined so
+        // it can drop from either end.
+        maxPages: WINDOW_PAGES,
         staleTime: 60_000,
     });
 
@@ -57,6 +68,14 @@ export function useShellData() {
         () => query.data?.pages.flatMap((p) => p.items) ?? [],
         [query.data]
     );
+
+    /**
+     * Absolute index of the first loaded item — the offset of the first retained
+     * page. Zero on a fresh load and while the window sits at the top; grows as
+     * front pages are evicted during downward scroll. The scrollbar maps a global
+     * item index to a row by subtracting this.
+     */
+    const windowStart = (query.data?.pageParams[0] as number | undefined) ?? 0;
 
     const hasPending = useMemo(
         () =>
@@ -115,28 +134,30 @@ export function useShellData() {
     /**
      * `cancelRefetch: false` is load-bearing.
      *
-     * React Query defaults it to true, so a second `fetchNextPage()` while one is
-     * in flight *aborts and restarts* it. Both the grid's scroll lookahead and the
-     * timeline scrollbar's jump-chasing ask for pages, and a jump asks on every
-     * drag frame — with the default the two livelocked, re-requesting the same
-     * cursor indefinitely and never advancing past it.
+     * React Query defaults it to true, so a second fetch while one is in flight
+     * aborts and restarts it. Both the grid's scroll lookahead (either edge) and
+     * the timeline scrollbar ask for pages, and a jump asks on every drag frame —
+     * with the default the two livelocked, re-requesting the same page forever.
      */
-    const { fetchNextPage } = query;
+    const { fetchNextPage, fetchPreviousPage } = query;
     const loadMore = useCallback(() => {
-        // Result is ignored: errors surface through the query, not this promise.
         fetchNextPage({ cancelRefetch: false });
     }, [fetchNextPage]);
+    const loadPrevious = useCallback(() => {
+        fetchPreviousPage({ cancelRefetch: false });
+    }, [fetchPreviousPage]);
 
     /**
-     * Bring the page holding a given *global* item index into the cache.
+     * Rebuild the window around a *global* item index for a timeline jump.
      *
-     * This is what the timeline scrollbar calls when the month a user picked is
-     * below the loaded range. Walking there with `fetchNextPage` cost one round
-     * trip per 2000 items and rendered every page on the way; addressing the gap
-     * by offset collapses it into a couple of parallel batches.
+     * This is what the scrollbar calls when the month a user picked is outside the
+     * loaded window. Rather than walk pages to it (one round trip each, rendering
+     * every page on the way), it fetches a fresh window of pages centred on the
+     * target in parallel and replaces the cached pages wholesale. Subsequent
+     * scroll-driven `fetchNextPage`/`fetchPreviousPage` continue from the new
+     * window's edges.
      *
-     * Rejects if the fetch fails, so the caller can release the jump it is holding
-     * rather than wait on a landing that will never come.
+     * Rejects if the fetch fails, so the caller can release the jump it is holding.
      */
     const seekInFlightRef = useRef(false);
     const [isSeeking, setIsSeeking] = useState(false);
@@ -149,25 +170,37 @@ export function useShellData() {
             const cached = queryClient.getQueryData<ShellPages>(key);
             if (!cached || cached.pages.length === 0) return;
 
+            // Already inside the loaded window — nothing to fetch; the scrollbar
+            // lands on it directly.
+            const start = cached.pageParams[0] ?? 0;
             const loaded = countLoadedItems(cached.pages);
-            const offsets = missingPageOffsets(loaded, targetIndex);
-            // Nothing missing, or the library ends before the target.
-            if (offsets.length === 0 || !cached.pages[cached.pages.length - 1]?.nextCursor) return;
+            if (targetIndex >= start && targetIndex < start + loaded) return;
+
+            const offsets = seekWindowOffsets(targetIndex);
+            if (offsets.length === 0) return;
 
             seekInFlightRef.current = true;
             setIsSeeking(true);
             try {
-                // A page fetch already in flight would append itself on top of
-                // whatever this writes, duplicating rows.
+                // Any in-flight page fetch would append onto whatever this writes.
                 await queryClient.cancelQueries({ queryKey: key });
 
                 const fetched = await mapWithConcurrency(offsets, SEEK_CONCURRENCY, (offset) =>
                     getShellData({ offset, limit: SHELL_PAGE_SIZE }).then((page) => ({ offset, page }))
                 );
 
-                queryClient.setQueryData<ShellPages>(key, (previous) =>
-                    previous ? appendShellPages(previous, fetched) : previous
-                );
+                // Keep the leading contiguous, non-empty pages. An offset past the
+                // end of the library returns an empty page and ends the window.
+                const pages: ShellPages['pages'] = [];
+                const pageParams: number[] = [];
+                for (const { offset, page } of fetched) {
+                    if (page.items.length === 0) break;
+                    pages.push(page);
+                    pageParams.push(offset);
+                }
+                if (pages.length === 0) return;
+
+                queryClient.setQueryData<ShellPages>(key, { pages, pageParams });
             }
             catch (err) {
                 toast.error('Could not jump to that date');
@@ -183,12 +216,16 @@ export function useShellData() {
 
     return {
         items,
+        windowStart,
         isLoading: query.isLoading,
         isError: query.isError,
         error: query.error,
         fetchNextPage: loadMore,
         hasNextPage: query.hasNextPage,
         isFetchingNextPage: query.isFetchingNextPage,
+        fetchPreviousPage: loadPrevious,
+        hasPreviousPage: query.hasPreviousPage,
+        isFetchingPreviousPage: query.isFetchingPreviousPage,
         seekToIndex,
         isSeeking,
     };

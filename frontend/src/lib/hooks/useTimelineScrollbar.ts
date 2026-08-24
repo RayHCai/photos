@@ -36,6 +36,12 @@ interface UseTimelineScrollbarOptions {
     /** Requests the next page. The fallback when `onSeekToIndex` is absent. */
     onLoadMore?: () => void;
     /**
+     * Global index of the first loaded row. The loaded rows are a *window* that can
+     * start anywhere in the library, so a global item index maps to a loaded row by
+     * subtracting this, and a loaded row's local index maps back by adding it.
+     */
+    windowStart?: number;
+    /**
      * Loads the page holding a global item index directly, skipping the ones in
      * between. Rejects if the fetch fails.
      */
@@ -69,7 +75,7 @@ export function useTimelineScrollbar(
     containerRef: RefObject<HTMLDivElement | null>,
     virtualRows: VirtualRow[],
     timeline: TimelineMonth[] | undefined,
-    { hasMore = false, onLoadMore, onSeekToIndex }: UseTimelineScrollbarOptions = {},
+    { hasMore = false, onLoadMore, windowStart = 0, onSeekToIndex }: UseTimelineScrollbarOptions = {},
 ): UseTimelineScrollbarResult {
     const [thumbFraction, setThumbFraction] = useState(0);
     const [activeLabel, setActiveLabel] = useState<string | null>(null);
@@ -154,7 +160,7 @@ export function useTimelineScrollbar(
      * correction existed, no longer distorts anything because a fraction maps to a
      * row rather than to a pixel offset.
      */
-    const totalItems = Math.max(totalItemsInTimeline(timeline), rowIndex.loadedItems);
+    const totalItems = Math.max(totalItemsInTimeline(timeline), windowStart + rowIndex.loadedItems);
 
     // Measure container height
     useEffect(() => {
@@ -184,10 +190,10 @@ export function useTimelineScrollbar(
         const fraction = atEnd && !hasMore
             ? 1
             : totalItems > 1
-                ? itemIndexAtScrollTop(rowIndex, container.scrollTop) / (totalItems - 1)
+                ? (windowStart + itemIndexAtScrollTop(rowIndex, container.scrollTop)) / (totalItems - 1)
                 : 0;
         setThumbFraction(Math.max(0, Math.min(1, fraction)));
-    }, [containerRef, rowIndex, totalItems, hasMore]);
+    }, [containerRef, rowIndex, totalItems, hasMore, windowStart]);
 
     // Track scroll position → thumb fraction (direct 1:1 mapping)
     useEffect(() => {
@@ -364,7 +370,9 @@ export function useTimelineScrollbar(
         if (totalItems <= 0) return;
 
         const targetIndex = Math.min(totalItems - 1, Math.round(clamped * (totalItems - 1)));
-        const scrollTop = scrollTopForItemIndex(rowIndex, targetIndex);
+        // targetIndex is a global library index; the loaded rows are a window
+        // starting at windowStart, so map into local row space to find its offset.
+        const scrollTop = scrollTopForItemIndex(rowIndex, targetIndex - windowStart);
 
         if (scrollTop === null) {
             /**
@@ -392,7 +400,7 @@ export function useTimelineScrollbar(
                 ? formatDate(currentDate)
                 : (findMarkerAtFraction(markers, clamped)?.label ?? null)
         );
-    }, [containerRef, markers, dateIndex, rowIndex, totalItems, requestPages, setPendingIndex, commitLabel]);
+    }, [containerRef, markers, dateIndex, rowIndex, totalItems, windowStart, requestPages, setPendingIndex, commitLabel]);
 
     /**
      * Land a jump once the pages holding its target arrive.
@@ -412,7 +420,7 @@ export function useTimelineScrollbar(
         const container = containerRef.current;
         if (!container) return;
 
-        const scrollTop = scrollTopForItemIndex(rowIndex, target);
+        const scrollTop = scrollTopForItemIndex(rowIndex, target - windowStart);
         if (scrollTop !== null) {
             setPendingIndex(null);
             container.scrollTop = scrollTop;
@@ -431,7 +439,7 @@ export function useTimelineScrollbar(
             const maxScroll = container.scrollHeight - container.clientHeight;
             if (maxScroll > 0) container.scrollTop = maxScroll;
         }
-    }, [containerRef, rowIndex, dateIndex, hasMore, requestPages, setPendingIndex, commitLabel]);
+    }, [containerRef, rowIndex, dateIndex, hasMore, windowStart, requestPages, setPendingIndex, commitLabel]);
 
     // rAF-throttle drag updates: pointermove fires far more often than the
     // display refreshes, so coalesce to at most one scrollTop write per frame.

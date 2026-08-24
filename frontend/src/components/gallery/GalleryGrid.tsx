@@ -63,6 +63,14 @@ interface GalleryGridProps {
     hasMore?: boolean;
     /** Whether a page fetch triggered by onLoadMore is in flight. */
     isLoadingMore?: boolean;
+    /** Called when the scroll position nears the start of the loaded window. */
+    onLoadPrevious?: () => void;
+    /** Whether a page exists above the loaded window. */
+    hasPrevious?: boolean;
+    /** Whether a page fetch triggered by onLoadPrevious is in flight. */
+    isLoadingPrevious?: boolean;
+    /** Global index of the first loaded item; the window's absolute start. */
+    windowStart?: number;
     /** Lets a timeline jump load the page holding an item index directly. */
     onSeekToIndex?: (index: number) => Promise<void>;
 }
@@ -94,6 +102,10 @@ export function GalleryGrid({
     onLoadMore,
     hasMore,
     isLoadingMore,
+    onLoadPrevious,
+    hasPrevious,
+    isLoadingPrevious,
+    windowStart = 0,
     onSeekToIndex,
 }: GalleryGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -282,6 +294,59 @@ export function GalleryGrid({
         // own identity would loop.
     }, [virtualRows]);
 
+    /**
+     * Keep the viewport pinned to the same content when the window slides.
+     *
+     * The window is a fixed span of pages: scrolling down evicts the top page and
+     * scrolling up prepends one. Either way the row set above the viewport changes,
+     * so every remaining row shifts and — because the browser keeps `scrollTop`
+     * numerically fixed — the content under the user would jump. This corrects for
+     * it by measuring the row straddling the top edge before and after the change
+     * and adjusting `scrollTop` by the exact delta.
+     *
+     * Heights are exact (justified layout is a pure function of the stored
+     * dimensions), so this is a correction, not an estimate. A jump replaces the
+     * whole window, so its anchor key is gone — the effect no-ops and the scrollbar
+     * lands the jump itself. Runs in a layout effect so the fix lands before paint.
+     */
+    const prevRowsRef = useRef<VirtualRow[] | null>(null);
+    useLayoutEffect(() => {
+        const container = containerRef.current;
+        const prev = prevRowsRef.current;
+        prevRowsRef.current = virtualRows;
+        if (!container || !prev || prev === virtualRows) return;
+
+        const scrollTop = container.scrollTop;
+        if (scrollTop <= 0) return; // pinned to the top: nothing above to preserve
+
+        // Row occupying the top edge in the OLD layout, and its offset.
+        let acc = 0;
+        let anchorKey: string | null = null;
+        let anchorOld = 0;
+        for (const r of prev) {
+            if (acc > scrollTop) break;
+            anchorKey = r.key;
+            anchorOld = acc;
+            acc += r.height;
+        }
+        if (!anchorKey) return;
+
+        // The same row's offset in the NEW layout.
+        let anchorNew: number | null = null;
+        let nacc = 0;
+        for (const r of virtualRows) {
+            if (r.key === anchorKey) {
+                anchorNew = nacc;
+                break;
+            }
+            nacc += r.height;
+        }
+        if (anchorNew === null) return; // anchor evicted (a jump) — leave it to the scrollbar
+
+        const delta = anchorNew - anchorOld;
+        if (delta !== 0) container.scrollTop = scrollTop + delta;
+    }, [virtualRows]);
+
     const virtualItems = virtualizer.getVirtualItems();
 
     /**
@@ -301,6 +366,18 @@ export function GalleryGrid({
             onLoadMore?.();
         }
     }, [distanceToEnd, viewportHeight, totalSize, hasMore, isLoadingMore, onLoadMore]);
+
+    /**
+     * Mirror of the above for the top edge: once the window has slid down (front
+     * pages evicted), scrolling back up refetches the page above before reaching
+     * it. The re-anchor effect keeps the viewport still as the page prepends.
+     */
+    useEffect(() => {
+        if (!hasPrevious || isLoadingPrevious || totalSize <= 0) return;
+        if (scrollOffset <= viewportHeight * LOAD_MORE_VIEWPORT_LOOKAHEAD) {
+            onLoadPrevious?.();
+        }
+    }, [scrollOffset, viewportHeight, totalSize, hasPrevious, isLoadingPrevious, onLoadPrevious]);
 
     return (
         <div className="h-full relative">
@@ -384,6 +461,7 @@ export function GalleryGrid({
                 timeline={timeline}
                 hasMore={hasMore}
                 onLoadMore={onLoadMore}
+                windowStart={windowStart}
                 onSeekToIndex={onSeekToIndex}
             />
         </div>

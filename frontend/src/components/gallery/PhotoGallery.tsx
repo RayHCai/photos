@@ -47,6 +47,14 @@ interface PhotoGalleryProps {
     hasMore?: boolean;
     /** Whether a page fetch triggered by onLoadMore is in flight. */
     isLoadingMore?: boolean;
+    /** Called when the grid scrolls near the start of the loaded window. */
+    onLoadPrevious?: () => void;
+    /** Whether a page exists above the loaded window (it slid down past it). */
+    hasPrevious?: boolean;
+    /** Whether a page fetch triggered by onLoadPrevious is in flight. */
+    isLoadingPrevious?: boolean;
+    /** Global index of the first loaded item; the window's absolute start. */
+    windowStart?: number;
     /**
      * Loads the page holding a global item index directly. Lets the timeline jump
      * to a month far below the loaded range without walking every page to it.
@@ -68,6 +76,10 @@ export function PhotoGallery({
     onLoadMore,
     hasMore,
     isLoadingMore,
+    onLoadPrevious,
+    hasPrevious,
+    isLoadingPrevious,
+    windowStart,
     onSeekToIndex,
 }: PhotoGalleryProps) {
     const [lightboxId, setLightboxId] = useState<string | null>(null);
@@ -163,6 +175,10 @@ export function PhotoGallery({
                     onLoadMore={onLoadMore}
                     hasMore={hasMore}
                     isLoadingMore={isLoadingMore}
+                    onLoadPrevious={onLoadPrevious}
+                    hasPrevious={hasPrevious}
+                    isLoadingPrevious={isLoadingPrevious}
+                    windowStart={windowStart}
                     onSeekToIndex={onSeekToIndex}
                 />
             </div>
