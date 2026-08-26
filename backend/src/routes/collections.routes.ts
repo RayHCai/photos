@@ -34,6 +34,9 @@ router.post(
 const itemPagination = validate({
     query: z.object({
         cursor: z.string().optional(),
+        // Direct address for a timeline jump, so the windowed gallery can pull the
+        // gap between here and the month it wants in parallel.
+        offset: z.coerce.number().int().min(0).optional(),
         limit: z.coerce.number().min(1).max(500).optional(),
     }),
 });
@@ -45,6 +48,7 @@ router.get('/hidden', itemPagination, collectionsController.getHidden);
 router.get('/favorites', itemPagination, collectionsController.getFavorites);
 
 router.get('/:id', itemPagination, collectionsController.getById);
+router.get('/:id/timeline', collectionsController.getTimeline);
 
 router.patch(
     '/:id',

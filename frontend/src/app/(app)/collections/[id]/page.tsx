@@ -17,9 +17,7 @@ import { FileDropZone } from '@/components/upload/UploadDropzone';
 import { UploadMenu } from '@/components/upload/UploadMenu';
 import { ImagePlus, Settings } from 'lucide-react';
 import { pluralize } from '@/lib/utils/pluralize';
-import { format } from 'date-fns';
 import { toast } from 'sonner';
-import type { TimelineMonth } from '@/lib/types/media';
 
 export default function CollectionDetailPage() {
     const params = useParams();
@@ -27,10 +25,17 @@ export default function CollectionDetailPage() {
     const {
         collection,
         items: mediaItems,
+        timeline,
+        windowStart,
         isLoading,
         fetchNextPage,
         hasNextPage,
         isFetchingNextPage,
+        fetchPreviousPage,
+        hasPreviousPage,
+        isFetchingPreviousPage,
+        seekToIndex,
+        isSeeking,
     } = useCollection(id);
     const [pickerOpen, setPickerOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -69,18 +74,6 @@ export default function CollectionDetailPage() {
         () => new Set(mediaItems.map((i) => i.id)),
         [mediaItems]
     );
-
-    const collectionTimeline = useMemo((): TimelineMonth[] => {
-        const monthCounts = new Map<string, number>();
-        for (const item of mediaItems) {
-            const dateStr = item.takenAt || item.createdAt;
-            const month = format(new Date(dateStr), 'yyyy-MM');
-            monthCounts.set(month, (monthCounts.get(month) || 0) + 1);
-        }
-        return Array.from(monthCounts.entries())
-            .sort(([a], [b]) => b.localeCompare(a))
-            .map(([month, count]) => ({ month, count }));
-    }, [mediaItems]);
 
     if (isLoading) {
         return <CenteredSpinner />;
@@ -151,16 +144,21 @@ export default function CollectionDetailPage() {
                 </div>
             </div>
 
-            {/* Gallery */}
+            {/* Gallery — full home parity: windowed both ways + timeline seek. */}
             <PhotoGallery
                 items={mediaItems}
                 selection={selection}
                 favoriteIds={favoriteIds}
                 onToggleFavorite={handleToggleFavorite}
-                timeline={collectionTimeline}
+                timeline={timeline}
                 onLoadMore={fetchNextPage}
                 hasMore={hasNextPage}
-                isLoadingMore={isFetchingNextPage}
+                isLoadingMore={isFetchingNextPage || isSeeking}
+                onLoadPrevious={fetchPreviousPage}
+                hasPrevious={hasPreviousPage}
+                isLoadingPrevious={isFetchingPreviousPage || isSeeking}
+                windowStart={windowStart}
+                onSeekToIndex={seekToIndex}
             />
 
             <CollectionItemPicker

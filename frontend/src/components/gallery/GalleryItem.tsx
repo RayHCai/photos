@@ -135,6 +135,16 @@ export const GalleryItem = memo(function GalleryItem({
                     alt={item.fileName ?? (item.type === 'VIDEO' ? 'Video' : 'Photo')}
                     loading="lazy"
                     decoding="async"
+                    /**
+                     * Explicit decode dimensions (the measured cell size). The cell is
+                     * still sized by CSS (`object-cover`, `w-full h-full`), but giving
+                     * the browser exact intrinsic dimensions lets it size the decoded
+                     * bitmap to the cell instead of the source's own resolution, and
+                     * evict it more readily — both of which cut the GPU/decode working
+                     * set under fast scroll.
+                     */
+                    width={Math.round(width)}
+                    height={Math.round(height)}
                     className="w-full h-full object-cover"
                     draggable={false}
                 />

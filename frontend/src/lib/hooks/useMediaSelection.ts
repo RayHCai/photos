@@ -54,7 +54,17 @@ export function useMediaSelection() {
         // Map lookups rather than two O(n) indexOf scans over the whole library.
         const fromIndex = index.get(fromId);
         const toIndex = index.get(toId);
-        if (fromIndex === undefined || toIndex === undefined) return;
+        // The clicked item is always in the visible order; guard anyway.
+        if (toIndex === undefined) return;
+        if (fromIndex === undefined) {
+            // The shift-anchor has scrolled out of the resident window (the gallery
+            // holds only a sliding page buffer), so a range across the gap can't be
+            // resolved. Select the clicked item and re-anchor here — better than the
+            // click silently doing nothing.
+            setSelectedIds((prev) => new Set(prev).add(toId));
+            lastSelectedIdRef.current = toId;
+            return;
+        }
 
         const start = Math.min(fromIndex, toIndex);
         const end = Math.max(fromIndex, toIndex);

@@ -19,6 +19,8 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 function paginationFrom(req: Request) {
     return {
         ...(req.query.cursor ? { cursor: req.query.cursor as string } : {}),
+        // Direct page address for a timeline jump, mirroring /media/shell.
+        ...(req.query.offset !== undefined ? { offset: Number(req.query.offset) } : {}),
         ...(req.query.limit ? { limit: Number(req.query.limit) } : {}),
     };
 }
@@ -61,6 +63,14 @@ export const getById = asyncHandler(async (req: Request, res: Response) => {
         paginationFrom(req)
     );
     res.json(collection);
+});
+
+export const getTimeline = asyncHandler(async (req: Request, res: Response) => {
+    const result = await collectionsService.getCollectionTimeline(req.params.id as string);
+    // Short-lived like the global timeline: cheap to recompute, and a remount
+    // should not re-request it.
+    res.set('Cache-Control', 'private, max-age=60');
+    res.json(result);
 });
 
 export const update = asyncHandler(async (req: Request, res: Response) => {

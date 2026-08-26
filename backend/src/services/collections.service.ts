@@ -1,4 +1,6 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
+import { redisConnection } from '../config/redis.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
@@ -51,12 +53,61 @@ export async function createCollection(data: {
  */
 export const COLLECTION_ITEMS_PAGE_SIZE = 500;
 
-export async function getCollection(
-    id: string,
-    opts: { cursor?: string; limit?: number } = {}
+/**
+ * Item order for a collection read, matching the gallery shell.
+ *
+ * Collections used to be served in `sortOrder` (insertion order), but the gallery
+ * regroups every response by date before painting (see groupByDate on the client),
+ * so what the user actually saw was already date-descending — the fetch order was
+ * invisible. Serving date order directly is what lets a collection use the same
+ * windowed pagination, timeline scrollbar and seek as the home gallery: the fetch
+ * offset, the on-screen order and the per-month timeline counts all agree.
+ *
+ * `id` is the final tiebreaker so a bulk import sharing one capture timestamp still
+ * has a *total* order — offset pages are independent queries and would otherwise
+ * skip or repeat a tied row at a boundary.
+ */
+export const COLLECTION_ITEM_ORDER_BY: Prisma.CollectionItemOrderByWithRelationInput[] = [
+    { mediaItem: { takenAt: { sort: 'desc', nulls: 'last' } } },
+    { mediaItem: { createdAt: 'desc' } },
+    { id: 'desc' },
+];
+
+/**
+ * One page of a collection's items, addressed by `cursor` (sequential scroll) or
+ * `offset` (a timeline jump), exactly like the shell. A cursor wins when both are
+ * present; an `offset` of 0 is a no-op skip, which is why the truthiness check is
+ * correct rather than `!== undefined`.
+ */
+async function fetchCollectionItemsPage(
+    collectionId: string,
+    opts: { cursor?: string; offset?: number; limit?: number }
 ) {
     const limit = Math.min(opts.limit ?? COLLECTION_ITEMS_PAGE_SIZE, COLLECTION_ITEMS_PAGE_SIZE);
 
+    const rows = await prisma.collectionItem.findMany({
+        where: { collectionId },
+        orderBy: COLLECTION_ITEM_ORDER_BY,
+        take: limit + 1,
+        ...(opts.cursor
+            ? applyCursor(opts.cursor)
+            : opts.offset
+                ? { skip: opts.offset }
+                : {}),
+        select: {
+            id: true,
+            sortOrder: true,
+            mediaItem: { select: MEDIA_ITEM_SUMMARY_SELECT },
+        },
+    });
+
+    return paginateResults(rows, limit);
+}
+
+export async function getCollection(
+    id: string,
+    opts: { cursor?: string; offset?: number; limit?: number } = {}
+) {
     const collection = await findOrThrow(
         () => prisma.collection.findUnique({
             where: { id },
@@ -68,19 +119,7 @@ export async function getCollection(
         'Collection'
     );
 
-    const rows = await prisma.collectionItem.findMany({
-        where: { collectionId: id },
-        orderBy: { sortOrder: 'asc' },
-        take: limit + 1,
-        ...applyCursor(opts.cursor),
-        select: {
-            id: true,
-            sortOrder: true,
-            mediaItem: { select: MEDIA_ITEM_SUMMARY_SELECT },
-        },
-    });
-
-    const { items, nextCursor, hasMore } = paginateResults(rows, limit);
+    const { items, nextCursor, hasMore } = await fetchCollectionItemsPage(id, opts);
 
     return { ...collection, items, nextCursor, hasMore };
 }
@@ -109,7 +148,7 @@ export async function deleteCollection(id: string) {
 export async function getOrCreateSystemCollection(
     systemType: string,
     defaultName: string,
-    opts: { cursor?: string; limit?: number } = {}
+    opts: { cursor?: string; offset?: number; limit?: number } = {}
 ) {
     let collection = await prisma.collection.findUnique({
         where: { systemType },
@@ -123,22 +162,51 @@ export async function getOrCreateSystemCollection(
         });
     }
 
-    const limit = Math.min(opts.limit ?? COLLECTION_ITEMS_PAGE_SIZE, COLLECTION_ITEMS_PAGE_SIZE);
-
-    const rows = await prisma.collectionItem.findMany({
-        where: { collectionId: collection.id },
-        orderBy: { sortOrder: 'asc' },
-        take: limit + 1,
-        ...applyCursor(opts.cursor),
-        select: {
-            id: true,
-            sortOrder: true,
-            mediaItem: { select: MEDIA_ITEM_SUMMARY_SELECT },
-        },
-    });
-
-    const { items, nextCursor, hasMore } = paginateResults(rows, limit);
+    const { items, nextCursor, hasMore } = await fetchCollectionItemsPage(collection.id, opts);
     return { ...collection, items, nextCursor, hasMore };
+}
+
+const COLLECTION_TIMELINE_TTL = 60;
+const collectionTimelineKey = (id: string) => `timeline:collection:${id}`;
+
+/**
+ * Month counts driving a collection's timeline scrollbar — the per-collection
+ * analogue of media.service `getTimeline`.
+ *
+ * The client previously derived this from the items it had loaded, so the
+ * scrollbar only described the pages fetched so far and every marker shifted as
+ * more loaded. Counting the whole collection server-side (grouped the same way as
+ * the item order, by capture wall-clock month, newest first) gives a stable track
+ * the windowed gallery can seek against.
+ *
+ * No hidden exclusion: a collection read returns all its members, so its timeline
+ * must count all of them or the total would not match the item list the scrollbar
+ * is mapping onto. Cached briefly and dropped explicitly on membership change.
+ */
+export async function getCollectionTimeline(id: string) {
+    const cacheKey = collectionTimelineKey(id);
+    const cached = await redisConnection.get(cacheKey);
+    if (cached) {
+        return JSON.parse(cached) as Array<{ month: string; count: number }>;
+    }
+
+    const rows = await prisma.$queryRaw<Array<{ month: string; count: bigint }>>`
+        SELECT to_char(COALESCE(mi."taken_at_local", mi."taken_at", mi."created_at"), 'YYYY-MM') AS month,
+               COUNT(*)::bigint AS count
+        FROM "collection_items" ci
+        JOIN "media_items" mi ON mi.id = ci."media_item_id"
+        WHERE ci."collection_id" = ${id}
+        GROUP BY month
+        ORDER BY month DESC
+    `;
+
+    const result = rows.map((r) => ({ month: r.month, count: Number(r.count) }));
+    await redisConnection.setex(cacheKey, COLLECTION_TIMELINE_TTL, JSON.stringify(result));
+    return result;
+}
+
+async function invalidateCollectionTimelineCache(id: string) {
+    await redisConnection.del(collectionTimelineKey(id));
 }
 
 /**
@@ -185,6 +253,8 @@ export async function addItems(
         data: items,
         skipDuplicates: true,
     });
+
+    await invalidateCollectionTimelineCache(collectionId);
 }
 
 export async function removeItems(
@@ -197,6 +267,8 @@ export async function removeItems(
             mediaItemId: { in: mediaItemIds },
         },
     });
+
+    await invalidateCollectionTimelineCache(collectionId);
 }
 
 export async function getCollectionMembership(mediaItemIds: string[]) {

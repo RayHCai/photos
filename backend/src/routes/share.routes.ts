@@ -40,6 +40,27 @@ router.delete(
 // Public share routes (no auth, dedicated higher rate limit)
 router.get('/public/s/:slug', publicShareRateLimiter, shareController.viewShared);
 
+/**
+ * Paginated items for a shared collection. Split out from the metadata response
+ * above so a large public link no longer ships its whole album into the guest tab
+ * at once — the client windows it exactly like the authenticated gallery.
+ */
+router.get(
+    '/public/s/:slug/items',
+    publicShareRateLimiter,
+    validate({
+        query: z.object({
+            cursor: z.string().optional(),
+            offset: z.coerce.number().int().min(0).optional(),
+            limit: z.coerce.number().min(1).max(500).optional(),
+        }),
+    }),
+    shareController.sharedItems
+);
+
+/** Month counts for the shared gallery's timeline scrollbar (hidden excluded). */
+router.get('/public/s/:slug/timeline', publicShareRateLimiter, shareController.sharedTimeline);
+
 router.get(
     '/public/s/:slug/media/:mediaId/thumbnail',
     publicShareRateLimiter,

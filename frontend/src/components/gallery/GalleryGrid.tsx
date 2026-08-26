@@ -265,7 +265,11 @@ export function GalleryGrid({
         count: virtualRows.length,
         getScrollElement: () => containerRef.current,
         estimateSize: (index) => virtualRows[index]?.height || (isMobile ? 100 : TARGET_ROW_HEIGHT),
-        overscan: isMobile ? 3 : 5,
+        // Kept small on both form factors: every overscanned row decodes its
+        // thumbnails into the GPU working set even though it is off-screen, and a
+        // wider desktop margin was a measurable contributor to the fast-scroll
+        // memory ceiling.
+        overscan: 3,
         /**
          * Stable keys. The rows were previously keyed by array index, so any insertion
          * or removal above the viewport — a new upload, a delete, a hide, a
@@ -319,32 +323,42 @@ export function GalleryGrid({
         const scrollTop = container.scrollTop;
         if (scrollTop <= 0) return; // pinned to the top: nothing above to preserve
 
-        // Row occupying the top edge in the OLD layout, and its offset.
-        let acc = 0;
-        let anchorKey: string | null = null;
-        let anchorOld = 0;
-        for (const r of prev) {
-            if (acc > scrollTop) break;
-            anchorKey = r.key;
-            anchorOld = acc;
-            acc += r.height;
-        }
-        if (!anchorKey) return;
-
-        // The same row's offset in the NEW layout.
-        let anchorNew: number | null = null;
+        // New-layout start offset for every row key, for O(1) survivor lookup.
+        const newOffsets = new Map<string, number>();
         let nacc = 0;
         for (const r of virtualRows) {
-            if (r.key === anchorKey) {
-                anchorNew = nacc;
-                break;
-            }
+            newOffsets.set(r.key, nacc);
             nacc += r.height;
         }
-        if (anchorNew === null) return; // anchor evicted (a jump) — leave it to the scrollbar
 
-        const delta = anchorNew - anchorOld;
-        if (delta !== 0) container.scrollTop = scrollTop + delta;
+        /**
+         * Walk the OLD rows from the top edge downward and re-anchor to the *first*
+         * one that still exists in the new layout, keeping it at the same viewport
+         * position it held before (`newOff - (oldOff - scrollTop)`).
+         *
+         * A window slide leaves the straddling top-edge row intact, so this lands on
+         * it exactly like the previous single-anchor version. But an invalidation
+         * that shifted the source — a delete or hide *above* a deep window — replaces
+         * that row's identity; anchoring instead to the nearest surviving row below
+         * keeps the jump to a fraction of a row rather than no-op'ing and letting the
+         * browser hold scrollTop fixed over content that moved by a whole page. If
+         * nothing survives (the whole window was replaced, i.e. a jump) it falls
+         * through and the scrollbar lands the jump itself.
+         */
+        let oldOff = 0;
+        let reachedTopEdge = false;
+        for (const r of prev) {
+            if (oldOff + r.height > scrollTop) reachedTopEdge = true;
+            if (reachedTopEdge) {
+                const newOff = newOffsets.get(r.key);
+                if (newOff !== undefined) {
+                    const next = newOff - (oldOff - scrollTop);
+                    if (next !== scrollTop) container.scrollTop = next;
+                    return;
+                }
+            }
+            oldOff += r.height;
+        }
     }, [virtualRows]);
 
     const virtualItems = virtualizer.getVirtualItems();

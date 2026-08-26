@@ -29,7 +29,12 @@ export function TimelineScrollbar({
     windowStart,
     onSeekToIndex,
 }: TimelineScrollbarProps) {
-    const { data: globalTimeline } = useTimeline();
+    // Only fetch the library-wide timeline when this surface has no scoped one of
+    // its own. A collection, the hidden view and a public share always pass a
+    // `timeline` array (possibly empty while it loads), so `timelineProp` is never
+    // undefined for them and the authenticated fetch — which a guest cannot make —
+    // stays off.
+    const { data: globalTimeline } = useTimeline(timelineProp === undefined);
     const timeline = timelineProp ?? globalTimeline;
 
     const {

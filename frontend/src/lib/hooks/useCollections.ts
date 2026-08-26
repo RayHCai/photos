@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useMutationWithInvalidation } from './useMutationWithInvalidation';
+import { useWindowedMedia } from './useWindowedMedia';
 import * as collectionsApi from '../api/collections';
 import { queryKeys } from '../queries/keys';
 import type { CollectionWithItems } from '../types/collections';
+import type { CursorPaginatedResponse } from '../types/api';
 import type { MediaShellItem } from '../types/media';
 
 export function useCollections() {
@@ -15,68 +16,86 @@ export function useCollections() {
     });
 }
 
+/** Map a collection page response down to the gallery-shell shape the window consumes. */
+function toShellPage(res: CollectionWithItems): CursorPaginatedResponse<MediaShellItem> {
+    return {
+        items: res.items.map((i) => i.mediaItem),
+        nextCursor: res.nextCursor,
+        hasMore: res.hasMore,
+    };
+}
+
 /**
- * A collection's items, paged as the gallery scrolls.
+ * A collection's items as a sliding window, at home-gallery parity.
  *
- * `GET /collections/:id` and the system-collection endpoints have always been
- * cursor-paginated server-side (`COLLECTION_ITEMS_PAGE_SIZE`, 500), but they were
- * read through a plain `useQuery` that only ever requested the first page. Any
- * collection larger than that rendered its newest 500 items and offered no way to
- * reach the rest — the same truncation the main gallery had, minus the symptom
- * being obvious, because nothing told the user items were missing.
+ * The collection endpoints have always been server-paginated, but they were read
+ * through a plain `useInfiniteQuery` that only walked forward and retained every
+ * page for the session — the same unbounded growth the home gallery was fixed for,
+ * plus a timeline derived from the loaded items alone (so the scrollbar only
+ * described the pages fetched so far). Now the endpoint is offset-addressable and
+ * date-ordered, so this composes the shared window engine (bidirectional
+ * pagination + timeline seek) with two side queries: the collection's metadata
+ * (name, count, share links) and its server-computed month timeline.
+ *
+ * Metadata, items and timeline all live under `['collections', ...]`, so one
+ * `collection-membership`/`collection-set` invalidation refreshes them together.
  */
-function useCollectionPages(
-    queryKey: readonly unknown[],
-    fetchPage: (params: { cursor?: string }) => Promise<CollectionWithItems>,
-    enabled = true,
-) {
-    const query = useInfiniteQuery({
-        queryKey,
-        queryFn: ({ pageParam }) => fetchPage(pageParam ? { cursor: pageParam } : {}),
-        initialPageParam: undefined as string | undefined,
-        getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-        enabled,
+function useCollectionGallery(opts: {
+    metaKey: readonly unknown[];
+    fetchMeta: () => Promise<CollectionWithItems>;
+    itemsKey: readonly unknown[];
+    fetchItemsPage: (params: { offset: number; limit: number }) => Promise<CursorPaginatedResponse<MediaShellItem>>;
+    /** Known upfront for a collection by id; derived from metadata for system collections. */
+    knownId?: string;
+    enabled?: boolean;
+}) {
+    const { metaKey, fetchMeta, itemsKey, fetchItemsPage, knownId, enabled = true } = opts;
+
+    const meta = useQuery({ queryKey: metaKey, queryFn: fetchMeta, enabled });
+    const collectionId = knownId ?? meta.data?.id;
+
+    const timeline = useQuery({
+        queryKey: ['collections', collectionId ?? 'unknown', 'timeline'],
+        queryFn: () => collectionsApi.getCollectionTimeline(collectionId!),
+        enabled: enabled && !!collectionId,
+        staleTime: 60_000,
     });
 
-    // Metadata (name, share links, total count) is identical on every page.
-    const collection = query.data?.pages[0];
-
-    const items = useMemo<MediaShellItem[]>(
-        () => query.data?.pages.flatMap((p) => p.items.map((i) => i.mediaItem)) ?? [],
-        [query.data]
-    );
-
-    // See useShellData: without `cancelRefetch: false`, overlapping requests for
-    // the next page abort each other and pagination never advances.
-    const { fetchNextPage } = query;
-    const loadMore = useCallback(() => {
-        // Result is ignored: errors surface through the query, not this promise.
-        fetchNextPage({ cancelRefetch: false });
-    }, [fetchNextPage]);
+    const windowed = useWindowedMedia({ queryKey: itemsKey, fetchPage: fetchItemsPage, enabled });
 
     return {
-        collection,
-        items,
-        isLoading: query.isLoading,
-        fetchNextPage: loadMore,
-        hasNextPage: query.hasNextPage,
-        isFetchingNextPage: query.isFetchingNextPage,
+        collection: meta.data,
+        // Always an array (never undefined), so the scrollbar treats this as a
+        // scoped source and never falls back to the authenticated global timeline
+        // (which excludes hidden items and 401s for a guest).
+        timeline: timeline.data ?? [],
+        ...windowed,
+        isLoading: meta.isLoading || windowed.isLoading,
     };
 }
 
 export function useCollection(id: string | undefined) {
-    return useCollectionPages(
-        ['collections', id],
-        (params) => collectionsApi.getCollection(id!, params),
-        !!id
-    );
+    return useCollectionGallery({
+        metaKey: ['collections', id, 'meta'],
+        // limit=1: only the header (name, count, share links) is wanted here; the
+        // items come from the window below.
+        fetchMeta: () => collectionsApi.getCollection(id!, { limit: 1 }),
+        itemsKey: ['collections', id, 'window'],
+        fetchItemsPage: ({ offset, limit }) =>
+            collectionsApi.getCollection(id!, { offset, limit }).then(toShellPage),
+        knownId: id,
+        enabled: !!id,
+    });
 }
 
 export function useHiddenCollection() {
-    return useCollectionPages(
-        queryKeys.collections.hidden(),
-        collectionsApi.getHiddenCollection
-    );
+    return useCollectionGallery({
+        metaKey: queryKeys.collections.hidden(),
+        fetchMeta: () => collectionsApi.getHiddenCollection({ limit: 1 }),
+        itemsKey: ['collections', 'hidden', 'window'],
+        fetchItemsPage: ({ offset, limit }) =>
+            collectionsApi.getHiddenCollection({ offset, limit }).then(toShellPage),
+    });
 }
 
 export function useCreateCollection() {

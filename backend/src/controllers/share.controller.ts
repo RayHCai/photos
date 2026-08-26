@@ -33,6 +33,21 @@ export const viewShared = asyncHandler(async (req: Request, res: Response) => {
     res.json(collection);
 });
 
+export const sharedItems = asyncHandler(async (req: Request, res: Response) => {
+    const result = await shareService.getSharedItems(req.params.slug as string, {
+        ...(req.query.cursor ? { cursor: req.query.cursor as string } : {}),
+        ...(req.query.offset !== undefined ? { offset: Number(req.query.offset) } : {}),
+        ...(req.query.limit ? { limit: Number(req.query.limit) } : {}),
+    });
+    res.json(result);
+});
+
+export const sharedTimeline = asyncHandler(async (req: Request, res: Response) => {
+    const result = await shareService.getSharedTimeline(req.params.slug as string);
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json(result);
+});
+
 /**
  * The URL's remaining lifetime is threaded into the redirect so the browser
  * cannot cache a 302 for longer than the presigned URL behind it stays valid.

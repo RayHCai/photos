@@ -12,10 +12,17 @@ import { IconButton } from '@/components/ui/IconButton';
 export default function HiddenPage() {
     const {
         items: mediaItems,
+        timeline,
+        windowStart,
         isLoading,
         fetchNextPage,
         hasNextPage,
         isFetchingNextPage,
+        fetchPreviousPage,
+        hasPreviousPage,
+        isFetchingPreviousPage,
+        seekToIndex,
+        isSeeking,
     } = useHiddenCollection();
 
     const { unhideItems } = useHidden();
@@ -55,9 +62,15 @@ export default function HiddenPage() {
                 isLoading={isLoading}
                 selection={selection}
                 emptyMessage="No hidden items"
+                timeline={timeline}
                 onLoadMore={fetchNextPage}
                 hasMore={hasNextPage}
-                isLoadingMore={isFetchingNextPage}
+                isLoadingMore={isFetchingNextPage || isSeeking}
+                onLoadPrevious={fetchPreviousPage}
+                hasPrevious={hasPreviousPage}
+                isLoadingPrevious={isFetchingPreviousPage || isSeeking}
+                windowStart={windowStart}
+                onSeekToIndex={seekToIndex}
             />
         </div>
     );

@@ -5,14 +5,17 @@ import type {
     CollectionWithItems,
     SystemCollectionRef,
 } from '../types/collections';
+import type { TimelineMonth } from '../types/media';
 
 interface PageParams {
     cursor?: string;
+    /** Direct page address for a timeline jump; mirrors /media/shell. */
+    offset?: number;
     limit?: number;
 }
 
 function withPage(path: string, params: PageParams): string {
-    const qs = buildQueryString({ cursor: params.cursor, limit: params.limit });
+    const qs = buildQueryString({ cursor: params.cursor, offset: params.offset, limit: params.limit });
     return qs ? `${path}?${qs}` : path;
 }
 
@@ -62,6 +65,11 @@ export function getCollection(
     params: PageParams = {}
 ): Promise<CollectionWithItems> {
     return apiFetch(withPage(`/collections/${id}`, params));
+}
+
+/** Month counts for a collection's timeline scrollbar (whole collection, not just loaded items). */
+export function getCollectionTimeline(id: string): Promise<TimelineMonth[]> {
+    return apiFetch(`/collections/${id}/timeline`);
 }
 
 export function createCollection(data: { name: string }): Promise<Collection> {

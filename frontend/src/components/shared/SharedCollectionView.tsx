@@ -1,7 +1,15 @@
 'use client';
 
 import { useMemo, useCallback } from 'react';
-import { sharedThumbnailUrl, sharedOriginalUrl, sharedDownloadUrl } from '@/lib/api/share';
+import { useQuery } from '@tanstack/react-query';
+import {
+    getSharedItems,
+    getSharedTimeline,
+    sharedThumbnailUrl,
+    sharedOriginalUrl,
+    sharedDownloadUrl,
+} from '@/lib/api/share';
+import { useWindowedMedia } from '@/lib/hooks/useWindowedMedia';
 import { PhotoGallery, type LightboxConfig } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
@@ -19,10 +27,23 @@ export function SharedCollectionView({
 }: SharedCollectionViewProps) {
     const selection = useMediaSelection();
 
-    const mediaItems = useMemo(
-        () => collection.items.map((i) => i.mediaItem),
-        [collection.items]
-    );
+    /**
+     * Items are windowed exactly like the authenticated gallery — a large public
+     * link used to hold its whole album in guest memory. The scrollbar is driven by
+     * a public, hidden-excluded timeline endpoint; passing it as an array (never
+     * undefined) also stops the scrollbar from falling back to the authenticated
+     * `/media/timeline`, which a guest cannot call.
+     */
+    const windowed = useWindowedMedia({
+        queryKey: ['share', slug, 'items'],
+        fetchPage: ({ offset, limit }) => getSharedItems(slug, { offset, limit }),
+    });
+
+    const { data: timeline } = useQuery({
+        queryKey: ['share', slug, 'timeline'],
+        queryFn: () => getSharedTimeline(slug),
+        staleTime: 60_000,
+    });
 
     const thumbnailSrcFn = useCallback(
         (id: string) => sharedThumbnailUrl(slug, id),
@@ -55,7 +76,7 @@ export function SharedCollectionView({
                     {collection.name}
                 </h1>
                 <p className="text-xs text-stone-400 mt-1">
-                    {pluralize(collection.items.length, 'item')}
+                    {pluralize(collection.itemCount, 'item')}
                 </p>
                 <SelectionToolbar
                     selection={selection}
@@ -69,10 +90,20 @@ export function SharedCollectionView({
             </header>
 
             <PhotoGallery
-                items={mediaItems}
+                items={windowed.items}
+                isLoading={windowed.isLoading}
                 selection={selection}
                 thumbnailSrcFn={thumbnailSrcFn}
                 lightboxConfig={lightboxConfig}
+                timeline={timeline ?? []}
+                onLoadMore={windowed.fetchNextPage}
+                hasMore={windowed.hasNextPage}
+                isLoadingMore={windowed.isFetchingNextPage || windowed.isSeeking}
+                onLoadPrevious={windowed.fetchPreviousPage}
+                hasPrevious={windowed.hasPreviousPage}
+                isLoadingPrevious={windowed.isFetchingPreviousPage || windowed.isSeeking}
+                windowStart={windowed.windowStart}
+                onSeekToIndex={windowed.seekToIndex}
             />
         </div>
     );

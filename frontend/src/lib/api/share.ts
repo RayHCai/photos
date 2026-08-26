@@ -1,4 +1,6 @@
-import { apiFetch, apiUrl } from './client';
+import { apiFetch, apiUrl, buildQueryString } from './client';
+import type { CursorPaginatedResponse } from '../types/api';
+import type { MediaShellItem, TimelineMonth } from '../types/media';
 import type { ShareLink, SharedCollection } from '../types/share';
 
 export function createShareLink(
@@ -21,6 +23,20 @@ export function revokeShareLink(linkId: string): Promise<void> {
 
 export function getSharedCollection(slug: string): Promise<SharedCollection> {
     return apiFetch(`/public/s/${slug}`);
+}
+
+/** One offset-addressed page of a shared collection's items (windowed like the shell). */
+export function getSharedItems(
+    slug: string,
+    params: { cursor?: string; offset?: number; limit?: number } = {}
+): Promise<CursorPaginatedResponse<MediaShellItem>> {
+    const qs = buildQueryString(params);
+    return apiFetch(`/public/s/${slug}/items${qs ? `?${qs}` : ''}`);
+}
+
+/** Month counts for the shared gallery's timeline scrollbar (hidden excluded, no auth). */
+export function getSharedTimeline(slug: string): Promise<TimelineMonth[]> {
+    return apiFetch(`/public/s/${slug}/timeline`);
 }
 
 export function sharedThumbnailUrl(slug: string, mediaId: string): string {
