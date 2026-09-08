@@ -40,9 +40,15 @@ export function Providers({ children }: { children: ReactNode }) {
                     <ProgressDock />
                 </DownloadProvider>
             </UploadProvider>
+            {/*
+              * visibleToasts caps the stack at two cards: a third toast pushes the
+              * oldest out instead of piling up the viewport, which on a phone-sized
+              * screen used to bury the whole UI.
+              */}
             <Toaster
                 position="bottom-right"
                 closeButton
+                visibleToasts={2}
                 toastOptions={{
                     style: {
                         background: '#fafaf9',

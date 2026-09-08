@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl, buildQueryString } from './client';
+import { ApiError, apiFetch, apiUrl, buildQueryString } from './client';
 import type { CursorPaginatedResponse } from '../types/api';
 import type {
     MediaItem,
@@ -147,4 +147,44 @@ export function downloadUrl(id: string): string {
  */
 export function archiveUrl(): string {
     return apiUrl('/media/archive');
+}
+
+export interface ArchiveProgress {
+    status: 'preparing' | 'streaming' | 'completed' | 'failed' | 'cancelled';
+    totalItems: number;
+    completedItems: number;
+    /** 0 when the server could not size the selection — render as indeterminate. */
+    totalBytes: number;
+    sentBytes: number;
+    fileName: string;
+    error?: string;
+}
+
+/**
+ * How far along an archive download is.
+ *
+ * Polled rather than measured locally, because the page never sees the bytes: the
+ * zip is fetched by a form navigation so that the browser's own download manager
+ * owns it (see DownloadProvider), which is what makes it a real download on a
+ * phone — and what leaves the app with nothing to observe.
+ *
+ * Null means the server has no record of this token, which for a download that has
+ * only just been submitted means "not yet", and later means it has expired.
+ */
+export async function fetchArchiveProgress(token: string): Promise<ArchiveProgress | null> {
+    try {
+        return await apiFetch<ArchiveProgress>(`/media/archive/${token}/progress`);
+    }
+    catch (err) {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+    }
+}
+
+/**
+ * Ask the server to stop writing an archive. The transfer belongs to the browser,
+ * so this cannot cancel it directly — ending the response is what interrupts it.
+ */
+export function cancelArchive(token: string): Promise<{ cancelled: boolean }> {
+    return apiFetch(`/media/archive/${token}/cancel`, { method: 'POST' });
 }

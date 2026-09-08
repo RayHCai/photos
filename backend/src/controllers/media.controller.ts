@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as mediaService from '../services/media.service.js';
 import * as archiveService from '../services/archive.service.js';
+import * as archiveProgress from '../services/archiveProgress.service.js';
 import { asyncHandler } from '../utils/async.js';
 import { extractPagination } from '../utils/db.js';
 import { cachedRedirect } from '../utils/response.js';
@@ -165,17 +166,78 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
  * Everything that can be validated is validated before streamArchive is called.
  */
 export const archive = asyncHandler(async (req: Request, res: Response) => {
-    const ids = archiveService.parseArchiveIds(req.body.ids);
-    logger.info({ count: ids.length }, 'archive requested');
+    const progressToken = (req.body.progressToken as string | undefined) ?? null;
 
-    const entries = await mediaService.getArchiveEntries(ids);
-    if (entries.length === 0) throw new AppError(404, 'None of these items exist');
+    try {
+        const ids = archiveService.parseArchiveIds(req.body.ids);
+        logger.info({ count: ids.length }, 'archive requested');
 
-    await archiveService.streamArchive(
-        res,
-        entries,
-        archiveService.archiveFileName(entries.length)
-    );
+        /**
+         * Recorded before the work starts, so the client's poll has something to
+         * find from its first tick. A poll that finds nothing cannot tell a request
+         * that was rejected from one that has not arrived yet, and can only sit
+         * there until it gives up — whereas a record can carry the rejection.
+         */
+        if (progressToken) await archiveProgress.startProgress(progressToken, ids.length);
+
+        const entries = await mediaService.getArchiveEntries(ids);
+        if (entries.length === 0) throw new AppError(404, 'None of these items exist');
+
+        await archiveService.streamArchive(
+            res,
+            entries,
+            archiveService.archiveFileName(entries.length),
+            progressToken
+        );
+    }
+    catch (err) {
+        /**
+         * The response is a download in a tab or a hidden frame, so the status code
+         * this rethrow produces is read by nobody. The progress record is the only
+         * channel back to the app — and it is written even for a failure that
+         * happened before startProgress, since the alternative is a panel that waits
+         * out its timeout on a request that was rejected immediately.
+         */
+        if (progressToken) {
+            await archiveProgress.finishProgress(
+                progressToken,
+                'failed',
+                err instanceof AppError ? err.message : 'Download failed'
+            );
+        }
+        throw err;
+    }
+});
+
+/**
+ * Reports how far along an archive download is.
+ *
+ * Polled rather than pushed, and separate from the download itself because the
+ * download is a form navigation the page never sees the bytes of. See
+ * archiveProgress.service.
+ */
+export const archiveProgressStatus = asyncHandler(async (req: Request, res: Response) => {
+    const progress = await archiveProgress.readProgress(req.params.token as string);
+    if (!progress) throw new AppError(404, 'No such download');
+    // A readout that changes every half-second, and a stale one would show a
+    // download stuck at a percentage it left long ago.
+    res.set('Cache-Control', 'no-store');
+    res.json(progress);
+});
+
+/**
+ * Stop an archive that is still being written.
+ *
+ * The bytes belong to the browser's download manager, so this cannot reach in and
+ * cancel the transfer; it raises a flag the streaming request picks up, which ends
+ * the response and leaves the download interrupted — which is what a cancel looks
+ * like from the browser's side.
+ */
+export const cancelArchive = asyncHandler(async (req: Request, res: Response) => {
+    const token = req.params.token as string;
+    const found = await archiveProgress.requestCancel(token);
+    logger.info({ found }, 'archive cancel requested');
+    res.json({ cancelled: found });
 });
 
 export const checkDuplicates = asyncHandler(async (req: Request, res: Response) => {

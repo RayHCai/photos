@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import * as mediaController from '../controllers/media.controller.js';
+import { ARCHIVE_TOKEN_PATTERN } from '../services/archiveProgress.service.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 
@@ -59,8 +60,39 @@ router.post(
  */
 router.post(
     '/archive',
-    validate({ body: z.object({ ids: z.string().min(1) }) }),
+    validate({
+        body: z.object({
+            ids: z.string().min(1),
+            /**
+             * Client-generated id the download is reported under. Optional: the
+             * archive streams the same either way, and a client that does not
+             * want a readout simply omits it. Constrained because it becomes part
+             * of a Redis key.
+             */
+            progressToken: z.string().regex(ARCHIVE_TOKEN_PATTERN).optional(),
+        }),
+    }),
     mediaController.archive
+);
+
+/**
+ * Progress for an archive in flight, and a way to stop it. Both are separate
+ * requests because the download itself is a navigation whose response belongs to
+ * the browser — nothing about it is observable from the page.
+ *
+ * Declared ahead of `/:id`, which would otherwise shadow nothing here (these have
+ * three path segments) but reads better next to the endpoint they describe.
+ */
+const archiveTokenParams = { params: z.object({ token: z.string().regex(ARCHIVE_TOKEN_PATTERN) }) };
+router.get(
+    '/archive/:token/progress',
+    validate(archiveTokenParams),
+    mediaController.archiveProgressStatus
+);
+router.post(
+    '/archive/:token/cancel',
+    validate(archiveTokenParams),
+    mediaController.cancelArchive
 );
 
 router.get('/:id', mediaController.getById);

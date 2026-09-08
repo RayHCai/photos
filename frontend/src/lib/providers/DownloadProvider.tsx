@@ -4,12 +4,23 @@ import {
     createContext,
     useReducer,
     useCallback,
+    useEffect,
     useMemo,
     useRef,
     type ReactNode,
 } from 'react';
 import { toast } from 'sonner';
 import { blocksAutomaticDownloads } from '@/lib/utils/platform';
+import {
+    archiveDetail,
+    archivePercent,
+    isArchiveFinished,
+} from '@/lib/utils/archiveProgress';
+import {
+    cancelArchive,
+    fetchArchiveProgress,
+    type ArchiveProgress,
+} from '@/lib/api/media';
 
 /** A single file to download. `url` is the fully-resolved endpoint to fetch bytes from. */
 export interface DownloadRequest {
@@ -23,21 +34,31 @@ export interface DownloadRequest {
 
 export interface DownloadOptions {
     /**
-     * Endpoint that streams a zip of the requested ids, used to turn a selection
-     * into a single download on platforms that will not accept several. Omit it and
-     * a selection is fetched file by file instead — correct on desktop, and the
-     * only option in contexts with no archive endpoint (a public share link).
+     * Endpoint that streams a zip of the requested ids, which is how a selection of
+     * more than one is downloaded wherever there is one to call. Omit it and a
+     * selection is fetched file by file instead — the only option in contexts with
+     * no archive endpoint, such as a public share link, and poor everywhere else.
      */
     archiveUrl?: string;
 }
 
 type DownloadStatus = 'pending' | 'downloading' | 'completed' | 'failed';
 
+/**
+ * `archive` rows are one zip the server builds from a whole selection. The bytes
+ * never pass through the page, so unlike a `file` row their progress is reported
+ * by the server rather than measured here — see startArchive.
+ */
+type DownloadKind = 'file' | 'archive';
+
 interface DownloadItem {
     key: string;
     fileName: string;
+    kind: DownloadKind;
     status: DownloadStatus;
     progress: number;
+    /** Second line under the name, e.g. "12 of 40 files · 340 MB of 1.2 GB". */
+    detail?: string;
     error?: string;
 }
 
@@ -50,9 +71,16 @@ interface DownloadState {
 const FINISHED_STATUSES: readonly DownloadStatus[] = ['completed', 'failed'];
 
 type DownloadAction =
-    | { type: 'ADD'; items: Array<{ key: string; fileName: string }> }
+    | { type: 'ADD'; kind: DownloadKind; items: Array<{ key: string; fileName: string }> }
     | { type: 'SET_DOWNLOADING'; key: string }
     | { type: 'SET_PROGRESS'; key: string; progress: number }
+    | {
+        type: 'SET_ARCHIVE_PROGRESS';
+        key: string;
+        fileName: string;
+        progress: number;
+        detail: string;
+    }
     | { type: 'SET_NAME'; key: string; fileName: string }
     | { type: 'SET_COMPLETED'; key: string }
     | { type: 'SET_FAILED'; keys: string[]; error: string }
@@ -80,6 +108,7 @@ function downloadReducer(state: DownloadState, action: DownloadAction): Download
                 ...action.items.map((i) => ({
                     key: i.key,
                     fileName: i.fileName,
+                    kind: action.kind,
                     status: 'pending' as const,
                     progress: 0,
                 })),
@@ -94,6 +123,16 @@ function downloadReducer(state: DownloadState, action: DownloadAction): Download
         return {
             ...state,
             items: patchItems(state.items, [action.key], { progress: action.progress }),
+        };
+    case 'SET_ARCHIVE_PROGRESS':
+        return {
+            ...state,
+            items: patchItems(state.items, [action.key], {
+                status: 'downloading',
+                fileName: action.fileName,
+                progress: action.progress,
+                detail: action.detail,
+            }),
         };
     case 'SET_NAME':
         return {
@@ -255,37 +294,87 @@ function openDownloadTab(url: string) {
 }
 
 /**
- * Post the selection to the archive endpoint, targeting a new tab for the same
- * reason as openDownloadTab.
+ * Post a selection to the archive endpoint as a navigation, so the response — a
+ * zip streamed as it is built — belongs to the browser's download manager rather
+ * than to this page. That costs no memory here, survives the app being
+ * backgrounded, and is the only shape of download a phone reliably accepts.
  *
- * `_blank` on every call rather than a fixed window name: a name would reuse one
- * tab, and a reused tab brings its spent allowance with it.
+ * Where it navigates differs by platform, and only by platform:
  *
- * An error response is rendered in that tab rather than reported here — a JSON body
- * the user has to read, which is poor, but this is a tab they can close and not the
- * app being replaced. A hidden frame would let us read the error out and toast it,
- * and cost every download after the first.
+ * - Handoff platforms get a new tab, because Chrome's download limiter counts per
+ *   tab and a fresh tab has its full allowance (see openDownloadTab). `_blank`
+ *   every time rather than a fixed name, since a reused tab brings its spent
+ *   allowance with it.
+ * - Everywhere else a hidden iframe, which downloads just as well without a tab
+ *   flickering open and shut on every selection.
+ *
+ * The response is never read either way: an error arrives as a JSON body nobody
+ * sees, which is why the same failure is also recorded against `progressToken` and
+ * surfaced by the panel.
  */
-function postArchiveInNewTab(action: string, ids: string[]) {
+function submitArchiveRequest(action: string, ids: string[], progressToken: string) {
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = action;
-    form.target = '_blank';
     form.style.display = 'none';
+
+    let frame: HTMLIFrameElement | null = null;
+    if (requiresBrowserHandoff()) {
+        form.target = '_blank';
+    }
+    else {
+        frame = document.createElement('iframe');
+        // Unique per download: two selections started seconds apart must not
+        // navigate the same frame, which would cancel the first.
+        frame.name = `archive-${progressToken}`;
+        frame.style.display = 'none';
+        document.body.appendChild(frame);
+        form.target = frame.name;
+    }
 
     // One field rather than one input per id: a selection of two thousand would
     // otherwise put two thousand nodes in the document while a tap is handled.
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'ids';
-    input.value = ids.join(',');
-    form.appendChild(input);
+    const idsField = document.createElement('input');
+    idsField.type = 'hidden';
+    idsField.name = 'ids';
+    idsField.value = ids.join(',');
+    form.appendChild(idsField);
+
+    const tokenField = document.createElement('input');
+    tokenField.type = 'hidden';
+    tokenField.name = 'progressToken';
+    tokenField.value = progressToken;
+    form.appendChild(tokenField);
 
     document.body.appendChild(form);
     form.submit();
 
-    window.setTimeout(() => form.remove(), HANDOFF_CLEANUP_DELAY_MS);
+    window.setTimeout(() => {
+        form.remove();
+        // Safe by now: once the attachment headers have arrived the browser has
+        // taken the transfer over, and it no longer belongs to this frame.
+        frame?.remove();
+    }, HANDOFF_CLEANUP_DELAY_MS);
 }
+
+/** How often the panel asks the server how far along an archive is. */
+const ARCHIVE_POLL_INTERVAL_MS = 700;
+
+/**
+ * How long to keep polling for an archive the server has no record of before
+ * calling it a failure. Generous: this covers the request being in flight, the
+ * server opening its first object, and a phone on a slow connection — and a
+ * request that really was rejected is normally reported through the record rather
+ * than through this timeout.
+ */
+const ARCHIVE_START_GRACE_MS = 30_000;
+
+/**
+ * How long the poll keeps trying an API that is not answering at all. Past this
+ * the panel stops describing the download rather than keep a timer running against
+ * a backend that may be down for the rest of the session.
+ */
+const ARCHIVE_UNREACHABLE_LIMIT_MS = 60_000;
 
 /**
  * Fetch a file into a Blob, reporting byte-level progress when the body can be
@@ -341,6 +430,173 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     // Replaced after every cancellation so a new batch is not born aborted.
     const abortRef = useRef<AbortController | null>(null);
     const queueRef = useRef<QueueEntry[]>([]);
+    /** Live archive downloads, keyed by progress token, each holding its poll. */
+    const archivePollsRef = useRef(new Map<string, () => void>());
+
+    /**
+     * Stop polling on unmount.
+     *
+     * The download itself is unaffected — it belongs to the browser by then — but a
+     * timer that outlives the tree dispatches into a dead reducer once a second for
+     * as long as the archive runs.
+     */
+    useEffect(() => {
+        const polls = archivePollsRef.current;
+        return () => {
+            for (const stop of polls.values()) stop();
+            polls.clear();
+        };
+    }, []);
+
+    /**
+     * Follow one archive to its end, reporting it into the panel.
+     *
+     * Polled, because there is nothing local to observe: the zip is a navigation
+     * whose response the browser owns, and the server is the only party that knows
+     * how much of it has been written (see archiveProgress.service on the backend).
+     */
+    const pollArchive = useCallback((token: string) => {
+        let timer = 0;
+        let stopped = false;
+        let everSeen = false;
+        /** When the polls started failing outright, or 0 while they are landing. */
+        let unreachableSince = 0;
+        const startedAt = Date.now();
+
+        const stop = () => {
+            stopped = true;
+            window.clearTimeout(timer);
+            archivePollsRef.current.delete(token);
+        };
+
+        const finish = (progress: ArchiveProgress) => {
+            stop();
+            if (progress.status !== 'completed') {
+                dispatch({
+                    type: 'SET_FAILED',
+                    keys: [token],
+                    error: progress.status === 'cancelled'
+                        ? 'Cancelled'
+                        : progress.error || 'Download failed',
+                });
+                return;
+            }
+            dispatch({
+                type: 'SET_ARCHIVE_PROGRESS',
+                key: token,
+                fileName: progress.fileName,
+                progress: 100,
+                detail: archiveDetail(progress),
+            });
+            dispatch({ type: 'SET_COMPLETED', key: token });
+        };
+
+        /**
+         * Give up on reporting, without claiming the download failed.
+         *
+         * Reached when the transfer has outlived anything that can describe it — the
+         * record expired, or the API stopped answering. The zip may well still be
+         * arriving; it belongs to the browser and nothing here can end it. Saying
+         * "failed" would be a guess, and a wrong one most of the time.
+         */
+        const stopTracking = () => {
+            stop();
+            dispatch({ type: 'SET_NAME', key: token, fileName: 'Download in progress' });
+            dispatch({ type: 'SET_COMPLETED', key: token });
+        };
+
+        const tick = async () => {
+            let progress: ArchiveProgress | null = null;
+            try {
+                progress = await fetchArchiveProgress(token);
+                unreachableSince = 0;
+            }
+            catch {
+                // A poll that fails is not a download that failed — the transfer is
+                // the browser's and is unaffected. Keep asking, for a while.
+                unreachableSince = unreachableSince || Date.now();
+            }
+            if (stopped) return;
+
+            if (progress) {
+                everSeen = true;
+                if (isArchiveFinished(progress.status)) {
+                    finish(progress);
+                    return;
+                }
+                dispatch({
+                    type: 'SET_ARCHIVE_PROGRESS',
+                    key: token,
+                    fileName: progress.fileName || 'Preparing zip…',
+                    progress: archivePercent(progress),
+                    detail: archiveDetail(progress),
+                });
+            }
+            else if (unreachableSince) {
+                // Bounded, or a backend that stays down leaves a timer polling it
+                // every second for the rest of the session.
+                if (Date.now() - unreachableSince > ARCHIVE_UNREACHABLE_LIMIT_MS) {
+                    if (everSeen) stopTracking();
+                    else {
+                        stop();
+                        dispatch({
+                            type: 'SET_FAILED',
+                            keys: [token],
+                            error: 'Download did not start',
+                        });
+                    }
+                    return;
+                }
+            }
+            else if (everSeen) {
+                // The record was there and is gone: its TTL outlives any gap between
+                // polls, so in practice this is a backend that restarted mid-download.
+                stopTracking();
+                return;
+            }
+            else if (Date.now() - startedAt > ARCHIVE_START_GRACE_MS) {
+                // The server is answering and has never heard of this token, so the
+                // request did not reach the endpoint — the panel must not sit at
+                // "Preparing…" forever for a download that is not happening.
+                stop();
+                dispatch({
+                    type: 'SET_FAILED',
+                    keys: [token],
+                    error: 'Download did not start',
+                });
+                return;
+            }
+
+            timer = window.setTimeout(tick, ARCHIVE_POLL_INTERVAL_MS);
+        };
+
+        archivePollsRef.current.set(token, stop);
+        tick();
+    }, []);
+
+    /**
+     * Download a selection as one zip built by the server.
+     *
+     * Used on every platform, not only the ones that need the handoff: one archive
+     * is one download, where a selection fetched file by file is a download per
+     * file — which a desktop browser prompts about and a phone refuses outright.
+     */
+    const startArchive = useCallback(
+        (requests: DownloadRequest[], archiveEndpoint: string) => {
+            const token = crypto.randomUUID();
+            dispatch({
+                type: 'ADD',
+                kind: 'archive',
+                items: [{ key: token, fileName: 'Preparing zip…' }],
+            });
+            dispatch({ type: 'SET_DOWNLOADING', key: token });
+            // Synchronous, and before the poll: this is what spends the tap's user
+            // activation, and awaiting anything first would lose it.
+            submitArchiveRequest(archiveEndpoint, requests.map((r) => r.id), token);
+            pollArchive(token);
+        },
+        [pollArchive]
+    );
 
     const processOne = useCallback(async (entry: QueueEntry) => {
         const { key, request } = entry;
@@ -380,8 +636,26 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         abortRef.current = new AbortController();
         const queued = queueRef.current.map((e) => e.key);
         queueRef.current = [];
-        if (queued.length > 0) {
-            dispatch({ type: 'SET_FAILED', keys: queued, error: 'Cancelled' });
+
+        /**
+         * An archive cannot be aborted from here — the transfer belongs to the
+         * browser's download manager, and this page has no handle on it. The server
+         * does: ending the response is what interrupts the download, so the cancel
+         * goes there. Reported as cancelled immediately rather than waiting for the
+         * poll to confirm, so the button does something the moment it is pressed.
+         */
+        const archives = [...archivePollsRef.current.keys()];
+        for (const token of archives) {
+            archivePollsRef.current.get(token)?.();
+            cancelArchive(token).catch(() => {
+                // Best effort. The panel has stopped tracking it either way, and a
+                // zip that keeps arriving is a far smaller surprise than an error.
+            });
+        }
+
+        const cancelled = [...queued, ...archives];
+        if (cancelled.length > 0) {
+            dispatch({ type: 'SET_FAILED', keys: cancelled, error: 'Cancelled' });
         }
     }, []);
 
@@ -430,46 +704,47 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
      * And each download needs a tab of its own, because the limiter's allowance is
      * per tab — see openDownloadTab.
      *
-     * One tab yields one download, so a selection cannot be N of these. It goes to
-     * the archive endpoint as a single zip instead. Returns false when there is no
-     * archive endpoint to use, leaving the caller to fall back.
+     * A selection is a zip before it ever reaches here (see triggerDownload), so
+     * what is left is a single file, or a selection in a context with no archive
+     * endpoint. Returns false for the latter, leaving the caller to fall back.
      */
-    const handOffToBrowser = useCallback(
-        (requests: DownloadRequest[], options: DownloadOptions): boolean => {
-            if (requests.length === 1) {
-                toast.success('Saving to your downloads');
-                openDownloadTab(requests[0]!.url);
-                return true;
-            }
-            if (options.archiveUrl) {
-                postArchiveInNewTab(options.archiveUrl, requests.map((r) => r.id));
-                // The zip is built as it is sent, so the browser has nothing to show
-                // until the first object is open. Without this the tap looks ignored.
-                toast.success(`Preparing ${requests.length} files as a zip…`);
-                return true;
-            }
+    const handOffToBrowser = useCallback((requests: DownloadRequest[]): boolean => {
+        if (requests.length === 1) {
+            toast.success('Saving to your downloads');
+            openDownloadTab(requests[0]!.url);
+            return true;
+        }
 
-            /**
-             * No archive endpoint in this context — a public share link, which has no
-             * session to authenticate one with. The fetch-and-save path below is all
-             * that is left and this platform will refuse most of those saves, so say
-             * so rather than let the panel report a batch of downloads that did not
-             * happen. The panel claiming success while nothing arrives is the exact
-             * complaint that started this.
-             */
-            toast.warning(
-                `Your browser will only save one of these at a time — open items individually to save all ${requests.length}.`
-            );
-            return false;
-        },
-        []
-    );
+        /**
+         * No archive endpoint in this context — a public share link, which has no
+         * session to authenticate one with. The fetch-and-save path below is all
+         * that is left and this platform will refuse most of those saves, so say
+         * so rather than let the panel report a batch of downloads that did not
+         * happen. The panel claiming success while nothing arrives is the exact
+         * complaint that started this.
+         */
+        toast.warning(
+            `Your browser will only save one of these at a time — open items individually to save all ${requests.length}.`
+        );
+        return false;
+    }, []);
 
     const triggerDownload = useCallback(
         (requests: DownloadRequest[], options: DownloadOptions = {}) => {
             if (requests.length === 0) return;
 
-            if (requiresBrowserHandoff() && handOffToBrowser(requests, options)) return;
+            /**
+             * Any selection with somewhere to build a zip becomes one, on every
+             * platform. Downloading file by file means a download per file, which a
+             * phone refuses outright and a desktop browser interrupts with a
+             * permission prompt — and it is also N round trips where this is one.
+             */
+            if (requests.length > 1 && options.archiveUrl) {
+                startArchive(requests, options.archiveUrl);
+                return;
+            }
+
+            if (requiresBrowserHandoff() && handOffToBrowser(requests)) return;
 
             if (!abortRef.current) abortRef.current = new AbortController();
 
@@ -480,6 +755,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
             dispatch({
                 type: 'ADD',
+                kind: 'file',
                 items: entries.map((e) => ({
                     key: e.key,
                     fileName: e.request.fileName || 'Preparing…',
@@ -489,7 +765,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
             queueRef.current.push(...entries);
             processQueue();
         },
-        [processQueue, handOffToBrowser]
+        [processQueue, handOffToBrowser, startArchive]
     );
 
     const clearFinished = useCallback(() => {

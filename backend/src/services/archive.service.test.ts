@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PassThrough, Readable } from 'node:stream';
 import type { Response } from 'express';
 
@@ -26,8 +26,26 @@ vi.mock('../utils/logger.js', () => ({
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-const { streamArchive, uniqueNames, parseArchiveIds, archiveFileName, MAX_ARCHIVE_ITEMS }
-    = await import('./archive.service.js');
+/**
+ * Stubbed for the same reason as s3: the real one opens a Redis connection at
+ * import time, by way of config/env. It is also what lets these tests read the
+ * progress an archive reported without running a Redis.
+ */
+vi.mock('./archiveProgress.service.js', () => ({
+    beginStreaming: vi.fn(async () => {}),
+    recordProgress: vi.fn(async () => ({ cancelRequested: false })),
+    finishProgress: vi.fn(async () => {}),
+}));
+
+const {
+    streamArchive,
+    uniqueNames,
+    parseArchiveIds,
+    archiveFileName,
+    estimateArchiveBytes,
+    MAX_ARCHIVE_ITEMS,
+} = await import('./archive.service.js');
+const progress = vi.mocked(await import('./archiveProgress.service.js'));
 
 /** Local file header, and end of central directory. */
 const LOCAL_FILE_HEADER = '504b0304';
@@ -208,5 +226,96 @@ describe('streamArchive', () => {
 
         expect(buf.toString('latin1')).toContain('IMG_0001.jpg');
         expect(buf.toString('latin1')).toContain('IMG_0001 (1).jpg');
+    });
+});
+
+describe('estimateArchiveBytes', () => {
+    it('sums the entry sizes', () => {
+        expect(
+            estimateArchiveBytes([
+                { key: 'a', fileName: 'a.jpg', size: 1000 },
+                { key: 'b', fileName: 'b.jpg', size: 2500 },
+            ])
+        ).toBe(3500);
+    });
+
+    it('is zero when no size is known, which the client reads as indeterminate', () => {
+        // An entry with no size still archives; it just cannot be counted.
+        expect(estimateArchiveBytes([{ key: 'a', fileName: 'a.jpg' }])).toBe(0);
+    });
+});
+
+describe('streamArchive progress', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(progress.recordProgress).mockResolvedValue({ cancelRequested: false });
+    });
+
+    const ENTRIES = [
+        { key: 'originals/one.jpg', fileName: 'one.jpg', size: 23 },
+        { key: 'originals/two.jpg', fileName: 'two.jpg', size: 23 },
+    ];
+
+    it('publishes the totals the panel counts towards, then a terminal status', async () => {
+        const { res, sink } = fakeResponse();
+        const bytes = collect(sink);
+
+        await streamArchive(res, ENTRIES, 'x.zip', 'token-abcdefgh');
+        await bytes;
+
+        expect(progress.beginStreaming).toHaveBeenCalledWith('token-abcdefgh', {
+            totalItems: 2,
+            totalBytes: 46,
+            fileName: 'x.zip',
+        });
+        // The last sample the throttle produced is generally a beat behind, so the
+        // panel would otherwise settle on "1 of 2" for a download that finished.
+        expect(progress.recordProgress).toHaveBeenLastCalledWith('token-abcdefgh', {
+            completedItems: 2,
+            sentBytes: expect.any(Number),
+        });
+        expect(progress.finishProgress).toHaveBeenCalledWith('token-abcdefgh', 'completed');
+    });
+
+    it('reports bytes as they reach the socket, not as entries finish', async () => {
+        const { res, sink } = fakeResponse();
+        const bytes = collect(sink);
+
+        await streamArchive(res, ENTRIES, 'x.zip', 'token-abcdefgh');
+        const buf = await bytes;
+
+        // A single large video would otherwise sit at one percentage for minutes.
+        const [, firstSample] = vi.mocked(progress.recordProgress).mock.calls[0]!;
+        expect(firstSample.sentBytes).toBeGreaterThan(0);
+        expect(firstSample.sentBytes).toBeLessThanOrEqual(buf.length);
+    });
+
+    it('says nothing when no token was supplied', async () => {
+        const { res, sink } = fakeResponse();
+        const bytes = collect(sink);
+
+        await streamArchive(res, ENTRIES, 'x.zip');
+        await bytes;
+
+        expect(progress.beginStreaming).not.toHaveBeenCalled();
+        expect(progress.recordProgress).not.toHaveBeenCalled();
+        expect(progress.finishProgress).not.toHaveBeenCalled();
+    });
+
+    it('tears the archive down when the client has asked to cancel', async () => {
+        vi.mocked(progress.recordProgress).mockResolvedValue({ cancelRequested: true });
+        const { res, sink } = fakeResponse();
+        // The response is destroyed rather than ended, so the sink errors — that
+        // truncation is the cancel, and is the only signal the protocol has here.
+        sink.on('error', () => {});
+
+        await streamArchive(res, ENTRIES, 'x.zip', 'token-abcdefgh');
+
+        expect(progress.finishProgress).toHaveBeenCalledWith(
+            'token-abcdefgh',
+            'cancelled',
+            undefined
+        );
+        expect(sink.destroyed).toBe(true);
     });
 });

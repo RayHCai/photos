@@ -1,14 +1,23 @@
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import type { Response } from 'express';
 import { ZipArchive } from 'archiver';
 import * as s3Service from './s3.service.js';
+import * as archiveProgress from './archiveProgress.service.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { fireAndForget } from '../utils/async.js';
 import { logger } from '../utils/logger.js';
 
 /** One member of the archive: where to read it from, and what to call it inside. */
 export interface ArchiveEntry {
     key: string;
     fileName: string;
+    /**
+     * Size of the original in bytes, used only to give the download a total to
+     * count towards. Optional because the archive itself does not need it: an
+     * entry with no size still streams, it just leaves the progress readout
+     * indeterminate.
+     */
+    size?: number;
 }
 
 /**
@@ -115,14 +124,32 @@ async function* readObject(entry: ArchiveEntry) {
 }
 
 /**
+ * Expected size of the payload, which is what the progress readout counts
+ * towards.
+ *
+ * The zip framing adds a little on top of this (a local header and a central
+ * directory record per entry) and an unreadable object subtracts its whole
+ * contribution, so treat it as an estimate — on photo and video originals both
+ * errors are a rounding difference. Zero means no size was known for anything,
+ * which the client renders as indeterminate rather than as an empty bar.
+ */
+export function estimateArchiveBytes(entries: ArchiveEntry[]): number {
+    return entries.reduce((sum, entry) => sum + (entry.size ?? 0), 0);
+}
+
+/** How often progress is published while bytes are moving. */
+const PROGRESS_INTERVAL_MS = 500;
+
+/**
  * Stream a zip of `entries` to the response as an attachment.
  *
  * Deliberately a stream with no Content-Length. The alternative — build the
  * archive, measure it, then send — needs the whole selection in memory or on disk
  * before the first byte moves, which is what made the browser-side version of
  * this unusable (a 150-photo batch peaked near 1.5 GB). The cost is that the
- * browser shows an indeterminate progress bar, since it cannot know the total in
- * advance.
+ * browser can only show an indeterminate progress bar, since it cannot know the
+ * total in advance — which is what `progressToken` is for: the sizes are known
+ * here, so the app reports the real figure itself (see archiveProgress.service).
  *
  * The response is the archive, so once the first byte is written there is no way
  * to report a failure except by ending the stream. Everything that can fail per
@@ -131,7 +158,8 @@ async function* readObject(entry: ArchiveEntry) {
 export async function streamArchive(
     res: Response,
     entries: ArchiveEntry[],
-    archiveName: string
+    archiveName: string,
+    progressToken?: string | null
 ): Promise<void> {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', s3Service.contentDisposition(archiveName));
@@ -143,6 +171,90 @@ export async function streamArchive(
 
     const archive = new ZipArchive(ZIP_OPTIONS);
 
+    let sentBytes = 0;
+    let completedItems = 0;
+    /** Set once the archive has been torn down, so teardown only runs once. */
+    let stopped = false;
+    let lastPublishAt = 0;
+    let publishInFlight = false;
+
+    /**
+     * Resolves when the archive is torn down, which is the only way some teardowns
+     * become observable — see the race below finalize().
+     */
+    let markStopped: () => void;
+    const stoppedSignal = new Promise<void>((resolve) => {
+        markStopped = resolve;
+    });
+
+    // Captured as a const so its narrowing survives into the callbacks below.
+    const token = progressToken ?? null;
+
+    const stop = (status: archiveProgress.ArchiveProgressStatus, error?: string) => {
+        if (stopped) return;
+        stopped = true;
+        archive.abort();
+        if (token) {
+            fireAndForget(
+                () => archiveProgress.finishProgress(token, status, error),
+                (err) => logger.warn({ err, archiveName }, 'archive: final status not recorded')
+            );
+        }
+        res.destroy();
+        markStopped();
+    };
+
+    /**
+     * Publish a sample, at most one every PROGRESS_INTERVAL_MS and never two at
+     * once — this is called per chunk off the socket, which for a large selection
+     * is tens of thousands of times.
+     *
+     * The reply carries the answer to "has the user cancelled", because a request
+     * already streaming its response has no other moment to find out. See
+     * archiveProgress.recordProgress.
+     */
+    const publishProgress = () => {
+        if (!token || stopped || publishInFlight) return;
+        const now = Date.now();
+        if (now - lastPublishAt < PROGRESS_INTERVAL_MS) return;
+        lastPublishAt = now;
+        publishInFlight = true;
+        fireAndForget(
+            async () => {
+                try {
+                    const { cancelRequested } = await archiveProgress.recordProgress(token, {
+                        completedItems,
+                        sentBytes,
+                    });
+                    if (cancelRequested) {
+                        logger.info({ archiveName }, 'archive cancelled by client');
+                        stop('cancelled');
+                    }
+                }
+                finally {
+                    publishInFlight = false;
+                }
+            },
+            (err) => logger.warn({ err, archiveName }, 'archive: progress sample not published')
+        );
+    };
+
+    /**
+     * Counts the bytes on their way to the socket.
+     *
+     * A pass-through rather than archiver's own `progress` event, which only fires
+     * as each entry completes: one 4 GB video would otherwise sit at the same
+     * percentage for minutes. Chunk sizes here are what the client actually
+     * receives, so this measures the download rather than the read from S3.
+     */
+    const counter = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+            sentBytes += chunk.length;
+            publishProgress();
+            callback(null, chunk);
+        },
+    });
+
     archive.on('warning', (err) => {
         // ENOENT here is a missing entry, which readObject has already logged and
         // absorbed; anything else is worth seeing.
@@ -150,7 +262,10 @@ export async function streamArchive(
     });
     archive.on('error', (err) => {
         logger.error({ err, archiveName }, 'archive failed');
-        res.destroy();
+        stop('failed', 'Archive failed');
+    });
+    archive.on('progress', (data: { entries: { processed: number } }) => {
+        completedItems = data.entries.processed;
     });
 
     /**
@@ -162,16 +277,58 @@ export async function streamArchive(
     res.on('close', () => {
         if (!res.writableEnded) {
             logger.info({ archiveName }, 'archive aborted by client');
-            archive.abort();
+            stop('cancelled');
         }
     });
 
-    archive.pipe(res);
+    archive.pipe(counter).pipe(res);
+
+    if (token) {
+        await archiveProgress.beginStreaming(token, {
+            totalItems: entries.length,
+            totalBytes: estimateArchiveBytes(entries),
+            fileName: archiveName,
+        });
+    }
 
     for (const entry of uniqueNames(entries)) {
         archive.append(Readable.from(readObject(entry)), { name: entry.fileName });
     }
 
-    await archive.finalize();
+    /**
+     * Raced against teardown rather than simply awaited.
+     *
+     * archiver settles finalize() on its output module emitting `end`, and an abort
+     * mid-stream destroys that module without ever ending it — so on a cancelled or
+     * disconnected download the promise never settles, and awaiting it alone parks
+     * this request handler, and everything it has open, for the life of the process.
+     * (Only an abort raised *before* finalize is called rejects promptly.)
+     */
+    const finalized: Promise<unknown> = archive
+        .finalize()
+        .then(() => null)
+        .catch((err: unknown) => err ?? new Error('archive aborted'));
+
+    const failure = await Promise.race([finalized, stoppedSignal.then(() => null)]);
+
+    // Teardown has already published its own terminal status — cancelled by the
+    // user, dropped by the client, or a failure the error handler above reported.
+    if (stopped) return;
+
+    if (failure) {
+        logger.error({ err: failure, archiveName }, 'archive could not be finalized');
+        stop('failed', 'Archive failed');
+        return;
+    }
+
+    if (token) {
+        // The last sample is likely a throttle interval behind, and the panel
+        // should not settle on "38 of 40".
+        await archiveProgress.recordProgress(token, {
+            completedItems: entries.length,
+            sentBytes,
+        });
+        await archiveProgress.finishProgress(token, 'completed');
+    }
     logger.info({ archiveName, count: entries.length }, 'archive complete');
 }

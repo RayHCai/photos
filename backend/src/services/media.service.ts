@@ -586,7 +586,7 @@ export async function getDownloadUrl(id: string) {
 export async function getArchiveEntries(ids: string[]): Promise<ArchiveEntry[]> {
     const items = await prisma.mediaItem.findMany({
         where: { id: { in: ids } },
-        select: { id: true, originalKey: true, fileName: true },
+        select: { id: true, originalKey: true, fileName: true, fileSize: true },
     });
 
     const byId = new Map(items.map((item) => [item.id, item]));
@@ -598,7 +598,13 @@ export async function getArchiveEntries(ids: string[]): Promise<ArchiveEntry[]> 
     return ids
         .map((id) => byId.get(id))
         .filter((item): item is NonNullable<typeof item> => item !== undefined)
-        .map((item) => ({ key: item.originalKey, fileName: item.fileName }));
+        // fileSize is a BigInt column; the archive only ever sums it into a byte
+        // total, and Number is exact well past any single file's size.
+        .map((item) => ({
+            key: item.originalKey,
+            fileName: item.fileName,
+            size: Number(item.fileSize),
+        }));
 }
 
 /** Grace period before a row with no S3 object is considered an abandoned upload. */

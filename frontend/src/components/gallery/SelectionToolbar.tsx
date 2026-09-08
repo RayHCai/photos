@@ -30,7 +30,7 @@ interface SelectionToolbarProps {
     downloadUrlFn?: (id: string) => string;
     /**
      * Endpoint that streams the selection as one zip, which is how a multi-file
-     * download reaches a phone at all (see DownloadProvider). Defaults to the
+     * download happens on every platform (see DownloadProvider). Defaults to the
      * library's; pass null in a context that has no such endpoint, such as a public
      * share link, and the selection is downloaded file by file instead.
      */
@@ -130,7 +130,10 @@ export function SelectionToolbar({
             })),
             getArchiveUrl ? { archiveUrl: getArchiveUrl() } : {}
         );
-    }, [selection.selectedIds, getDownloadUrl, getArchiveUrl, triggerDownload]);
+        // Safe after the trigger above: the ids are already copied into the request
+        // list, so clearing does not disturb the download in flight.
+        selection.clearSelection();
+    }, [selection, getDownloadUrl, getArchiveUrl, triggerDownload]);
 
     if (!selection.isSelecting) return null;
 

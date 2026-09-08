@@ -17,12 +17,23 @@ export function DownloadProgress() {
     const idle = finished === total;
     const inProgressIndex = Math.min(finished + 1, total);
 
+    /**
+     * A zip is a single row covering a whole selection, so "Downloading 1 of 1"
+     * would be an odd way to describe forty photos in flight. Its own row carries
+     * the counts.
+     */
+    const archiveOnly = items.every((i) => i.kind === 'archive');
+
     const headline = idle
         ? `${pluralize(completed, 'download')} complete${failed > 0 ? `, ${failed} failed` : ''}`
-        : `Downloading ${inProgressIndex} of ${total}`;
+        : archiveOnly
+            ? 'Preparing your download'
+            : `Downloading ${inProgressIndex} of ${total}`;
 
     return (
-        <div className="w-80 rounded-lg bg-white/80 backdrop-blur-xl shadow-2xl shadow-black/8 border border-stone-200/60 overflow-hidden transition-all duration-300">
+        // Width is capped against the viewport as well: at a fixed 20rem the panel
+        // ran under the edge of a small phone screen, hiding the cancel control.
+        <div className="w-[min(20rem,calc(100vw-2.5rem))] rounded-lg bg-white/80 backdrop-blur-xl shadow-2xl shadow-black/8 border border-stone-200/60 overflow-hidden transition-all duration-300">
             {/* Header */}
             <div
                 className="flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors duration-150 hover:bg-stone-50/80"
@@ -86,9 +97,16 @@ export function DownloadProgress() {
 
                             {/* File info */}
                             <div className="flex-1 min-w-0">
-                                <p className="text-[13px] text-stone-700 truncate leading-tight">
-                                    {item.fileName}
-                                </p>
+                                <div className="flex items-baseline gap-2">
+                                    <p className="flex-1 text-[13px] text-stone-700 truncate leading-tight">
+                                        {item.fileName}
+                                    </p>
+                                    {item.status === 'downloading' && (
+                                        <span className="text-[11px] text-stone-400 tabular-nums flex-shrink-0">
+                                            {item.progress}%
+                                        </span>
+                                    )}
+                                </div>
                                 {item.status === 'downloading' && (
                                     <div className="mt-1.5 h-0.5 w-full bg-stone-100 rounded-full overflow-hidden">
                                         <div
@@ -99,6 +117,13 @@ export function DownloadProgress() {
                                 )}
                                 {item.status === 'pending' && (
                                     <div className="mt-1.5 h-0.5 w-full bg-stone-100 rounded-full" />
+                                )}
+                                {/* A zip is one row for a whole selection, so how far
+                                    through that selection it is only shows here. */}
+                                {item.detail && item.status !== 'failed' && (
+                                    <p className="text-[11px] text-stone-400 mt-1 truncate">
+                                        {item.detail}
+                                    </p>
                                 )}
                                 {item.error && (
                                     <p className="text-[11px] text-red-500 mt-0.5 truncate">

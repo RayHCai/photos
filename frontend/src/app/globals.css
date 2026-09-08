@@ -15,11 +15,13 @@ body {
     --width: 320px;
 }
 
-/* Sonner renders close button as a sibling to the toast, positioned relative to the li wrapper */
-[data-sonner-toaster] li {
-    position: relative;
-}
-
+/*
+ * Do NOT set `position` on the toast <li> here. Sonner absolutely positions every
+ * [data-sonner-toast] inside the fixed <ol> and collapses the stack with transforms;
+ * forcing `position: relative` drops them all into normal flow, so each toast renders
+ * above the last and the stack grows until it fills the viewport (worst on mobile).
+ * The close button below anchors to the toast's own absolute positioning.
+ */
 [data-sonner-toaster] [data-close-button] {
     position: absolute !important;
     top: 50% !important;
