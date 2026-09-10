@@ -327,8 +327,30 @@ resource "aws_cloudfront_distribution" "thumbnails" {
 # been generated yet. That stamped a one-year immutable lifetime on "this thumbnail does
 # not exist", which browsers honoured long after the backfill created it.
 #
-# custom_error_response above bounds CloudFront's own caching; this bounds the viewer's.
-# Viewer-response functions run after the response headers policy, so this wins.
+# custom_error_response above bounds CloudFront's own caching. This was meant to bound the
+# viewer's as well, and it DOES NOT WORK. Measured against the live distribution on
+# 2026-09-10:
+#
+#   curl -sI -H 'Origin: https://rays-photos.vercel.app' \
+#     https://<dist>/thumbnails/2024/01/<nonexistent-uuid>@200w.webp
+#   HTTP/1.1 403 Forbidden
+#   Cache-Control: public, max-age=31536000, immutable   <-- not rewritten
+#   Access-Control-Allow-Origin: https://rays-photos.vercel.app
+#
+# A viewer-response function does not run for a response CloudFront generates itself,
+# which includes the 403 S3 returns through OAC for a key that does not exist. So the
+# response headers policy's immutable Cache-Control lands on every such error, and any
+# browser that requests a thumbnail rung before the worker has written it pins that
+# failure for a year. frontend/public/sw.js already says this in as many words and works
+# around it with `cache: 'reload'`; this comment used to claim the opposite.
+#
+# The real fix is to stop stamping Cache-Control at the edge: set it on the objects at
+# upload time (PutObjectCommand CacheControl in backend/src/services/s3.service.ts plus a
+# matching header in worker/src/worker/s3.py — it becomes a SIGNED header, so the two must
+# agree exactly or every upload fails) and drop custom_headers_config from the response
+# headers policy. That is a coordinated backend/worker/infra change and is left undone
+# deliberately. The function below is kept because it is harmless and does still apply to
+# origin-generated errors.
 resource "aws_cloudfront_function" "no_store_errors" {
   name    = "photos-platform-no-store-errors"
   runtime = "cloudfront-js-2.0"

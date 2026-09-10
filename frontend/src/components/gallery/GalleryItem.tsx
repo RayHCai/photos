@@ -1,13 +1,25 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { PlayCircle, Star } from 'lucide-react';
 import { CDN_CONFIGURED, thumbnailSrcSet, thumbnailUrlFromKey } from '@/lib/api/media';
-import { blurhashToDataUrl } from '@/lib/utils/blurhashCache';
+import { blurhashAverageColor, blurhashToDataUrl } from '@/lib/utils/blurhashCache';
 import { formatDuration } from '@/lib/utils/format';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { useSelectableItem } from '@/lib/hooks/useSelectableItem';
 import type { MediaShellItem } from '@/lib/types/media';
+
+/** Failures before the one retry: 1 drops the srcset, 2 means `src` itself failed. */
+const RETRY_AFTER_FAILURES = 2;
+const RETRY_DELAY_MS = 1200;
+const RETRY_JITTER_MS = 1800;
+
+/**
+ * Cell width below which the blurhash is rendered as a flat average colour instead of a
+ * decoded gradient. A cell this small cannot resolve a 32x32 gradient, so the two look
+ * the same and only one of them costs a canvas encode.
+ */
+const FLAT_PLACEHOLDER_MAX_CELL_PX = 120;
 
 interface GalleryItemProps {
     item: MediaShellItem;
@@ -43,9 +55,23 @@ export const GalleryItem = memo(function GalleryItem({
         onClick: item.processingStatus === 'COMPLETED' ? onClick : undefined,
     });
 
+    /**
+     * Gradient placeholder for a cell big enough to show one; a flat average colour
+     * below that. See blurhashAverageColor for why the cheap path exists — the gradient
+     * costs a canvas round trip and a PNG encode per *unique* hash, which scrolling
+     * forward misses by construction, and a dense mobile grid mounts a hundred new cells
+     * a screenful.
+     */
+    const useFlatPlaceholder = width < FLAT_PLACEHOLDER_MAX_CELL_PX;
+
     const blurDataUrl = useMemo(
-        () => (item.blurHash ? blurhashToDataUrl(item.blurHash) : null),
-        [item.blurHash]
+        () => (item.blurHash && !useFlatPlaceholder ? blurhashToDataUrl(item.blurHash) : null),
+        [item.blurHash, useFlatPlaceholder]
+    );
+
+    const blurColor = useMemo(
+        () => (item.blurHash && useFlatPlaceholder ? blurhashAverageColor(item.blurHash) : null),
+        [item.blurHash, useFlatPlaceholder]
     );
 
     /**
@@ -58,6 +84,7 @@ export const GalleryItem = memo(function GalleryItem({
     const showFavourite = onToggleFavorite && (!hasTouch || isFavorite || isSelecting);
 
     const isReady = item.processingStatus === 'COMPLETED' && item.thumbnailKey;
+    const baseSrc = thumbnailSrc ?? thumbnailUrlFromKey(item.thumbnailKey, item.id);
 
     /**
      * Request CDN thumbnails with CORS so the service worker can read their status.
@@ -80,15 +107,51 @@ export const GalleryItem = memo(function GalleryItem({
      * the candidate a large cell picks. The browser does not try another candidate
      * when the chosen one fails; it renders an empty cell.
      *
-     * Dropping the srcset on error falls back to `src`, the canonical thumbnail,
-     * which always exists. Slightly soft in a large cell, which beats blank.
+     * Dropping the srcset on the first error falls back to `src`, the canonical
+     * thumbnail, which always exists. Slightly soft in a large cell, which beats blank.
      *
-     * Keyed by thumbnailKey rather than a boolean so a recycled cell (this grid is
-     * virtualised, components are reused across items) does not inherit the previous
-     * item's failure.
+     * Beyond that first step this used to be terminal: a second error set the same state
+     * value, React bailed out, no attribute changed, and no further request was ever
+     * made. That turned every *transient* failure into a permanent one — and on a phone
+     * they are not rare, since a dropped packet, a cancelled load, or a service worker
+     * too busy to answer all surface here as an error. The cell then sat on its blurhash
+     * background for as long as it stayed mounted, which is exactly the reported
+     * stuck-blurred thumbnail. One backed-off retry recovers those without turning a
+     * genuinely missing object into a retry loop.
+     *
+     * Keyed by thumbnailKey rather than a counter alone, so a cell that is re-used for a
+     * different item does not inherit the previous one's failures.
      */
-    const [ladderFailedFor, setLadderFailedFor] = useState<string | null>(null);
-    const useSrcSet = !thumbnailSrc && ladderFailedFor !== item.thumbnailKey;
+    const [failures, setFailures] = useState<{ key: string | null; count: number }>({
+        key: null,
+        count: 0,
+    });
+    const failureCount = failures.key === item.thumbnailKey ? failures.count : 0;
+    const useSrcSet = !thumbnailSrc && failureCount === 0;
+
+    /**
+     * Cache-buster for the retry attempt.
+     *
+     * Only the browser's own HTTP cache needs busting: it is what can hold a CDN error
+     * response stamped `immutable`, and the service worker strips the query when it
+     * builds its cache key, so a retry still hits any bytes already stored there.
+     *
+     * Never applied to a caller-supplied `thumbnailSrc`. In presigned mode (and on share
+     * links) that is a signed S3 URL whose query is part of what was signed, so an extra
+     * parameter turns a working image into a 403. Those URLs also expire and are
+     * re-issued, which gives that path its own recovery.
+     */
+    const canRetry = !thumbnailSrc;
+    const [retryToken, setRetryToken] = useState(0);
+
+    useEffect(() => {
+        if (!canRetry || failureCount !== RETRY_AFTER_FAILURES) return;
+        // Jittered, because a stall fails a whole screenful of cells at once and they
+        // must not all come back at the same instant into the congestion that caused it.
+        const delay = RETRY_DELAY_MS + Math.random() * RETRY_JITTER_MS;
+        const timer = setTimeout(() => setRetryToken((t) => t + 1), delay);
+        return () => clearTimeout(timer);
+    }, [canRetry, failureCount]);
 
     return (
         <div
@@ -104,6 +167,7 @@ export const GalleryItem = memo(function GalleryItem({
                 // Suppress the iOS long-press "Save Image" callout so it does not
                 // hijack the drag-to-select long press.
                 WebkitTouchCallout: 'none',
+                ...(blurColor && { backgroundColor: blurColor }),
                 ...(blurDataUrl && {
                     backgroundImage: `url(${blurDataUrl})`,
                     backgroundSize: 'cover',
@@ -114,7 +178,7 @@ export const GalleryItem = memo(function GalleryItem({
         >
             {isReady ? (
                 <img
-                    src={thumbnailSrc ?? thumbnailUrlFromKey(item.thumbnailKey!, item.id)}
+                    src={baseSrc + (retryToken > 0 ? `${baseSrc.includes('?') ? '&' : '?'}r=${retryToken}` : '')}
                     /**
                      * Without srcset the same 400px file served every cell from ~63
                      * CSS px (mobile, 6 columns) up to ~400, across DPR 1-3 — so on a
@@ -126,11 +190,17 @@ export const GalleryItem = memo(function GalleryItem({
                     srcSet={useSrcSet ? thumbnailSrcSet(item.thumbnailKey!) : undefined}
                     sizes={`${Math.round(width)}px`}
                     /**
-                     * Re-renders once with no srcset. If `src` itself is what failed,
-                     * the state is already set to this key, so React bails out and no
-                     * further request is made — no retry loop.
+                     * First failure re-renders once with no srcset, falling back to
+                     * `src`. A second means `src` itself failed, which arms the single
+                     * backed-off retry above. Past that the count keeps rising but
+                     * nothing reads it, so there is no retry loop.
                      */
-                    onError={() => setLadderFailedFor(item.thumbnailKey)}
+                    onError={() =>
+                        setFailures((prev) => ({
+                            key: item.thumbnailKey,
+                            count: prev.key === item.thumbnailKey ? prev.count + 1 : 1,
+                        }))
+                    }
                     crossOrigin={useCors ? 'anonymous' : undefined}
                     alt={item.fileName ?? (item.type === 'VIDEO' ? 'Video' : 'Photo')}
                     loading="lazy"

@@ -17,12 +17,11 @@ export default function HiddenPage() {
         isLoading,
         fetchNextPage,
         hasNextPage,
-        isFetchingNextPage,
+        isLoadingMore,
         fetchPreviousPage,
         hasPreviousPage,
-        isFetchingPreviousPage,
+        isLoadingPrevious,
         seekToIndex,
-        isSeeking,
     } = useHiddenCollection();
 
     const { unhideItems } = useHidden();
@@ -65,10 +64,10 @@ export default function HiddenPage() {
                 timeline={timeline}
                 onLoadMore={fetchNextPage}
                 hasMore={hasNextPage}
-                isLoadingMore={isFetchingNextPage || isSeeking}
+                isLoadingMore={isLoadingMore}
                 onLoadPrevious={fetchPreviousPage}
                 hasPrevious={hasPreviousPage}
-                isLoadingPrevious={isFetchingPreviousPage || isSeeking}
+                isLoadingPrevious={isLoadingPrevious}
                 windowStart={windowStart}
                 onSeekToIndex={seekToIndex}
             />

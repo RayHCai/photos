@@ -72,7 +72,19 @@ export function TimelineScrollbar({
                 right: 0,
                 bottom: 0,
                 width: 48,
-                pointerEvents: isVisible ? 'auto' : 'none',
+                /**
+                 * The wrapper is never hit-testable; only the track inside it is.
+                 *
+                 * This element is a *sibling* of the scroll container, not a child, so a
+                 * touch that lands on it has no scrollable ancestor and cannot pan the
+                 * gallery at all — it is a dead strip, not merely a close one. It used to
+                 * become hit-testable whenever the bar was visible, and visibility
+                 * includes `isScrolling`, which stays true for 1200ms after the last
+                 * scroll event. During ordinary browsing that is continuous, so the right
+                 * 48px of the screen — where a one-handed thumb naturally lands —
+                 * swallowed swipes for as long as the user kept scrolling.
+                 */
+                pointerEvents: 'none',
                 zIndex: 30,
             }}
             className={`transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
@@ -85,10 +97,14 @@ export function TimelineScrollbar({
                     position: 'absolute',
                     top: 16,
                     bottom: 16,
-                    right: 8,
-                    width: 32,
+                    // Hugs the edge rather than sitting 8px inboard over the grid. Paired
+                    // with MOBILE_SCROLLBAR_GUTTER, which reserves the space this occupies
+                    // so it no longer overlaps the last column of photos.
+                    right: 4,
+                    width: 28,
                     cursor: 'pointer',
                     touchAction: 'none',
+                    pointerEvents: isVisible ? 'auto' : 'none',
                 }}
             >
                 {/* Track line */}

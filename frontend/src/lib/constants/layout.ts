@@ -24,6 +24,19 @@ export const MOBILE_GAP = 2;
 /** Horizontal padding of the mobile grid, per side. */
 export const MOBILE_PADDING = 4;
 
+/**
+ * Extra right-hand inset on mobile, reserved for the timeline scrollbar.
+ *
+ * There was none. The grid ran to within MOBILE_PADDING of the right edge while the
+ * scrollbar's scrub track occupied the 32px immediately inside it, so the track sat
+ * entirely on top of the last column — half of a cell at six columns. Every touch aimed
+ * at a photo there landed on the scrubber instead, which is why scrolling with a thumb on
+ * the right edge did nothing while the rest of the app kept responding.
+ *
+ * Sized to clear the track (28px) plus a small gap, so the two never intersect.
+ */
+export const MOBILE_SCROLLBAR_GUTTER = 32;
+
 /** Target row height for the justified layout. */
 export const TARGET_ROW_HEIGHT = 220;
 

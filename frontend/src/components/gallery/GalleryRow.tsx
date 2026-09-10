@@ -10,7 +10,17 @@ interface RowItemProps {
     id: string;
     width: number;
     height: number;
-    mediaItems: Map<string, MediaShellItem>;
+    /**
+     * The resolved item, not the Map it came from.
+     *
+     * The Map is rebuilt whenever the loaded window changes, so passing it here gave
+     * `memo` a different reference on every page slide and re-rendered every cell in the
+     * viewport. Individual items keep their identity across a slide — React Query's
+     * structural sharing preserves unchanged pages, and the processing poll allocates a
+     * new object only for items that actually changed — so resolving in the row (which
+     * re-renders anyway) is what lets this memo hold.
+     */
+    item: MediaShellItem | undefined;
     onItemClick: (id: string) => void;
     /** Precomputed, so a Set identity change does not re-render every cell. */
     isSelected: boolean;
@@ -50,7 +60,7 @@ const RowItem = memo(function RowItem({
     id,
     width,
     height,
-    mediaItems,
+    item: mediaItem,
     onItemClick,
     isSelected,
     isSelecting,
@@ -60,7 +70,6 @@ const RowItem = memo(function RowItem({
     thumbnailSrcFn,
     hasTouch,
 }: RowItemProps) {
-    const mediaItem = mediaItems.get(id);
     const handleClick = useCallback(() => onItemClick(id), [onItemClick, id]);
     const handleSelect = useCallback(
         (e: React.MouseEvent) => onItemSelect?.(id, e),
@@ -132,7 +141,10 @@ export const GalleryRow = memo(function GalleryRow({
                     id={item.id}
                     width={item.width}
                     height={item.height}
-                    mediaItems={mediaItems}
+                    // Resolved here rather than in the memoized leaf; a row can briefly
+                    // outrun the map while the window is being replaced, which RowItem
+                    // still handles by rendering nothing.
+                    item={mediaItems.get(item.id)}
                     onItemClick={onItemClick}
                     isSelected={selectedIds?.has(item.id) ?? false}
                     isSelecting={isSelecting}

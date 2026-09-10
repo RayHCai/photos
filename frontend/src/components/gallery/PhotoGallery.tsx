@@ -127,6 +127,18 @@ export function PhotoGallery({
         [selection, orderedIds, indexById]
     );
 
+    /**
+     * Stable identity, because this prop is the one that reaches every cell.
+     *
+     * It used to be an inline arrow. GalleryRow, RowItem and GalleryItem are all
+     * memoized, and all three compare this prop — so a new closure per render made every
+     * one of them miss, and the row's own `useCallback` for the per-item click handler
+     * was invalidated too. The result was that every render of this component fully
+     * reconciled every visible cell: a hundred of them at six columns, on every selection
+     * toggle, every favourite, every window slide.
+     */
+    const handleItemClick = useCallback((id: string) => setLightboxId(id), []);
+
     // Bridge the touch drag-select gesture (resolved in GalleryGrid) to the
     // selection paint API. Stable across renders as long as the selection methods
     // and visual order hold, so listeners are not re-registered mid-gesture.
@@ -163,7 +175,7 @@ export function PhotoGallery({
             <div className="flex-1 min-h-0">
                 <GalleryGrid
                     groups={groups}
-                    onItemClick={(id) => setLightboxId(id)}
+                    onItemClick={handleItemClick}
                     selectedIds={selection.selectedIds}
                     isSelecting={selection.isSelecting}
                     favoriteIds={favoriteIds}

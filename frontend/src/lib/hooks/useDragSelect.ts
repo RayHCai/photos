@@ -16,12 +16,17 @@ export interface DragSelectController {
     end: () => void;
 }
 
-// How long a finger must rest on a photo before a drag-select begins. Short
-// enough to feel responsive, long enough that a flick reads as a scroll.
-const LONG_PRESS_MS = 350;
+// How long a finger must rest on a photo before a drag-select begins.
+//
+// 350ms was below both platforms' long-press conventions (iOS and Android use ~500ms),
+// which made the most ordinary gesture on a phone — flick, then plant a finger to arrest
+// the momentum and look at what went past — resolve as a selection paint instead. The
+// finger is deliberately still at that moment, so the slop check never cancelled it.
+const LONG_PRESS_MS = 500;
 // Finger travel (px) during the long-press wait that reclassifies the gesture as
-// a scroll and cancels the pending selection.
-const MOVE_SLOP = 10;
+// a scroll and cancels the pending selection. Also raised to the platform touch slop:
+// 10px is inside the jitter of a resting thumb.
+const MOVE_SLOP = 14;
 // Distance (px) from the top/bottom edge of the scroll viewport within which a
 // held drag triggers auto-scroll.
 const EDGE_ZONE = 90;
@@ -60,8 +65,15 @@ export function useDragSelect(
     const lastY = useRef(0);
     const scrollVelocity = useRef(0);
     const rafId = useRef(0);
-    // Original inline touch-action, restored when a drag ends.
-    const prevTouchAction = useRef<string>('');
+    /**
+     * Identifier of the touch that owns the drag.
+     *
+     * `TouchEvent.touches` is every contact on the screen, not the ones on this element,
+     * so "the drag finger lifted" cannot be read off the count — a second finger resting
+     * anywhere keeps it above zero. Matching on the identifier ends the drag when *this*
+     * finger goes up, whatever else is happening.
+     */
+    const activeTouchId = useRef<number | null>(null);
     // After a real gesture, swallow the trailing synthetic click so it can't
     // toggle the item under the finger (which would undo a just-made selection).
     const suppressClick = useRef(false);
@@ -127,12 +139,10 @@ export function useDragSelect(
         };
 
         const startDrag = (anchorId: string) => {
+            // Idempotent: a leaked drag must not be layered under a new one.
+            if (isDragging.current) endDrag();
             longPressTimer.current = null;
             isDragging.current = true;
-            // Take over touch handling so the browser doesn't pan/zoom while we
-            // paint and drive our own auto-scroll.
-            prevTouchAction.current = el.style.touchAction;
-            el.style.touchAction = 'none';
             navigator.vibrate?.(10);
             controllerRef.current?.begin(anchorId);
         };
@@ -149,11 +159,28 @@ export function useDragSelect(
             }, 500);
         };
 
+        /**
+         * The drag does *not* touch `el.style.touchAction`.
+         *
+         * It used to set it to `none` on start and restore it on end, which was both
+         * useless and dangerous. Useless because both engines resolve the effective
+         * touch-action by hit-testing when a touch sequence *begins*, and never
+         * re-consult it mid-sequence — so a value written from inside a long-press timer
+         * could not affect the gesture it was meant to protect (the non-passive
+         * `preventDefault` in onTouchMove does that). Dangerous because GalleryGrid sets
+         * `touchAction: 'pan-y'` on the same node as a React inline style: React's style
+         * diff only writes a property whose value *changed* between renders, and 'pan-y'
+         * never changes, so React can never repair an imperative overwrite. Any drag that
+         * ended without running this function left `touch-action: none` latched on the
+         * gallery's only scroll container for the life of the page — the reported "cannot
+         * scroll, but the buttons still work". It was self-worsening too: the next
+         * startDrag saved the poisoned 'none' as the value to restore.
+         */
         const endDrag = () => {
             if (!isDragging.current) return;
             isDragging.current = false;
+            activeTouchId.current = null;
             stopAutoScroll();
-            el.style.touchAction = prevTouchAction.current;
             armClickSuppression();
             controllerRef.current?.end();
         };
@@ -173,8 +200,24 @@ export function useDragSelect(
             startY.current = t.clientY;
             lastX.current = t.clientX;
             lastY.current = t.clientY;
+            activeTouchId.current = t.identifier;
             clearLongPress();
             longPressTimer.current = setTimeout(() => startDrag(id), LONG_PRESS_MS);
+        };
+
+        /**
+         * A scroll means the finger that is down is scrolling, not pressing.
+         *
+         * Without this, planting a finger to arrest a momentum fling arms the long press
+         * and — because arresting momentum means holding still — nothing cancels it. The
+         * gesture the user meant as "stop and look" became "enter selection mode", and
+         * every subsequent touchmove was preventDefault'd into a selection paint.
+         *
+         * Guarded on `!isDragging`, so the hook's own edge auto-scroll cannot cancel the
+         * drag it is scrolling for.
+         */
+        const onScroll = () => {
+            if (!isDragging.current) clearLongPress();
         };
 
         const onTouchMove = (e: TouchEvent) => {
@@ -204,13 +247,34 @@ export function useDragSelect(
             }
         };
 
+        /**
+         * Bound to the window, in the capture phase, rather than to the container.
+         *
+         * A touch event is dispatched to the node the touch *started* on. Two ordinary
+         * things detach that node mid-gesture: the virtualizer unmounts the row (the edge
+         * auto-scroll below writes `scrollTop` every frame, so this is routine), and the
+         * window slides a page out from under the finger. Once the original target is
+         * gone, neither `touchend` nor `touchcancel` reaches the container, so the drag
+         * was never ended — `isDragging` stayed true, every later touchmove was
+         * preventDefault'd, and the gallery could not be scrolled again for the life of
+         * the page. A lift over a sibling that is not inside the scroller at all — the
+         * timeline scrollbar overlay, the header, the selection toolbar — did the same.
+         *
+         * A window listener sees the lift wherever it lands, and `endDrag` early-returns
+         * unless this hook actually started a drag, so a touch elsewhere in the app
+         * cannot fabricate one.
+         */
         const onTouchEnd = (e: TouchEvent) => {
             clearLongPress();
-            if (isDragging.current && e.touches.length === 0) {
-                endDrag();
-            }
+            if (!isDragging.current) return;
+            const stillDown = Array.from(e.touches).some(
+                (t) => t.identifier === activeTouchId.current
+            );
+            if (!stillDown || e.touches.length === 0) endDrag();
         };
 
+        // Separate from onTouchEnd on purpose: a cancel is unconditional and must not
+        // inherit any surviving-touch test.
         const onTouchCancel = () => {
             clearLongPress();
             endDrag();
@@ -241,16 +305,18 @@ export function useDragSelect(
 
         el.addEventListener('touchstart', onTouchStart, { passive: true });
         el.addEventListener('touchmove', onTouchMove, { passive: false });
-        el.addEventListener('touchend', onTouchEnd, { passive: true });
-        el.addEventListener('touchcancel', onTouchCancel, { passive: true });
+        el.addEventListener('scroll', onScroll, { passive: true });
+        window.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
+        window.addEventListener('touchcancel', onTouchCancel, { passive: true, capture: true });
         el.addEventListener('click', onClickCapture, true);
         el.addEventListener('contextmenu', onContextMenu);
 
         return () => {
             el.removeEventListener('touchstart', onTouchStart);
             el.removeEventListener('touchmove', onTouchMove);
-            el.removeEventListener('touchend', onTouchEnd);
-            el.removeEventListener('touchcancel', onTouchCancel);
+            el.removeEventListener('scroll', onScroll);
+            window.removeEventListener('touchend', onTouchEnd, { capture: true });
+            window.removeEventListener('touchcancel', onTouchCancel, { capture: true });
             el.removeEventListener('click', onClickCapture, true);
             el.removeEventListener('contextmenu', onContextMenu);
             clearLongPress();
@@ -262,9 +328,9 @@ export function useDragSelect(
             if (rafId.current) cancelAnimationFrame(rafId.current);
             rafId.current = 0;
             scrollVelocity.current = 0;
+            activeTouchId.current = null;
             if (isDragging.current) {
                 isDragging.current = false;
-                el.style.touchAction = prevTouchAction.current;
                 controllerRef.current?.end();
             }
         };

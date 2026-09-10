@@ -25,7 +25,11 @@ export function buildTimelineMarkers(timeline: TimelineMonth[]): TimelineMarker[
     for (const entry of timeline) {
         const date = parse(entry.month, 'yyyy-MM', new Date());
         markers.push({
-            label: format(date, 'MMM yyyy'),
+            // Abbreviated year. The label chips are absolutely positioned inside the
+            // scrollbar track and overhang the grid to their left; "Sep 2026" is wide
+            // enough to cover a whole cell of a six-column mobile grid, "Sep '26" is not.
+            // The doubled apostrophes are date-fns' escape for a literal one: "Sep '26".
+            label: format(date, 'MMM \'\'yy'),
             monthKey: entry.month,
             fraction: cumulative / totalItems,
             count: entry.count,

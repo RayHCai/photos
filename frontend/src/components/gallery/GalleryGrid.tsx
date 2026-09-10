@@ -18,6 +18,7 @@ import {
     MOBILE_BREAKPOINT,
     MOBILE_GAP,
     MOBILE_PADDING,
+    MOBILE_SCROLLBAR_GUTTER,
     TARGET_ROW_HEIGHT,
 } from '@/lib/constants/layout';
 import type { DateGroup } from '@/lib/utils/groupByDate';
@@ -87,6 +88,41 @@ interface GalleryGridProps {
  */
 const LOAD_MORE_VIEWPORT_LOOKAHEAD = 3;
 
+/**
+ * Rows mounted beyond the viewport, expressed in pixels rather than rows.
+ *
+ * The virtualizer counts overscan in *rows*, which made the lookahead collapse exactly
+ * where it was needed most: a mobile row is `cellSize + gap`, so three rows is ~576px at
+ * two columns but only ~192px at six. At six columns a flick therefore mounted a row,
+ * started its thumbnail request, and unmounted it again — cancelling the load — before
+ * the response could arrive, so a fast scroll could cross hundreds of photos while
+ * finishing none of them and leaving every cell on its blurhash.
+ *
+ * A pixel budget also keeps decoded-image memory flat rather than growing it, which is
+ * the concern the row count was protecting: cells shrink as columns grow, so the same
+ * strip of pixels costs roughly the same decoded bytes at any density. 576px is the
+ * two-column value, so that case is unchanged.
+ */
+const OVERSCAN_LOOKAHEAD_PX = 576;
+/**
+ * Second ceiling, in cells rather than pixels, because the two costs of an overscanned
+ * row are not the same shape.
+ *
+ * Decoded memory tracks *pixels*, and a pixel budget holds it flat as cells shrink. But
+ * every mounted cell also issues a network request, and that cost tracks the cell COUNT,
+ * which grows with the square of the column count. Honouring the pixel budget alone would
+ * mount ten overscan rows at six columns — sixty cells per side against six at two
+ * columns — and fire them all at once on a mobile link. Since the reported symptom is
+ * thumbnails not arriving, a tenfold increase in simultaneous requests is the wrong
+ * direction to push, whatever it does for decode memory.
+ *
+ * This caps the request burst while still buying back most of the lookahead the row-count
+ * overscan lost at high densities.
+ */
+const MAX_OVERSCAN_CELLS_PER_SIDE = 30;
+/** Ceiling on the derived row overscan, so a pathologically short row cannot run away. */
+const MAX_OVERSCAN_ROWS = 10;
+
 export function GalleryGrid({
     groups,
     onItemClick,
@@ -118,15 +154,25 @@ export function GalleryGrid({
     const [measuredWidth, setMeasuredWidth] = useState(() =>
         typeof window !== 'undefined' ? window.innerWidth : 0
     );
+    /**
+     * Observed rather than read from `clientHeight` during render.
+     *
+     * The load-more lookaheads need the viewport height, and reading it off the DOM in
+     * the render body forced a synchronous layout flush on every scroll-driven render —
+     * interleaved with the virtualizer's own DOM writes, which is the read-after-write
+     * pattern that produces layout thrash on the one thread the scroll depends on.
+     */
+    const [measuredHeight, setMeasuredHeight] = useState(0);
 
     useLayoutEffect(() => {
         const el = containerRef.current;
         if (!el) return;
         setMeasuredWidth(el.clientWidth);
+        setMeasuredHeight(el.clientHeight);
 
         let frame = 0;
         const observer = new ResizeObserver((entries) => {
-            const width = Math.round(entries[0]!.contentRect.width);
+            const { width, height } = entries[0]!.contentRect;
             if (width <= 0) return;
             /**
              * rAF-coalesced. `containerWidth` feeds the layout memo, so an unthrottled
@@ -135,7 +181,10 @@ export function GalleryGrid({
              * being dragged.
              */
             cancelAnimationFrame(frame);
-            frame = requestAnimationFrame(() => setMeasuredWidth(width));
+            frame = requestAnimationFrame(() => {
+                setMeasuredWidth(Math.round(width));
+                setMeasuredHeight(Math.round(height));
+            });
         });
         observer.observe(el);
         return () => {
@@ -146,7 +195,19 @@ export function GalleryGrid({
 
     const containerWidth = propWidth ?? measuredWidth;
     const isMobile = containerWidth > 0 && containerWidth < MOBILE_BREAKPOINT;
-    const mobileAvailableWidth = containerWidth - MOBILE_PADDING * 2;
+
+    /**
+     * One source for the mobile insets.
+     *
+     * The cell arithmetic and the row's own padding have to agree exactly: the rows carry
+     * `contain: layout style paint`, so a row whose flex children total more than its
+     * content box is silently *clipped* rather than visibly overflowing, with no
+     * horizontal scrollbar to give it away. Deriving both from the same pair means the
+     * gutter cannot half-land.
+     */
+    const mobileInsetLeft = MOBILE_PADDING;
+    const mobileInsetRight = MOBILE_PADDING + MOBILE_SCROLLBAR_GUTTER;
+    const mobileAvailableWidth = containerWidth - mobileInsetLeft - mobileInsetRight;
 
     const { columns: mobileColumns, gestureScale, isPinching } = usePinchToZoom(
         containerRef,
@@ -188,9 +249,8 @@ export function GalleryGrid({
         const rows: VirtualRow[] = [];
 
         if (isMobile) {
-            const availableWidth = containerWidth - MOBILE_PADDING * 2;
             const cellSize = Math.floor(
-                (availableWidth - (mobileColumns - 1) * MOBILE_GAP) / mobileColumns
+                (mobileAvailableWidth - (mobileColumns - 1) * MOBILE_GAP) / mobileColumns
             );
 
             for (const group of groups) {
@@ -259,17 +319,35 @@ export function GalleryGrid({
         }
 
         return rows;
-    }, [groups, containerWidth, isMobile, mobileColumns]);
+    }, [groups, containerWidth, isMobile, mobileColumns, mobileAvailableWidth]);
+
+    /**
+     * Overscan, derived from the row height so the lookahead is a fixed strip of pixels.
+     * Desktop keeps the literal 3: its rows are already ~225px, so the pixel budget is
+     * met and the tighter margin the comment below describes is preserved.
+     */
+    const overscan = useMemo(() => {
+        if (!isMobile || mobileColumns <= 0 || mobileAvailableWidth <= 0) return 3;
+        const cellSize = Math.floor(
+            (mobileAvailableWidth - (mobileColumns - 1) * MOBILE_GAP) / mobileColumns
+        );
+        const rowHeight = cellSize + MOBILE_GAP;
+        if (rowHeight <= 0) return 3;
+        const byPixels = Math.ceil(OVERSCAN_LOOKAHEAD_PX / rowHeight);
+        const byCells = Math.floor(MAX_OVERSCAN_CELLS_PER_SIDE / mobileColumns);
+        return Math.max(3, Math.min(MAX_OVERSCAN_ROWS, byPixels, byCells));
+    }, [isMobile, mobileColumns, mobileAvailableWidth]);
 
     const virtualizer = useVirtualizer({
         count: virtualRows.length,
         getScrollElement: () => containerRef.current,
         estimateSize: (index) => virtualRows[index]?.height || (isMobile ? 100 : TARGET_ROW_HEIGHT),
-        // Kept small on both form factors: every overscanned row decodes its
-        // thumbnails into the GPU working set even though it is off-screen, and a
-        // wider desktop margin was a measurable contributor to the fast-scroll
-        // memory ceiling.
-        overscan: 3,
+        // Budgeted in pixels, not rows — see OVERSCAN_LOOKAHEAD_PX. Every overscanned
+        // row decodes its thumbnails into the GPU working set even though it is
+        // off-screen, which is why this is a fixed strip of pixels rather than a fixed
+        // row count: cells shrink as columns grow, so the decoded cost of the strip stays
+        // roughly constant instead of tracking the row count. Desktop is unchanged.
+        overscan,
         /**
          * Stable keys. The rows were previously keyed by array index, so any insertion
          * or removal above the viewport — a new upload, a delete, a hide, a
@@ -292,11 +370,17 @@ export function GalleryGrid({
     );
     const resolvedThumbnailSrcFn = thumbnailSrcFn ?? (CDN_CONFIGURED ? undefined : prefetchSrcFn);
 
-    useEffect(() => {
-        virtualizer.measure();
-        // Intentionally keyed on the row set only: depending on the virtualizer's
-        // own identity would loop.
-    }, [virtualRows]);
+    /*
+     * There is deliberately no `virtualizer.measure()` effect here.
+     *
+     * It cleared a measurement cache that this grid never populates — `measureElement` is
+     * never called, so row positions come entirely from `estimateSize` — and the memo it
+     * was meant to invalidate is invalidated anyway: `getItemKey` and `estimateSize` are
+     * fresh closures on every render, which is part of the virtualizer's own memo key. So
+     * it was pure cost: `measure()` notifies unconditionally, forcing a second full render
+     * of the grid immediately after every one that changed the row set — every page slide,
+     * every column change, every processing-poll patch.
+     */
 
     /**
      * Keep the viewport pinned to the same content when the window slides.
@@ -371,7 +455,7 @@ export function GalleryGrid({
      */
     const totalSize = virtualizer.getTotalSize();
     const scrollOffset = virtualizer.scrollOffset ?? 0;
-    const viewportHeight = containerRef.current?.clientHeight ?? 0;
+    const viewportHeight = measuredHeight;
     const distanceToEnd = totalSize - scrollOffset - viewportHeight;
 
     useEffect(() => {
@@ -398,64 +482,86 @@ export function GalleryGrid({
             <div
                 ref={containerRef}
                 className="h-full overflow-y-auto hide-scrollbar"
-                style={isMobile ? { touchAction: 'pan-y' } : undefined}
+                style={{
+                    // Keep a fling from chaining into the document behind the gallery,
+                    // which on an iOS standalone PWA both wastes the gesture and can hand
+                    // it to the system at the bottom edge.
+                    overscrollBehavior: 'contain',
+                    ...(isMobile && { touchAction: 'pan-y' }),
+                }}
             >
                 <div
                     className="relative w-full"
-                    style={{
-                        height: virtualizer.getTotalSize(),
-                        padding: isMobile ? `0 ${MOBILE_PADDING}px` : '0 4px',
-                        // Live pinch feedback: scale the grid visually and commit a new
-                        // column count on release, so no layout runs mid-gesture.
-                        ...(gestureScale !== null && {
-                            transform: `scale(${gestureScale})`,
-                            transformOrigin: 'top center',
-                        }),
-                        // Only hinted during an actual gesture. It used to be set
-                        // permanently on every row, promoting a compositor layer with a
-                        // device-pixel backing store for each one on an already
-                        // memory-tight iOS tab.
-                        ...(isPinching && { willChange: 'transform' }),
-                    }}
+                    style={{ height: virtualizer.getTotalSize() }}
                 >
-                    {virtualItems.map((virtualItem) => {
-                        const row = virtualRows[virtualItem.index];
-                        if (!row) return null;
-                        return (
-                            <div
-                                key={virtualItem.key}
-                                className="absolute top-0 left-0 w-full"
-                                style={{
-                                    height: virtualItem.size,
-                                    transform: `translateY(${virtualItem.start}px)`,
-                                    padding: isMobile
-                                        ? `0 ${MOBILE_PADDING}px`
-                                        : `0 ${DESKTOP_INSET}px`,
-                                    contain: 'layout style paint',
-                                }}
-                            >
-                                {row.type === 'date-header' ? (
-                                    <DateHeader
-                                        label={row.label!}
-                                        contentOffset={row.contentOffset}
-                                    />
-                                ) : (
-                                    <GalleryRow
-                                        rowData={row.rowData!}
-                                        mediaItems={mediaMap}
-                                        onItemClick={onItemClick}
-                                        selectedIds={selectedIds}
-                                        isSelecting={isSelecting}
-                                        favoriteIds={favoriteIds}
-                                        onToggleFavorite={onToggleFavorite}
-                                        onItemSelect={onItemSelect}
-                                        thumbnailSrcFn={resolvedThumbnailSrcFn}
-                                        hasTouch={hasTouch}
-                                    />
-                                )}
-                            </div>
-                        );
-                    })}
+                    {/*
+                      * The pinch preview transform lives here, on an inner wrapper, not on
+                      * the height-bearing div above.
+                      *
+                      * A scroll container's scrollable region includes its descendants'
+                      * *transformed* boxes, so scaling the element that carries
+                      * `getTotalSize()` scaled the scroll height itself. Pinching out to a
+                      * denser grid is fingers-together — scale below 1 — so the scroll
+                      * height halved mid-gesture and the browser clamped `scrollTop` to
+                      * the new maximum. Anyone past the halfway point of the window was
+                      * dragged backwards, and nothing recorded where they had been, so the
+                      * re-anchor on release faithfully restored the clamped position
+                      * rather than the real one.
+                      */}
+                    <div
+                        style={{
+                            position: 'absolute',
+                            inset: 0,
+                            ...(gestureScale !== null && {
+                                transform: `scale(${gestureScale})`,
+                                transformOrigin: 'top center',
+                            }),
+                            // Only hinted during an actual gesture. It used to be set
+                            // permanently on every row, promoting a compositor layer with a
+                            // device-pixel backing store for each one on an already
+                            // memory-tight iOS tab.
+                            ...(isPinching && { willChange: 'transform' }),
+                        }}
+                    >
+                        {virtualItems.map((virtualItem) => {
+                            const row = virtualRows[virtualItem.index];
+                            if (!row) return null;
+                            return (
+                                <div
+                                    key={virtualItem.key}
+                                    className="absolute top-0 left-0 w-full"
+                                    style={{
+                                        height: virtualItem.size,
+                                        transform: `translateY(${virtualItem.start}px)`,
+                                        padding: isMobile
+                                            ? `0 ${mobileInsetRight}px 0 ${mobileInsetLeft}px`
+                                            : `0 ${DESKTOP_INSET}px`,
+                                        contain: 'layout style paint',
+                                    }}
+                                >
+                                    {row.type === 'date-header' ? (
+                                        <DateHeader
+                                            label={row.label!}
+                                            contentOffset={row.contentOffset}
+                                        />
+                                    ) : (
+                                        <GalleryRow
+                                            rowData={row.rowData!}
+                                            mediaItems={mediaMap}
+                                            onItemClick={onItemClick}
+                                            selectedIds={selectedIds}
+                                            isSelecting={isSelecting}
+                                            favoriteIds={favoriteIds}
+                                            onToggleFavorite={onToggleFavorite}
+                                            onItemSelect={onItemSelect}
+                                            thumbnailSrcFn={resolvedThumbnailSrcFn}
+                                            hasTouch={hasTouch}
+                                        />
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
 

@@ -30,6 +30,12 @@ interface UseTimelineScrollbarResult {
     wrapperHeight: number;
 }
 
+/**
+ * Vertical travel a *touch* must cover on the track before it counts as a scrub rather
+ * than a swipe that happened to start there.
+ */
+const TOUCH_SCRUB_THRESHOLD_PX = 6;
+
 interface UseTimelineScrollbarOptions {
     /** Whether pages exist beyond the loaded rows. */
     hasMore?: boolean;
@@ -302,10 +308,28 @@ export function useTimelineScrollbar(
             }
         };
 
+        /**
+         * A touch is not a hover.
+         *
+         * iOS synthesises a `mousemove` at the tap point after a touch sequence, so a tap
+         * anywhere near the right edge latched `isHovering` — which keeps the scrollbar
+         * armed indefinitely, since there is no pointer to move away afterwards and clear
+         * it. Clearing on touchstart makes the hover path mouse-only in practice.
+         */
+        const handleTouchStart = () => {
+            if (hideTimeoutRef.current) {
+                clearTimeout(hideTimeoutRef.current);
+                hideTimeoutRef.current = null;
+            }
+            setIsHovering(false);
+        };
+
         document.addEventListener('mousemove', handleMouseMove, { passive: true });
+        document.addEventListener('touchstart', handleTouchStart, { passive: true });
         container.addEventListener('mouseleave', handleMouseLeave);
         return () => {
             document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('touchstart', handleTouchStart);
             container.removeEventListener('mouseleave', handleMouseLeave);
             window.removeEventListener('resize', refreshRect);
             window.removeEventListener('scroll', refreshRect, { capture: true });
@@ -464,19 +488,43 @@ export function useTimelineScrollbar(
         const track = trackRef.current;
         if (!track) return;
 
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        /**
+         * A finger has to move before it is scrubbing.
+         *
+         * With a mouse, pressing the track *is* the gesture — the cursor was placed
+         * deliberately, so applying the fraction immediately is the right feedback. A
+         * finger is different: it lands somewhere on the way to a swipe, and the track
+         * runs the full height of the screen down its right edge. Applying on contact
+         * meant a swipe that merely grazed the track teleported the gallery to whatever
+         * date corresponded to the y the thumb happened to touch, and since the track
+         * sets `touch-action: none` the swipe could not scroll either. Requiring real
+         * vertical travel first makes a stray touch a no-op while leaving deliberate
+         * scrubbing unchanged.
+         */
+        const isTouch = e.pointerType === 'touch';
+        const startClientY = e.clientY;
+        let moved = !isTouch;
+
+        // Capture on the track itself. It used to be taken on `e.target`, which can be
+        // the thumb — an element this component removes whenever the wrapper measures to
+        // zero height, dropping the capture mid-drag.
+        track.setPointerCapture(e.pointerId);
         isDraggingRef.current = true;
         setIsDragging(true);
 
         const trackRect = track.getBoundingClientRect();
         const fraction = Math.max(0, Math.min(1, (e.clientY - trackRect.top) / trackRect.height));
+        dragFractionRef.current = fraction;
         // Immediate feedback on the initial press, but not a commitment: a click is
         // only what the pointer was over when it came *up*.
-        dragFractionRef.current = fraction;
-        applyFraction(fraction, false);
+        if (!isTouch) applyFraction(fraction, false);
 
         const handlePointerMove = (ev: PointerEvent) => {
             if (!isDraggingRef.current) return;
+            if (!moved) {
+                if (Math.abs(ev.clientY - startClientY) < TOUCH_SCRUB_THRESHOLD_PX) return;
+                moved = true;
+            }
             const rect = track.getBoundingClientRect();
             const f = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
             scheduleDragFrame(f);
@@ -492,8 +540,11 @@ export function useTimelineScrollbar(
                 dragRafRef.current = null;
             }
             // The release point is the position the user actually chose, so this is
-            // where an unloaded target is worth fetching pages for.
-            applyFraction(dragFractionRef.current, true);
+            // where an unloaded target is worth fetching pages for. A touch that never
+            // crossed the threshold was not a scrub at all, so it commits nothing —
+            // otherwise suppressing the press-time apply would only move the accidental
+            // teleport from contact to release, and add a page fetch to it.
+            if (moved) applyFraction(dragFractionRef.current, true);
             document.removeEventListener('pointermove', handlePointerMove);
             document.removeEventListener('pointerup', handlePointerUp);
             document.removeEventListener('pointercancel', handlePointerUp);

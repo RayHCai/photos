@@ -30,12 +30,11 @@ export default function CollectionDetailPage() {
         isLoading,
         fetchNextPage,
         hasNextPage,
-        isFetchingNextPage,
+        isLoadingMore,
         fetchPreviousPage,
         hasPreviousPage,
-        isFetchingPreviousPage,
+        isLoadingPrevious,
         seekToIndex,
-        isSeeking,
     } = useCollection(id);
     const [pickerOpen, setPickerOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -153,10 +152,10 @@ export default function CollectionDetailPage() {
                 timeline={timeline}
                 onLoadMore={fetchNextPage}
                 hasMore={hasNextPage}
-                isLoadingMore={isFetchingNextPage || isSeeking}
+                isLoadingMore={isLoadingMore}
                 onLoadPrevious={fetchPreviousPage}
                 hasPrevious={hasPreviousPage}
-                isLoadingPrevious={isFetchingPreviousPage || isSeeking}
+                isLoadingPrevious={isLoadingPrevious}
                 windowStart={windowStart}
                 onSeekToIndex={seekToIndex}
             />

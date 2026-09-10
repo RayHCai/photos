@@ -68,7 +68,9 @@ export function usePinchToZoom(
 
         const onTouchMove = (e: TouchEvent) => {
             if (!pinchingRef.current || e.touches.length !== 2) return;
-            e.preventDefault();
+            // iOS marks a sequence non-cancelable once it has committed to scrolling it;
+            // calling preventDefault then only produces a console warning per move event.
+            if (e.cancelable) e.preventDefault();
 
             // Read the touch positions synchronously: by the time a rAF callback runs
             // the TouchEvent's touch list may already have been recycled.
@@ -105,8 +107,25 @@ export function usePinchToZoom(
             setColumns(clampedCols);
         };
 
+        /**
+         * Bound to the window, not the container.
+         *
+         * The touchstart target is a virtualized cell, and a lift after the row has been
+         * unmounted — or over the timeline scrollbar overlay next to it — never reaches
+         * the container. `commit` was the only thing that cleared `gestureScale`, so a
+         * missed lift left a `scale()` transform on the element that carries the grid's
+         * full height, permanently: the scroll range no longer matched the content, and
+         * `willChange: 'transform'` kept a full-height compositor layer alive on a device
+         * that is already short of memory for decoded thumbnails.
+         */
         const onTouchEnd = (e: TouchEvent) => {
             if (e.touches.length < 2 && pinchingRef.current) commit();
+        };
+
+        // A cancel is unconditional — it must not inherit the surviving-touch test, or an
+        // iOS cancel delivered while two contacts are still listed leaves the gesture on.
+        const onTouchCancel = () => {
+            if (pinchingRef.current) commit();
         };
 
         const onWheel = (e: WheelEvent) => {
@@ -122,17 +141,22 @@ export function usePinchToZoom(
 
         el.addEventListener('touchstart', onTouchStart, { passive: true });
         el.addEventListener('touchmove', onTouchMove, { passive: false });
-        el.addEventListener('touchend', onTouchEnd, { passive: true });
-        el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+        window.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
+        window.addEventListener('touchcancel', onTouchCancel, { passive: true, capture: true });
         el.addEventListener('wheel', onWheel, { passive: false });
 
         return () => {
             el.removeEventListener('touchstart', onTouchStart);
             el.removeEventListener('touchmove', onTouchMove);
-            el.removeEventListener('touchend', onTouchEnd);
-            el.removeEventListener('touchcancel', onTouchEnd);
+            window.removeEventListener('touchend', onTouchEnd, { capture: true });
+            window.removeEventListener('touchcancel', onTouchCancel, { capture: true });
             el.removeEventListener('wheel', onWheel);
             cancelAnimationFrame(rafId.current);
+            // Never leave a gesture transform behind on unmount or an `enabled` flip.
+            pinchingRef.current = false;
+            baseDistance.current = 0;
+            setGestureScale(null);
+            setIsPinching(false);
         };
     }, [containerRef, enabled]);
 

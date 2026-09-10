@@ -28,12 +28,11 @@ export default function GalleryPage() {
         isLoading,
         fetchNextPage,
         hasNextPage,
-        isFetchingNextPage,
+        isLoadingMore,
         fetchPreviousPage,
         hasPreviousPage,
-        isFetchingPreviousPage,
+        isLoadingPrevious,
         seekToIndex,
-        isSeeking,
     } = useShellData();
     const [search, setSearch] = useState('');
     const selection = useMediaSelection();
@@ -121,16 +120,16 @@ export default function GalleryPage() {
                     emptyMessage={isSearchActive ? 'No results found' : undefined}
                     onLoadMore={isSearchActive ? undefined : fetchNextPage}
                     hasMore={isSearchActive ? false : hasNextPage}
-                    // A timeline jump fetching the pages it needs is the same
-                    // "more is coming" state as a scroll-driven page fetch, and it
-                    // also keeps the grid's scroll lookahead from racing it.
-                    isLoadingMore={isSearchActive ? false : isFetchingNextPage || isSeeking}
+                    // Any fetch on the window, not just a forward one — a jump, an
+                    // invalidation refetch, a reconnect. See the note on where these
+                    // are derived: a lookahead fired during a non-directional fetch is
+                    // silently discarded, which reads to the user as a dead end.
+                    isLoadingMore={isSearchActive ? false : isLoadingMore}
                     // The window slides both ways: scrolling back up past the
-                    // evicted edge refetches the page above. `isSeeking` blocks the
-                    // top lookahead during a jump for the same reason as the bottom.
+                    // evicted edge refetches the page above.
                     onLoadPrevious={isSearchActive ? undefined : fetchPreviousPage}
                     hasPrevious={isSearchActive ? false : hasPreviousPage}
-                    isLoadingPrevious={isSearchActive ? false : isFetchingPreviousPage || isSeeking}
+                    isLoadingPrevious={isSearchActive ? false : isLoadingPrevious}
                     windowStart={isSearchActive ? 0 : windowStart}
                     onSeekToIndex={isSearchActive ? undefined : seekToIndex}
                 />

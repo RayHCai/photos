@@ -49,6 +49,13 @@ export interface WindowedMediaResult {
     isFetchingPreviousPage: boolean;
     seekToIndex: (targetIndex: number) => Promise<void>;
     isSeeking: boolean;
+    /**
+     * Whether a page request would be dropped right now. Pass these to the grid's
+     * lookahead gates rather than the directional flags — see the note on their
+     * derivation below.
+     */
+    isLoadingMore: boolean;
+    isLoadingPrevious: boolean;
 }
 
 /**
@@ -87,6 +94,18 @@ export function useWindowedMedia({
         maxPages: WINDOW_PAGES,
         staleTime,
         enabled,
+        /**
+         * A reconnect must not rebuild the window.
+         *
+         * `refetchOnWindowFocus` is already off globally, but reconnect keeps its default,
+         * and an installed PWA changes network state constantly — every resume from
+         * background, every walk between cells and wifi. A refetch here is not one
+         * request: it re-runs every retained page sequentially, and while it does, page
+         * requests are dropped on the floor (see the `isLoadingMore` note below). Set on
+         * the query rather than on the QueryClient so the rest of the app keeps refreshing
+         * after a blip.
+         */
+        refetchOnReconnect: false,
     });
 
     const items = useMemo<MediaShellItem[]>(
@@ -220,5 +239,25 @@ export function useWindowedMedia({
         isFetchingPreviousPage: query.isFetchingPreviousPage,
         seekToIndex,
         isSeeking,
+        /**
+         * Derived from `isFetching`, not from the directional flags.
+         *
+         * `isFetchingNextPage` is only true for a fetch React Query itself tagged as
+         * forward. A plain refetch — any `['media']` invalidation from a favourite, hide,
+         * delete or retry, or a reconnect — carries no direction, so both directional
+         * flags read false throughout it. Meanwhile `fetchNextPage({ cancelRefetch:
+         * false })` is a no-op while a fetch is already in flight: query-core returns the
+         * running promise and discards the requested direction. So the grid's lookahead
+         * fired on every render for the whole refetch and nothing happened, the "Loading
+         * more…" pill stayed hidden because it keys off this flag, and the gallery simply
+         * dead-ended at the bottom of the loaded window — for five sequential round trips,
+         * one per retained page. That is the reported "cannot scroll down".
+         *
+         * Gating on `isFetching` makes the lookahead wait instead of firing into the void,
+         * and because these are in the effects' dependency arrays it re-evaluates the
+         * moment the refetch settles and issues a real request.
+         */
+        isLoadingMore: query.isFetching || isSeeking,
+        isLoadingPrevious: query.isFetching || isSeeking,
     };
 }

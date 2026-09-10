@@ -16,7 +16,8 @@
 
 // Bump on each deploy. Anything not in CURRENT_CACHES is deleted on activate.
 // v3 retires the v2 thumbnail cache, which may hold 404s stored as valid thumbnails.
-const VERSION = 'v3';
+// v4 retires v3, whose eviction pass could leave the cache far below its target.
+const VERSION = 'v4';
 const CACHE_NAME = `photos-app-${VERSION}`;
 const THUMB_CACHE = `photos-thumbs-${VERSION}`;
 
@@ -32,6 +33,16 @@ const THUMB_MAX_BYTES = 120 * 1024 * 1024;
 const THUMB_TRIM_TARGET_BYTES = 100 * 1024 * 1024;
 /** Fallback charge for an entry whose response declares no Content-Length. */
 const UNKNOWN_SIZE_ESTIMATE = 30 * 1024;
+/**
+ * Puts between two budget checks.
+ *
+ * A check is one `cache.keys()`; at 64 puts apart that is well under one per screenful
+ * even on the densest mobile grid, and the worst the interval costs is a few MB of
+ * overshoot before an over-budget cache is trimmed.
+ */
+const TRIM_CHECK_INTERVAL = 64;
+/** Entries the cache always keeps, however large they turn out to be. */
+const THUMB_MIN_ENTRIES = 200;
 
 const PRECACHE_URLS = ['/', '/manifest.json', '/icon.svg'];
 
@@ -112,30 +123,89 @@ async function tryFetch(request, init) {
     }
 }
 
+/** Bytes an entry occupies, from the response we already hold. */
+function responseSize(response) {
+    const length = Number(response?.headers.get('Content-Length') ?? 0);
+    return length > 0 ? length : UNKNOWN_SIZE_ESTIMATE;
+}
+
+/**
+ * Running mean of stored thumbnail sizes, and how many samples it is built from.
+ *
+ * The budget is denominated in bytes but enforced in *entries*, and this is the
+ * conversion between the two. It has to be measured rather than assumed because the
+ * same cache serves wildly different entry sizes: a phone at six columns requests the
+ * 200w rung (~10 KB), a desktop justified row requests the 800w rung (~80 KB). A fixed
+ * entry cap would hold a third of the budget on one and four times it on the other.
+ *
+ * The sample count is capped so the mean tracks the density currently being scrolled
+ * instead of being pinned by the first few thousand entries of the session.
+ */
+let meanEntryBytes = UNKNOWN_SIZE_ESTIMATE;
+let entrySamples = 0;
+const MAX_ENTRY_SAMPLES = 512;
+
+function noteEntrySize(bytes) {
+    entrySamples = Math.min(entrySamples + 1, MAX_ENTRY_SAMPLES);
+    meanEntryBytes += (bytes - meanEntryBytes) / entrySamples;
+}
+
+/** Puts since the last budget check, and whether a check is already running. */
+let putsSinceCheck = 0;
+let trimming = false;
+
 /**
  * Evict oldest-first until the cache is back under the target.
  *
  * cache.keys() returns insertion order, so deleting from the front is FIFO.
+ *
+ * This used to read *every* entry back with `cache.match` to sum Content-Length, and
+ * it ran after every single successful put — including the overwhelmingly common case
+ * where the cache was nowhere near its budget, because the early-out sat after the
+ * sweep rather than before it. At the ~12,000 entries a 120 MB budget holds at mobile
+ * thumbnail sizes that is 12,000 storage round trips per stored thumbnail, and a
+ * six-column grid stores upwards of sixty per screenful — roughly 800,000 Cache API
+ * operations for one flick, all of them queued on the same per-origin queue that every
+ * incoming `fetch` event has to get through. Since the worker answers thumbnails with
+ * `event.respondWith`, the browser will not fetch around it: the <img> simply never
+ * resolves and the cell stays on its blurhash background. Worse, each in-flight sweep
+ * retained an array of every Request in the cache, and dozens ran concurrently, which
+ * is enough memory pressure for iOS to kill the worker outright.
+ *
+ * Now the hot path is an integer increment. A check costs one `cache.keys()` and
+ * happens once per TRIM_CHECK_INTERVAL puts, deletes touch only the entries actually
+ * being evicted, and the whole thing is coalesced so concurrent puts cannot stack
+ * sweeps on top of each other.
  */
 async function trimThumbCache(cache) {
-    const keys = await cache.keys();
+    if (trimming) return;
+    if (++putsSinceCheck < TRIM_CHECK_INTERVAL) return;
+    putsSinceCheck = 0;
 
-    let total = 0;
-    const sizes = [];
-    for (const request of keys) {
-        const response = await cache.match(request);
-        const length = Number(response?.headers.get('Content-Length') ?? 0);
-        const size = length > 0 ? length : UNKNOWN_SIZE_ESTIMATE;
-        sizes.push({ request, size });
-        total += size;
+    trimming = true;
+    try {
+        const keys = await cache.keys();
+        const maxEntries = Math.max(
+            THUMB_MIN_ENTRIES,
+            Math.floor(THUMB_MAX_BYTES / meanEntryBytes)
+        );
+        if (keys.length <= maxEntries) return;
+
+        const targetEntries = Math.max(
+            THUMB_MIN_ENTRIES,
+            Math.floor(THUMB_TRIM_TARGET_BYTES / meanEntryBytes)
+        );
+        const evict = keys.length - targetEntries;
+        for (let i = 0; i < evict; i++) {
+            await cache.delete(keys[i]);
+        }
     }
-
-    if (total <= THUMB_MAX_BYTES) return;
-
-    for (const { request, size } of sizes) {
-        if (total <= THUMB_TRIM_TARGET_BYTES) break;
-        await cache.delete(request);
-        total -= size;
+    catch {
+        // Storage errors here are not worth surfacing: the cache is a cache, and the
+        // next check will try again.
+    }
+    finally {
+        trimming = false;
     }
 }
 
@@ -200,8 +270,15 @@ async function thumbnailStrategy(event, url) {
     // tell whether it is a thumbnail or a 404 dressed as one.
     if (response.ok && !response.redirected && response.status !== 206) {
         const copy = response.clone();
+        // Sized from the response already in hand, so the budget never costs a read back
+        // out of the cache.
+        const size = responseSize(response);
         event.waitUntil(
-            safePut(cache, key, copy).then((stored) => (stored ? trimThumbCache(cache) : undefined))
+            safePut(cache, key, copy).then((stored) => {
+                if (!stored) return;
+                noteEntrySize(size);
+                return trimThumbCache(cache);
+            })
         );
     }
 

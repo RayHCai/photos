@@ -98,10 +98,10 @@ export function SharedCollectionView({
                 timeline={timeline ?? []}
                 onLoadMore={windowed.fetchNextPage}
                 hasMore={windowed.hasNextPage}
-                isLoadingMore={windowed.isFetchingNextPage || windowed.isSeeking}
+                isLoadingMore={windowed.isLoadingMore}
                 onLoadPrevious={windowed.fetchPreviousPage}
                 hasPrevious={windowed.hasPreviousPage}
-                isLoadingPrevious={windowed.isFetchingPreviousPage || windowed.isSeeking}
+                isLoadingPrevious={windowed.isLoadingPrevious}
                 windowStart={windowed.windowStart}
                 onSeekToIndex={windowed.seekToIndex}
             />
