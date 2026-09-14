@@ -85,6 +85,10 @@ export function TimelineScrollbar({
                  * swallowed swipes for as long as the user kept scrolling.
                  */
                 pointerEvents: 'none',
+                // Dragging the track must not start a text selection in the gallery
+                // behind it; inherited by the labels, thumb and tooltip.
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
                 zIndex: 30,
             }}
             className={`transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
