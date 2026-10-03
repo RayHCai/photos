@@ -1,23 +1,52 @@
+# Dependencies
 node_modules/
+.venv/
+venv/
+env/
+
+# Build output
 dist/
 build/
 .next/
-.env
-.env.local
-*.log
-.DS_Store
-Thumbs.db
-coverage/
-.turbo/
+out/
+target/
+*.egg-info/
 
 # TypeScript build info
 *.tsbuildinfo
 
-# Python
-venv/
+# Caches and coverage
+coverage/
+.turbo/
+.eslintcache
 __pycache__/
 *.pyc
-*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# AI tool files
+.claude/
+CLAUDE.md
+AGENTS.md
 
 # Terraform
 .terraform/
