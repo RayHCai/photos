@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import io
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from PIL import Image
@@ -32,6 +32,9 @@ from worker.metadata import (
     extract_photo_metadata,
     extract_raw_metadata,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Tag ids, so intent is legible at the call site.
 _DATETIME = 0x0132  # IFD0 — file modification timestamp
