@@ -51,6 +51,18 @@ resource "aws_iam_user_policy" "app_s3" {
         Resource = ["${aws_s3_bucket.photos.arn}/originals/*"]
       },
       {
+        # Originals are uploaded with a pending tag, which S3 authorizes as
+        # PutObjectTagging, and confirm removes it (see the
+        # expire-unconfirmed-uploads lifecycle rule).
+        Sid    = "PendingUploadTag"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObjectTagging",
+          "s3:DeleteObjectTagging",
+        ]
+        Resource = ["${aws_s3_bucket.photos.arn}/originals/*"]
+      },
+      {
         # Required for the HeadObject existence checks; constrained to the same
         # prefixes.
         Sid      = "BucketList"

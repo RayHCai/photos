@@ -98,6 +98,30 @@ resource "aws_s3_bucket_lifecycle_configuration" "photos" {
     }
   }
 
+  # Originals are uploaded tagged upload-state=pending and the tag is removed when
+  # the client confirms, which is also when the media row is created. An upload
+  # abandoned in between (connection dropped, app closed) keeps the tag and is
+  # expired here, so there is no row to get stuck in the gallery and no stranded
+  # object. Must stay longer than the backend's upload-token TTL (24h) so a valid
+  # token never confirms an object that is about to be deleted.
+  rule {
+    id     = "expire-unconfirmed-uploads"
+    status = "Enabled"
+
+    filter {
+      and {
+        prefix = "originals/"
+        tags = {
+          "upload-state" = "pending"
+        }
+      }
+    }
+
+    expiration {
+      days = 2
+    }
+  }
+
   # Versioning is enabled, and the only rule used to be the one above — so a
   # "deleted" photo was retained forever: still billed, and still restorable by
   # anyone with bucket access. A user deleting 20 GB for privacy or to reclaim space

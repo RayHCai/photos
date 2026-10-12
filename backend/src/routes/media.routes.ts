@@ -125,7 +125,7 @@ router.post(
     '/upload/confirm',
     validate({
         body: z.object({
-            id: z.string().min(1),
+            uploadToken: z.string().min(1),
         }),
     }),
     mediaController.confirmUpload
@@ -147,8 +147,7 @@ router.post(
     '/upload/multipart/presign',
     validate({
         body: z.object({
-            s3Key: z.string().min(1),
-            uploadId: z.string().min(1),
+            uploadToken: z.string().min(1),
             partNumber: z.number().int().positive(),
         }),
     }),
@@ -159,9 +158,7 @@ router.post(
     '/upload/multipart/complete',
     validate({
         body: z.object({
-            mediaItemId: z.string().min(1),
-            s3Key: z.string().min(1),
-            uploadId: z.string().min(1),
+            uploadToken: z.string().min(1),
             parts: z.array(
                 z.object({
                     PartNumber: z.number().int().positive(),

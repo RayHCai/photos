@@ -61,16 +61,16 @@ export const presign = asyncHandler(async (req: Request, res: Response) => {
         req.body.mimeType,
         req.body.fileSize
     );
-    logger.info({ mediaId: result.id }, 'presigned upload created');
+    logger.info('presigned upload created');
     res.json(result);
 });
 
 export const confirmUpload = asyncHandler(async (req: Request, res: Response) => {
-    logger.info({ mediaId: req.body.id }, 'confirming presigned upload');
+    logger.info('confirming presigned upload');
     // Propagated into the queue job so worker logs can be correlated with the
     // originating request; previously x-request-id died at the HTTP boundary.
     const item = await mediaService.confirmPresignedUpload(
-        req.body.id,
+        req.body.uploadToken,
         req.headers['x-request-id'] as string | undefined
     );
     logger.info({ mediaId: item.id }, 'presigned upload confirmed, processing enqueued');
@@ -84,14 +84,13 @@ export const multipartInit = asyncHandler(async (req: Request, res: Response) =>
         req.body.mimeType,
         req.body.fileSize
     );
-    logger.info({ mediaId: result.id }, 'multipart upload initiated');
+    logger.info('multipart upload initiated');
     res.json(result);
 });
 
 export const multipartPresign = asyncHandler(async (req: Request, res: Response) => {
     const result = await mediaService.getMultipartPartUrl(
-        req.body.s3Key,
-        req.body.uploadId,
+        req.body.uploadToken,
         req.body.partNumber
     );
     res.json(result);
@@ -99,11 +98,9 @@ export const multipartPresign = asyncHandler(async (req: Request, res: Response)
 
 export const multipartComplete = asyncHandler(async (req: Request, res: Response) => {
     const partCount = req.body.parts?.length ?? 0;
-    logger.info({ mediaId: req.body.mediaItemId, partCount }, 'multipart upload completing');
+    logger.info({ partCount }, 'multipart upload completing');
     const item = await mediaService.completeMultipartUpload(
-        req.body.mediaItemId,
-        req.body.s3Key,
-        req.body.uploadId,
+        req.body.uploadToken,
         req.body.parts,
         req.headers['x-request-id'] as string | undefined
     );

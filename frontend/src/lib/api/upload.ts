@@ -50,16 +50,23 @@ export async function checkDuplicates(fileNames: string[]): Promise<DuplicateEnt
     return duplicates;
 }
 
+/**
+ * No media item exists until the upload is confirmed. `uploadToken` is the
+ * server's signed record of what it issued, handed back on every later call.
+ */
 interface PresignResponse {
-    id: string;
     presignedUrl: string;
-    s3Key: string;
+    /** Signed into the URL; the PUT is rejected without them. */
+    headers: Record<string, string>;
+    uploadToken: string;
 }
 
 interface MultipartInitResponse {
+    uploadToken: string;
+}
+
+interface ConfirmedUpload {
     id: string;
-    uploadId: string;
-    s3Key: string;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -78,9 +85,15 @@ function isRetryable(err: unknown): boolean {
     return status >= 500;
 }
 
+/** A presigned PUT: the URL plus any headers its signature covers. */
+interface S3Target {
+    url: string;
+    headers?: Record<string, string>;
+}
+
 /** PUT a body to S3, resolving with the object's ETag. */
 function uploadToS3WithProgress(
-    url: string,
+    { url, headers }: S3Target,
     body: Blob,
     onProgress: (pct: number) => void,
     signal?: AbortSignal
@@ -93,6 +106,9 @@ function uploadToS3WithProgress(
 
         const xhr = new XMLHttpRequest();
         xhr.open('PUT', url);
+        for (const [name, value] of Object.entries(headers ?? {})) {
+            xhr.setRequestHeader(name, value);
+        }
 
         // XHR predates AbortSignal, so the bridge is manual. Without it there was no
         // way to stop an in-flight PUT of a multi-gigabyte original.
@@ -132,20 +148,17 @@ function uploadToS3WithProgress(
 }
 
 /**
- * PUT a body to S3, retrying a transient failure up to `S3_MAX_RETRIES` times
- * with exponential backoff (1s, 2s, 4s). `getUrl` runs before every attempt so a
- * retry can pick up a freshly signed URL instead of replaying an expired one.
+ * Run `fn`, retrying a transient failure up to `S3_MAX_RETRIES` times with
+ * exponential backoff (1s, 2s, 4s).
  */
-async function putToS3WithRetry(
-    getUrl: () => Promise<string>,
-    body: Blob,
-    onProgress: (pct: number) => void,
+async function withRetry<T>(
+    fn: () => Promise<T>,
     onRetry?: UploadRetryHandler,
     signal?: AbortSignal
-): Promise<string> {
+): Promise<T> {
     for (let attempt = 0; ; attempt++) {
         try {
-            return await uploadToS3WithProgress(await getUrl(), body, onProgress, signal);
+            return await fn();
         }
         catch (err) {
             // A cancellation is not a transient failure; retrying it would restart the
@@ -154,10 +167,54 @@ async function putToS3WithRetry(
             if (attempt >= S3_MAX_RETRIES || !isRetryable(err)) throw err;
             onRetry?.(attempt + 1, S3_MAX_RETRIES);
             await sleep(S3_RETRY_BASE_DELAY_MS * 2 ** attempt);
-            // Rewind: the failed attempt may have reported partial progress.
-            onProgress(0);
         }
     }
+}
+
+/**
+ * PUT a body to S3 with retries. `getTarget` runs before every attempt so a
+ * retry can pick up a freshly signed URL instead of replaying an expired one.
+ */
+function putToS3WithRetry(
+    getTarget: () => Promise<S3Target>,
+    body: Blob,
+    onProgress: (pct: number) => void,
+    onRetry?: UploadRetryHandler,
+    signal?: AbortSignal
+): Promise<string> {
+    return withRetry(
+        async () => {
+            // Rewind: a failed earlier attempt may have reported partial progress.
+            onProgress(0);
+            return uploadToS3WithProgress(await getTarget(), body, onProgress, signal);
+        },
+        onRetry,
+        signal
+    );
+}
+
+/**
+ * Confirm/complete is what creates the media item, so losing it to a blip would
+ * throw away a finished upload (the object then expires with its pending tag).
+ * Retrying is safe: the server returns the existing item for a repeat.
+ */
+function finalizeWithRetry(
+    path: string,
+    body: object,
+    onRetry?: UploadRetryHandler,
+    signal?: AbortSignal
+): Promise<string> {
+    return withRetry(
+        async () => {
+            const item = await apiFetch<ConfirmedUpload>(path, {
+                method: 'POST',
+                body: JSON.stringify(body),
+            });
+            return item.id;
+        },
+        onRetry,
+        signal
+    );
 }
 
 async function runWithConcurrency(
@@ -181,7 +238,7 @@ async function singleUpload(
     onRetry?: UploadRetryHandler,
     signal?: AbortSignal
 ): Promise<string> {
-    const { id, presignedUrl } = await apiFetch<PresignResponse>(
+    const { presignedUrl, headers, uploadToken } = await apiFetch<PresignResponse>(
         '/media/upload/presign',
         {
             method: 'POST',
@@ -193,17 +250,17 @@ async function singleUpload(
         }
     );
 
-    // Every attempt reuses this URL: /upload/presign also creates the media-item
-    // row, so re-signing per attempt would orphan a record each time. The
+    // Every attempt reuses this URL, since the token names its key. The
     // signature outlives the retry window by a wide margin.
-    await putToS3WithRetry(async () => presignedUrl, file, onProgress, onRetry, signal);
+    await putToS3WithRetry(
+        async () => ({ url: presignedUrl, headers }),
+        file,
+        onProgress,
+        onRetry,
+        signal
+    );
 
-    await apiFetch('/media/upload/confirm', {
-        method: 'POST',
-        body: JSON.stringify({ id }),
-    });
-
-    return id;
+    return finalizeWithRetry('/media/upload/confirm', { uploadToken }, onRetry, signal);
 }
 
 async function multipartUpload(
@@ -215,7 +272,7 @@ async function multipartUpload(
 ): Promise<string> {
     const totalParts = Math.ceil(file.size / PART_SIZE);
 
-    const { id, uploadId, s3Key } = await apiFetch<MultipartInitResponse>(
+    const { uploadToken } = await apiFetch<MultipartInitResponse>(
         '/media/upload/multipart/init',
         {
             method: 'POST',
@@ -243,10 +300,10 @@ async function multipartUpload(
                     '/media/upload/multipart/presign',
                     {
                         method: 'POST',
-                        body: JSON.stringify({ s3Key, uploadId, partNumber }),
+                        body: JSON.stringify({ uploadToken, partNumber }),
                     }
                 );
-                return presignedUrl;
+                return { url: presignedUrl };
             },
             blob,
             // Progress is reported per completed part, so byte updates are noise.
@@ -272,12 +329,12 @@ async function multipartUpload(
     );
 
     parts.sort((a, b) => a.PartNumber - b.PartNumber);
-    await apiFetch('/media/upload/multipart/complete', {
-        method: 'POST',
-        body: JSON.stringify({ mediaItemId: id, s3Key, uploadId, parts }),
-    });
-
-    return id;
+    return finalizeWithRetry(
+        '/media/upload/multipart/complete',
+        { uploadToken, parts },
+        onRetry,
+        signal
+    );
 }
 
 export async function uploadFile(

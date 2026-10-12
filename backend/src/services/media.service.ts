@@ -10,6 +10,7 @@ import * as queueService from './queue.service.js';
 import { logger } from '../utils/logger.js';
 import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
 import { mapWithConcurrency } from '../utils/async.js';
+import { signUploadToken, verifyUploadToken, type UploadClaims } from '../utils/uploadToken.js';
 import { MEDIA_ITEM_SUMMARY_SELECT, MEDIA_ITEM_SHELL_SELECT } from '../utils/select.js';
 import { HIDDEN_EXCLUSION, HIDDEN_NOT_EXISTS } from '../utils/filters.js';
 import { collectMediaS3Keys, MEDIA_S3_KEY_SELECT } from '../utils/s3.js';
@@ -182,25 +183,71 @@ export async function createPresignedUpload(
     const presignedUrl = await s3Service.getPresignedUploadUrl(
         originalKey,
         mimeType,
-        fileSize
+        fileSize,
+        { tagging: s3Service.PENDING_UPLOAD_TAGGING }
     );
 
-    const mediaItem = await prisma.mediaItem.create({
-        data: newMediaItemData(fileName, mimeType, fileSize, originalKey),
-    });
-
-    return { id: mediaItem.id, presignedUrl, s3Key: originalKey };
+    // No row yet. Creating it here is what left interrupted uploads in the
+    // gallery as items stuck on "Processing..." with no object behind them; it
+    // is now created on confirm, once the bytes are known to be in S3.
+    return {
+        presignedUrl,
+        // Part of the signature, so the PUT must send them exactly.
+        headers: { 'x-amz-tagging': s3Service.PENDING_UPLOAD_TAGGING },
+        uploadToken: signUploadToken({ key: originalKey, fileName, mimeType, fileSize }),
+    };
 }
 
-export async function confirmPresignedUpload(mediaItemId: string, requestId?: string) {
-    const item = await findOrThrow(
-        () => prisma.mediaItem.findUnique({ where: { id: mediaItemId } }),
-        'Media item'
-    );
-    await _createTaskAndEnqueue(
-        item.id, item.originalKey, item.mimeType, item.type, 'full', requestId
-    );
+export async function confirmPresignedUpload(uploadToken: string, requestId?: string) {
+    return finalizeUpload(verifyUploadToken(uploadToken), requestId);
+}
+
+/**
+ * Turn an upload the client reports finished into a library item.
+ *
+ * Order matters. The pending tag comes off before the row is created, so a
+ * crash between the two leaves an untagged object with no row — wasted storage,
+ * nothing visible. The reverse order would leave a row whose object the
+ * lifecycle rule later deletes: a broken photo in the gallery.
+ *
+ * Safe to repeat, since a client retries a confirm whose response it lost: the
+ * row is found by its unique key rather than duplicated. A retry re-enqueues
+ * only while the item is still PENDING, which covers a first attempt that
+ * created the row but failed to enqueue; a superseded task is dropped by the
+ * worker's currentTaskId check.
+ */
+async function finalizeUpload(claims: UploadClaims, requestId?: string) {
+    const { key, fileName, mimeType, fileSize } = claims;
+
+    // 'error' is let through: clearing the tag fails loudly if the object is
+    // truly absent, and refusing here would strand a real upload.
+    if (await s3Service.getObjectState(key) === 'missing') {
+        throw new AppError(409, 'Upload not found in storage');
+    }
+    await s3Service.clearPendingUploadTag(key);
+
+    let item;
+    try {
+        item = await prisma.mediaItem.create({
+            data: newMediaItemData(fileName, mimeType, fileSize, key),
+        });
+    }
+    catch (err) {
+        if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) {
+            throw err;
+        }
+        item = await prisma.mediaItem.findUniqueOrThrow({ where: { originalKey: key } });
+        if (item.processingStatus !== 'PENDING') return item;
+    }
+
+    await _createTaskAndEnqueue(item.id, key, mimeType, item.type, 'full', requestId);
     return item;
+}
+
+function verifyMultipartToken(uploadToken: string) {
+    const claims = verifyUploadToken(uploadToken);
+    if (!claims.uploadId) throw new AppError(400, 'Not a multipart upload token');
+    return { ...claims, uploadId: claims.uploadId };
 }
 
 export async function initMultipartUpload(
@@ -216,43 +263,34 @@ export async function initMultipartUpload(
 
     const uploadId = await s3Service.initMultipartUpload(originalKey, mimeType);
 
-    const mediaItem = await prisma.mediaItem.create({
-        data: newMediaItemData(fileName, mimeType, fileSize, originalKey),
-    });
-
-    return { id: mediaItem.id, uploadId, s3Key: originalKey };
+    // As with a single PUT, the row waits for completion.
+    return {
+        uploadToken: signUploadToken({ key: originalKey, fileName, mimeType, fileSize, uploadId }),
+    };
 }
 
-export async function getMultipartPartUrl(
-    s3Key: string,
-    uploadId: string,
-    partNumber: number
-) {
-    const presignedUrl = await s3Service.getPresignedPartUrl(
-        s3Key,
-        uploadId,
-        partNumber
-    );
+/** The key and upload id come from the token, so a client can only sign parts of its own upload. */
+export async function getMultipartPartUrl(uploadToken: string, partNumber: number) {
+    const { key, uploadId } = verifyMultipartToken(uploadToken);
+    const presignedUrl = await s3Service.getPresignedPartUrl(key, uploadId, partNumber);
     return { presignedUrl, partNumber };
 }
 
 export async function completeMultipartUpload(
-    mediaItemId: string,
-    s3Key: string,
-    uploadId: string,
+    uploadToken: string,
     parts: Array<{ PartNumber: number; ETag: string }>,
     requestId?: string
 ) {
-    await s3Service.completeMultipartUpload(s3Key, uploadId, parts);
-
-    const item = await findOrThrow(
-        () => prisma.mediaItem.findUnique({ where: { id: mediaItemId } }),
-        'Media item'
-    );
-    await _createTaskAndEnqueue(
-        item.id, item.originalKey, item.mimeType, item.type, 'full', requestId
-    );
-    return item;
+    const claims = verifyMultipartToken(uploadToken);
+    try {
+        await s3Service.completeMultipartUpload(claims.key, claims.uploadId, parts);
+    }
+    catch (err) {
+        // A retry after a completion whose response was lost finds the upload
+        // id already gone; the assembled object existing proves it completed.
+        if (await s3Service.getObjectState(claims.key) !== 'exists') throw err;
+    }
+    return finalizeUpload(claims, requestId);
 }
 
 export async function listMedia(params: {
@@ -617,12 +655,13 @@ const ABANDONED_UPLOAD_GRACE_MS = 60 * 60 * 1000;
  * exception and returned false, so any transient S3 error — credential rotation,
  * an IAM change, a DNS blip — classified a perfectly good row as an orphan and
  * hard-deleted it, cascading its faces and album membership while leaving the
- * bytes stranded in S3. It also raced live uploads: presign creates the row
- * before the PUT completes, so a concurrent check deleted rows mid-upload.
+ * bytes stranded in S3. It also raced live uploads: presign used to create the
+ * row before the PUT completed, so a concurrent check deleted rows mid-upload.
  *
  * Now: only a *definitive* 404 counts as missing, only rows still PENDING and
  * older than the grace period are eligible for cleanup, and the HEAD fan-out is
- * bounded.
+ * bounded. Rows are now created only after their object is confirmed, so the
+ * cleanup exists for rows left stuck by the old upload flow.
  */
 export async function checkDuplicateFileNames(fileNames: string[]) {
     const existing = await prisma.mediaItem.findMany({

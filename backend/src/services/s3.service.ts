@@ -6,6 +6,7 @@ import {
     CreateMultipartUploadCommand,
     UploadPartCommand,
     CompleteMultipartUploadCommand,
+    DeleteObjectTaggingCommand,
     ListObjectsV2Command,
     type ListObjectsV2CommandOutput,
 } from '@aws-sdk/client-s3';
@@ -72,17 +73,28 @@ export function generateWebKey(ext: string): string {
     return buildKey('web', ext);
 }
 
+/**
+ * Tag carried by a client-uploaded original until the upload is confirmed. A
+ * bucket lifecycle rule (infra/main.tf) expires objects that still carry it, so
+ * an upload abandoned before confirm cleans itself up with no DB row to leak.
+ */
+export const PENDING_UPLOAD_TAGGING = 'upload-state=pending';
+
 export async function getPresignedUploadUrl(
     key: string,
     mimeType: string,
     fileSize?: number,
-    { streamedBody = false }: { streamedBody?: boolean } = {}
+    {
+        streamedBody = false,
+        tagging,
+    }: { streamedBody?: boolean; tagging?: string } = {}
 ) {
     const command = new PutObjectCommand({
         Bucket: env.S3_BUCKET,
         Key: key,
         ContentType: mimeType,
         ...(fileSize !== undefined && { ContentLength: fileSize }),
+        ...(tagging !== undefined && { Tagging: tagging }),
     });
 
     // A streamed (chunked, no Content-Length) PUT is incompatible with the
@@ -90,6 +102,11 @@ export async function getPresignedUploadUrl(
     // with the checksum disabled. See s3StreamingUploadClient.
     return getSignedUrl(streamedBody ? s3StreamingUploadClient : s3Client, command, {
         expiresIn: env.PRESIGNED_URL_EXPIRY_SECONDS,
+        // By default the presigner hoists x-amz-* headers into the query string,
+        // where S3 ignores a tagging value. Kept as a signed header instead, the
+        // client must send it verbatim or the PUT is rejected — so an original
+        // cannot reach the bucket without the pending tag.
+        ...(tagging !== undefined && { unhoistableHeaders: new Set(['x-amz-tagging']) }),
     });
 }
 
@@ -397,6 +414,8 @@ export async function initMultipartUpload(key: string, mimeType: string) {
             Bucket: env.S3_BUCKET,
             Key: key,
             ContentType: mimeType,
+            // Applied to the assembled object on completion.
+            Tagging: PENDING_UPLOAD_TAGGING,
         })
     );
     return result.UploadId!;
@@ -431,5 +450,12 @@ export async function completeMultipartUpload(
             UploadId: uploadId,
             MultipartUpload: { Parts: parts },
         })
+    );
+}
+
+/** Take an original out of the lifecycle rule's reach. Idempotent. */
+export async function clearPendingUploadTag(key: string) {
+    await s3Client.send(
+        new DeleteObjectTaggingCommand({ Bucket: env.S3_BUCKET, Key: key })
     );
 }
