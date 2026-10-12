@@ -4,7 +4,36 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { navItems } from '@/lib/constants/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { getIconButtonStyles } from '@/components/ui/IconButton';
+import { getWorkerStatus } from '@/lib/api/jobs';
+
+/**
+ * Worker liveness, from its heartbeat. Grey until the first answer arrives so a
+ * page load never flashes red.
+ */
+function WorkerStatusDot() {
+    const { data, isError } = useQuery({
+        queryKey: ['worker-status'],
+        queryFn: getWorkerStatus,
+        refetchInterval: 30_000,
+        refetchOnWindowFocus: true,
+    });
+
+    const online = data?.online === true;
+    const known = data !== undefined || isError;
+    const color = !known ? 'bg-stone-300' : online ? 'bg-emerald-500' : 'bg-red-500';
+    const label = !known ? 'Worker status unknown' : online ? 'Worker online' : 'Worker offline';
+
+    return (
+        <span
+            title={label}
+            aria-label={label}
+            role="status"
+            className={`absolute top-1 right-1 w-2 h-2 rounded-full ring-2 ring-white ${color}`}
+        />
+    );
+}
 
 export function Sidebar() {
     const pathname = usePathname();
@@ -26,7 +55,7 @@ export function Sidebar() {
                 {/* Hamburger / X toggle */}
                 <button
                     onClick={() => setOpen(!open)}
-                    className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-stone-100 transition-colors duration-200"
+                    className="relative w-9 h-9 flex items-center justify-center rounded-lg hover:bg-stone-100 transition-colors duration-200"
                     aria-label={open ? 'Close menu' : 'Open menu'}
                 >
                     <div className="w-4 h-3 relative">
@@ -46,6 +75,7 @@ export function Sidebar() {
                             }`}
                         />
                     </div>
+                    <WorkerStatusDot />
                 </button>
 
                 {/* Nav icons - slide down */}
