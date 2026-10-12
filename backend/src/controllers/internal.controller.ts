@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import * as internalService from '../services/internal.service.js';
 import * as personsService from '../services/persons.service.js';
 import * as s3Service from '../services/s3.service.js';
+import * as workerStatusService from '../services/workerStatus.service.js';
 import { asyncHandler } from '../utils/async.js';
 import { logger } from '../utils/logger.js';
 import { isManagedStorageKey } from '../constants/storage.js';
@@ -231,4 +232,9 @@ export const deleteExpiredSessions = asyncHandler(async (_req: Request, res: Res
     const count = await internalService.deleteExpiredSessions();
     logger.info({ deleted: count }, 'expired sessions cleaned up');
     res.json({ deleted: count });
+});
+
+export const workerHeartbeat = asyncHandler(async (req: Request, res: Response) => {
+    await workerStatusService.recordHeartbeat(req.body.workerId, req.body.startedAt);
+    res.status(204).send();
 });

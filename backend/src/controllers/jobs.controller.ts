@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as queueService from '../services/queue.service.js';
 import * as mediaService from '../services/media.service.js';
+import * as workerStatusService from '../services/workerStatus.service.js';
 import { prisma } from '../config/prisma.js';
 import { asyncHandler, fireAndForget } from '../utils/async.js';
 import { logger } from '../utils/logger.js';
@@ -189,4 +190,8 @@ export const getProcessingStats = asyncHandler(async (_req: Request, res: Respon
     });
     const find = (s: string) => counts.find(c => c.processingStatus === s)?._count.id ?? 0;
     res.json({ pending: find('PENDING'), processing: find('PROCESSING'), failed: find('FAILED') });
+});
+
+export const getWorkerStatus = asyncHandler(async (_req: Request, res: Response) => {
+    res.json(await workerStatusService.getWorkerStatus());
 });

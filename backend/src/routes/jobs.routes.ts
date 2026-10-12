@@ -49,5 +49,6 @@ router.get('/stats', jobsController.getStats);
 router.get('/thumbnail-ladder-audit', jobsController.auditThumbnailLadders);
 router.get('/storage-stats', jobsController.getStorageStats);
 router.get('/processing-stats', jobsController.getProcessingStats);
+router.get('/worker-status', jobsController.getWorkerStatus);
 
 export default router;

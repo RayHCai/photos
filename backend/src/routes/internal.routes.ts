@@ -270,6 +270,19 @@ router.post(
 
 router.delete('/persons/orphans', internalController.deleteOrphanPersons);
 
+// ─── Worker Liveness ─────────────────────────────────────────
+
+router.post(
+    '/worker/heartbeat',
+    validate({
+        body: z.object({
+            workerId: z.string().min(1).max(200),
+            startedAt: z.coerce.date(),
+        }),
+    }),
+    internalController.workerHeartbeat
+);
+
 // ─── Sessions ────────────────────────────────────────────────
 
 router.delete('/sessions/expired', internalController.deleteExpiredSessions);

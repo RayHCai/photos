@@ -213,3 +213,15 @@ model QueryEmbedding {
 
     @@map("query_embeddings")
 }
+
+// ─── Worker Liveness ───────────────────────────────────────
+// One row per worker process, upserted by its heartbeat. Liveness is derived
+// at read time from lastHeartbeatAt, so nothing has to flip a flag when a
+// worker dies.
+model WorkerHeartbeat {
+    workerId        String   @id @map("worker_id")
+    startedAt       DateTime @map("started_at")
+    lastHeartbeatAt DateTime @map("last_heartbeat_at")
+
+    @@map("worker_heartbeats")
+}
