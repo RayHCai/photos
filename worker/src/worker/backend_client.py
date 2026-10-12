@@ -434,3 +434,13 @@ async def persist_geocoding(
 async def delete_expired_sessions() -> int:
     data = await _request("DELETE", "/sessions/expired")
     return data["deleted"]
+
+
+# ─── Worker Liveness ─────────────────────────────────────────
+
+
+async def send_heartbeat(worker_id: str, started_at: str) -> None:
+    await _request("POST", "/worker/heartbeat", json={
+        "workerId": worker_id,
+        "startedAt": started_at,
+    })

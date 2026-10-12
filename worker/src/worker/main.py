@@ -12,6 +12,7 @@ from worker.clip_encoder import warm_up as clip_warm_up
 from worker.config import settings
 from worker.consumer import start_consumers, stop_consumers
 from worker.face_detect import warm_up as face_warm_up
+from worker.heartbeat import start_heartbeat, stop_heartbeat
 from worker.log import get_logger
 
 if TYPE_CHECKING:
@@ -52,11 +53,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("models_warm")
 
     await start_consumers()
+    # Only beat once consumers are running, so "online" means "will pick up work".
+    start_heartbeat()
     logger.info("worker_ready")
 
     yield
 
     logger.info("worker_shutting_down")
+    await stop_heartbeat()
     await stop_consumers()
     await close_client()
     logger.info("worker_stopped")

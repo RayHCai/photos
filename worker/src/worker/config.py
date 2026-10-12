@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Nominatim's usage policy requires a real contact address in the User-Agent.
     geocode_user_agent: str = "photos-app/1.0"
 
+    # Liveness beat to the backend. The backend assumes 20s and marks the worker
+    # offline after three missed beats, so keep the two in sync.
+    heartbeat_interval_seconds: float = 20.0
+
     log_level: str = "info"
 
     @field_validator("log_level")
