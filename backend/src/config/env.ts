@@ -4,7 +4,16 @@ import { z } from 'zod';
 const envSchema = z.object({
     PORT: z.coerce.number().default(4000),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    CORS_ORIGIN: z.string().default('http://localhost:3000'),
+    // Comma-separated, so the app can be served from more than one domain.
+    CORS_ORIGIN: z
+        .string()
+        .default('http://localhost:3000')
+        .transform((s) =>
+            s
+                .split(',')
+                .map((o) => o.trim())
+                .filter(Boolean)
+        ),
     DATABASE_URL: z.string(),
     REDIS_URL: z.string().default('redis://localhost:6379'),
     AWS_REGION: z.string().default('us-east-1'),
