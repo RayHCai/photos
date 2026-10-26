@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import socket
 from datetime import UTC, datetime
@@ -39,8 +40,6 @@ async def stop_heartbeat() -> None:
     global _task  # noqa: PLW0603
     if _task is not None:
         _task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await _task
-        except asyncio.CancelledError:
-            pass
         _task = None
