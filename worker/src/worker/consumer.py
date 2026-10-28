@@ -23,6 +23,26 @@ def _parse_redis_opts() -> dict[str, Any]:
         "host": parsed.hostname or "localhost",
         "port": parsed.port or 6379,
         "db": int(parsed.path.lstrip("/") or "0"),
+        # Socket resilience. This worker runs on a laptop/Mac mini against remote
+        # (prod) Redis, so a Wi-Fi handoff or sleep/wake routinely leaves the TCP
+        # connection half-open: the socket still reads as ESTABLISHED but no
+        # packets flow. With no client-side timeout the BullMQ blocking consumer
+        # (bzpopmin) parks on that dead socket *forever* — the process stays alive
+        # and keeps heartbeating while the queue silently stops draining, which is
+        # exactly the recurring "worker went stale" incident.
+        #
+        # socket_timeout bounds every socket read, so a dead connection raises
+        # TimeoutError instead of hanging; bullmq already wraps the client in a
+        # Retry that reconnects on TimeoutError/ConnectionError, so the consumer
+        # self-heals on the next poll. It MUST exceed bullmq's maximum block
+        # timeout (10s, see worker.py:maximum_block_timeout) or a normal idle
+        # bzpopmin would time out on every poll.
+        "socket_timeout": 30,
+        "socket_connect_timeout": 10,
+        # OS-level dead-peer detection as a backstop for reads already in flight.
+        "socket_keepalive": True,
+        # PING idle connections before reuse and reconnect if the ping fails.
+        "health_check_interval": 30,
     }
     if parsed.username:
         opts["username"] = parsed.username
