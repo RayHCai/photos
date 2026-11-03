@@ -19,23 +19,19 @@ export const DESKTOP_GAP = 5;
 /** Horizontal inset applied to each desktop row, per side. */
 export const DESKTOP_INSET = 66;
 
-/** Gap between cells in the fixed-grid (mobile) layout. */
-export const MOBILE_GAP = 2;
-/** Horizontal padding of the mobile grid, per side. */
-export const MOBILE_PADDING = 4;
-
 /**
- * Extra right-hand inset on mobile, reserved for the timeline scrollbar.
+ * Gap between cells in the fixed-grid (mobile) layout.
  *
- * There was none. The grid ran to within MOBILE_PADDING of the right edge while the
- * scrollbar's scrub track occupied the 32px immediately inside it, so the track sat
- * entirely on top of the last column — half of a cell at six columns. Every touch aimed
- * at a photo there landed on the scrubber instead, which is why scrolling with a thumb on
- * the right edge did nothing while the rest of the app kept responding.
- *
- * Sized to clear the track (28px) plus a small gap, so the two never intersect.
+ * There is deliberately no mobile padding or scrollbar gutter any more. The grid runs
+ * edge to edge like the phone photo apps, and the timeline scrollbar overlays the last
+ * column while it is visible. A gutter used to be reserved because the scrub track was
+ * hit-testable along the whole right edge and swallowed swipes aimed at the last column;
+ * on touch only the scrollbar's thumb is hit-testable now (see TimelineScrollbar), so
+ * the strip no longer needs to be kept clear.
  */
-export const MOBILE_SCROLLBAR_GUTTER = 32;
+export const MOBILE_GAP = 2;
+/** Left inset of a date header on mobile, where the grid itself has none. */
+export const MOBILE_HEADER_INSET = 12;
 
 /** Target row height for the justified layout. */
 export const TARGET_ROW_HEIGHT = 220;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, useLayoutEffect, useEffect } from 'react';
+import { useCallback, useMemo, useRef, useState, useLayoutEffect, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { GalleryRow } from './GalleryRow';
 import { DateHeader } from './DateHeader';
@@ -11,14 +11,13 @@ import { usePinchToZoom } from '@/lib/hooks/usePinchToZoom';
 import { useDragSelect, type DragSelectController } from '@/lib/hooks/useDragSelect';
 import { useHasTouch } from '@/lib/hooks/useIsMobile';
 import { CDN_CONFIGURED } from '@/lib/api/media';
+import { computeWindowShift, estimateLeadingSpace } from '@/lib/utils/scrollAnchor';
 import {
     DATE_HEADER_HEIGHT,
     DESKTOP_GAP,
     DESKTOP_INSET,
     MOBILE_BREAKPOINT,
     MOBILE_GAP,
-    MOBILE_PADDING,
-    MOBILE_SCROLLBAR_GUTTER,
     TARGET_ROW_HEIGHT,
 } from '@/lib/constants/layout';
 import type { DateGroup } from '@/lib/utils/groupByDate';
@@ -163,6 +162,12 @@ export function GalleryGrid({
      * pattern that produces layout thrash on the one thread the scroll depends on.
      */
     const [measuredHeight, setMeasuredHeight] = useState(0);
+    /**
+     * Height of the empty strip above the first loaded row, standing in for the pages
+     * evicted above the window. Fed to the virtualizer as `paddingStart`; maintained by
+     * the re-anchor effect below.
+     */
+    const [leadingSpace, setLeadingSpace] = useState(0);
 
     useLayoutEffect(() => {
         const el = containerRef.current;
@@ -197,17 +202,13 @@ export function GalleryGrid({
     const isMobile = containerWidth > 0 && containerWidth < MOBILE_BREAKPOINT;
 
     /**
-     * One source for the mobile insets.
-     *
-     * The cell arithmetic and the row's own padding have to agree exactly: the rows carry
-     * `contain: layout style paint`, so a row whose flex children total more than its
-     * content box is silently *clipped* rather than visibly overflowing, with no
-     * horizontal scrollbar to give it away. Deriving both from the same pair means the
-     * gutter cannot half-land.
+     * Edge to edge. The rows carry `contain: layout style paint`, so a row whose flex
+     * children total more than its content box is silently *clipped* rather than visibly
+     * overflowing; with no insets the cell arithmetic below and the row box agree by
+     * construction. The timeline scrollbar overlays the last column while it is visible
+     * (MOBILE_GAP in constants/layout says why no gutter is reserved for it).
      */
-    const mobileInsetLeft = MOBILE_PADDING;
-    const mobileInsetRight = MOBILE_PADDING + MOBILE_SCROLLBAR_GUTTER;
-    const mobileAvailableWidth = containerWidth - mobileInsetLeft - mobileInsetRight;
+    const mobileAvailableWidth = containerWidth;
 
     const { columns: mobileColumns, gestureScale, isPinching } = usePinchToZoom(
         containerRef,
@@ -215,6 +216,13 @@ export function GalleryGrid({
         mobileAvailableWidth,
         MOBILE_GAP
     );
+
+    /** Square cell edge at the committed density; the one number every mobile row shares. */
+    const mobileCellSize = Math.max(
+        0,
+        Math.floor((mobileAvailableWidth - (mobileColumns - 1) * MOBILE_GAP) / mobileColumns)
+    );
+    const mobileRowHeight = mobileCellSize + MOBILE_GAP;
 
     // Press-and-drag multi-select with edge auto-scroll. Coexists with pinch-to-zoom
     // above — it bails out the moment a second finger lands. Gated on pointer type
@@ -249,9 +257,7 @@ export function GalleryGrid({
         const rows: VirtualRow[] = [];
 
         if (isMobile) {
-            const cellSize = Math.floor(
-                (mobileAvailableWidth - (mobileColumns - 1) * MOBILE_GAP) / mobileColumns
-            );
+            const cellSize = mobileCellSize;
 
             for (const group of groups) {
                 rows.push({
@@ -319,7 +325,7 @@ export function GalleryGrid({
         }
 
         return rows;
-    }, [groups, containerWidth, isMobile, mobileColumns, mobileAvailableWidth]);
+    }, [groups, containerWidth, isMobile, mobileColumns, mobileCellSize]);
 
     /**
      * Overscan, derived from the row height so the lookahead is a fixed strip of pixels.
@@ -327,16 +333,11 @@ export function GalleryGrid({
      * met and the tighter margin the comment below describes is preserved.
      */
     const overscan = useMemo(() => {
-        if (!isMobile || mobileColumns <= 0 || mobileAvailableWidth <= 0) return 3;
-        const cellSize = Math.floor(
-            (mobileAvailableWidth - (mobileColumns - 1) * MOBILE_GAP) / mobileColumns
-        );
-        const rowHeight = cellSize + MOBILE_GAP;
-        if (rowHeight <= 0) return 3;
-        const byPixels = Math.ceil(OVERSCAN_LOOKAHEAD_PX / rowHeight);
+        if (!isMobile || mobileColumns <= 0 || mobileCellSize <= 0) return 3;
+        const byPixels = Math.ceil(OVERSCAN_LOOKAHEAD_PX / mobileRowHeight);
         const byCells = Math.floor(MAX_OVERSCAN_CELLS_PER_SIDE / mobileColumns);
         return Math.max(3, Math.min(MAX_OVERSCAN_ROWS, byPixels, byCells));
-    }, [isMobile, mobileColumns, mobileAvailableWidth]);
+    }, [isMobile, mobileColumns, mobileCellSize, mobileRowHeight]);
 
     const virtualizer = useVirtualizer({
         count: virtualRows.length,
@@ -348,6 +349,11 @@ export function GalleryGrid({
         // row count: cells shrink as columns grow, so the decoded cost of the strip stays
         // roughly constant instead of tracking the row count. Desktop is unchanged.
         overscan,
+        /**
+         * The empty strip standing in for pages evicted above the window; see the
+         * re-anchor effect below and lib/utils/scrollAnchor.
+         */
+        paddingStart: leadingSpace,
         /**
          * Stable keys. The rows were previously keyed by array index, so any insertion
          * or removal above the viewport — a new upload, a delete, a hide, a
@@ -388,62 +394,88 @@ export function GalleryGrid({
      * The window is a fixed span of pages: scrolling down evicts the top page and
      * scrolling up prepends one. Either way the row set above the viewport changes,
      * so every remaining row shifts and — because the browser keeps `scrollTop`
-     * numerically fixed — the content under the user would jump. This corrects for
-     * it by measuring the row straddling the top edge before and after the change
-     * and adjusting `scrollTop` by the exact delta.
+     * numerically fixed — the content under the user would jump.
      *
-     * Heights are exact (justified layout is a pure function of the stored
-     * dimensions), so this is a correction, not an estimate. A jump replaces the
-     * whole window, so its anchor key is gone — the effect no-ops and the scrollbar
-     * lands the jump itself. Runs in a layout effect so the fix lands before paint.
+     * This used to correct `scrollTop` by the exact delta, and that write is what
+     * ended every momentum fling on iOS at a page boundary: WebKit stops a fling the
+     * moment script writes scrollTop. The correction now goes into `leadingSpace`
+     * instead — an empty strip above the first row that grows by exactly what an
+     * eviction removed and shrinks by what a prepend adds — so the surviving rows
+     * never move on screen and scrollTop is left alone. lib/utils/scrollAnchor has
+     * the maths and the two cases that still need a write.
+     *
+     * Two-commit protocol. The strip is React state, so a new value reaches the DOM
+     * one synchronous re-render after this effect sets it; a layout-effect setState
+     * re-renders before paint, so nothing is visible in between. Any scrollTop
+     * correction that assumes the *new* strip is parked in `pendingScrollDeltaRef`
+     * and applied by this same effect in that second commit, once the strip the DOM
+     * has (`leadingSpace`) equals the one asked for (`leadingSpaceRef`). The
+     * scrollbar's landings go through `scrollToLocal`, which positions against the
+     * strip the DOM has *now* and leaves the pending strip change to the same
+     * mechanism, so a jump that lands between the two commits is still corrected.
+     *
+     * Heights are exact (both layouts are pure functions of the stored dimensions),
+     * so this is a correction, not an estimate. A jump replaces the whole window, so
+     * no anchor survives: the strip is then sized from the item count above the
+     * window and the scrollbar lands the jump itself.
      */
     const prevRowsRef = useRef<VirtualRow[] | null>(null);
+    /** The strip height asked for; may be one commit ahead of the DOM. */
+    const leadingSpaceRef = useRef(0);
+    /** The strip height the DOM currently has. */
+    const appliedLeadingSpaceRef = useRef(0);
+    /** scrollTop correction to apply once the DOM strip matches `leadingSpaceRef`. */
+    const pendingScrollDeltaRef = useRef(0);
+
+    /**
+     * Scroll so that the loaded row at `offset` — an offset within the loaded rows,
+     * strip excluded — sits at the top of the viewport.
+     */
+    const scrollToLocal = useCallback((offset: number) => {
+        const container = containerRef.current;
+        if (!container) return;
+        container.scrollTop = appliedLeadingSpaceRef.current + offset;
+        pendingScrollDeltaRef.current = leadingSpaceRef.current - appliedLeadingSpaceRef.current;
+    }, []);
+
+    // Only consulted after a jump, to size the strip for the items above the window.
+    const rowHeightEstimate = isMobile ? mobileRowHeight : TARGET_ROW_HEIGHT + DESKTOP_GAP;
+    const itemsPerRowEstimate = isMobile
+        ? mobileColumns
+        : Math.max(1, Math.round((containerWidth - DESKTOP_INSET * 2) / (TARGET_ROW_HEIGHT * 1.4)));
+
     useLayoutEffect(() => {
         const container = containerRef.current;
+        if (!container) return;
+        const applied = leadingSpace;
+        appliedLeadingSpaceRef.current = applied;
+
         const prev = prevRowsRef.current;
         prevRowsRef.current = virtualRows;
-        if (!container || !prev || prev === virtualRows) return;
-
-        const scrollTop = container.scrollTop;
-        if (scrollTop <= 0) return; // pinned to the top: nothing above to preserve
-
-        // New-layout start offset for every row key, for O(1) survivor lookup.
-        const newOffsets = new Map<string, number>();
-        let nacc = 0;
-        for (const r of virtualRows) {
-            newOffsets.set(r.key, nacc);
-            nacc += r.height;
-        }
-
-        /**
-         * Walk the OLD rows from the top edge downward and re-anchor to the *first*
-         * one that still exists in the new layout, keeping it at the same viewport
-         * position it held before (`newOff - (oldOff - scrollTop)`).
-         *
-         * A window slide leaves the straddling top-edge row intact, so this lands on
-         * it exactly like the previous single-anchor version. But an invalidation
-         * that shifted the source — a delete or hide *above* a deep window — replaces
-         * that row's identity; anchoring instead to the nearest surviving row below
-         * keeps the jump to a fraction of a row rather than no-op'ing and letting the
-         * browser hold scrollTop fixed over content that moved by a whole page. If
-         * nothing survives (the whole window was replaced, i.e. a jump) it falls
-         * through and the scrollbar lands the jump itself.
-         */
-        let oldOff = 0;
-        let reachedTopEdge = false;
-        for (const r of prev) {
-            if (oldOff + r.height > scrollTop) reachedTopEdge = true;
-            if (reachedTopEdge) {
-                const newOff = newOffsets.get(r.key);
-                if (newOff !== undefined) {
-                    const next = newOff - (oldOff - scrollTop);
-                    if (next !== scrollTop) container.scrollTop = next;
-                    return;
-                }
+        if (prev && prev !== virtualRows) {
+            const shift = computeWindowShift(prev, virtualRows, container.scrollTop, applied, {
+                atLibraryStart: !hasPrevious,
+            });
+            let nextSpace = shift.leadingSpace;
+            let target = shift.scrollTop;
+            if (!shift.anchored) {
+                nextSpace = hasPrevious
+                    ? estimateLeadingSpace(windowStart, itemsPerRowEstimate, rowHeightEstimate)
+                    : 0;
+                // Nothing on screen survived, so keep whatever is there until the
+                // scrollbar lands the jump: the strip change is a pure shift.
+                target = container.scrollTop + (nextSpace - applied);
             }
-            oldOff += r.height;
+            leadingSpaceRef.current = nextSpace;
+            pendingScrollDeltaRef.current = target - container.scrollTop;
+            if (nextSpace !== applied) setLeadingSpace(nextSpace);
         }
-    }, [virtualRows]);
+
+        if (leadingSpaceRef.current === applied && pendingScrollDeltaRef.current !== 0) {
+            container.scrollTop += pendingScrollDeltaRef.current;
+            pendingScrollDeltaRef.current = 0;
+        }
+    }, [virtualRows, leadingSpace, hasPrevious, windowStart, itemsPerRowEstimate, rowHeightEstimate]);
 
     const virtualItems = virtualizer.getVirtualItems();
 
@@ -472,10 +504,12 @@ export function GalleryGrid({
      */
     useEffect(() => {
         if (!hasPrevious || isLoadingPrevious || totalSize <= 0) return;
-        if (scrollOffset <= viewportHeight * LOAD_MORE_VIEWPORT_LOOKAHEAD) {
+        // Measured from the first loaded row, not from the top of the scroll range:
+        // the strip above it is empty space standing in for the unloaded pages.
+        if (scrollOffset - leadingSpace <= viewportHeight * LOAD_MORE_VIEWPORT_LOOKAHEAD) {
             onLoadPrevious?.();
         }
-    }, [scrollOffset, viewportHeight, totalSize, hasPrevious, isLoadingPrevious, onLoadPrevious]);
+    }, [scrollOffset, leadingSpace, viewportHeight, totalSize, hasPrevious, isLoadingPrevious, onLoadPrevious]);
 
     return (
         <div className="h-full relative">
@@ -533,9 +567,7 @@ export function GalleryGrid({
                                     style={{
                                         height: virtualItem.size,
                                         transform: `translateY(${virtualItem.start}px)`,
-                                        padding: isMobile
-                                            ? `0 ${mobileInsetRight}px 0 ${mobileInsetLeft}px`
-                                            : `0 ${DESKTOP_INSET}px`,
+                                        padding: isMobile ? 0 : `0 ${DESKTOP_INSET}px`,
                                         contain: 'layout style paint',
                                     }}
                                 >
@@ -583,6 +615,9 @@ export function GalleryGrid({
                 onLoadMore={onLoadMore}
                 windowStart={windowStart}
                 onSeekToIndex={onSeekToIndex}
+                hasTouch={hasTouch}
+                leadingSpace={leadingSpace}
+                scrollToLocal={scrollToLocal}
             />
         </div>
     );

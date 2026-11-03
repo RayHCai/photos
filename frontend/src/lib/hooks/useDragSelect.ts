@@ -194,15 +194,26 @@ export function useDragSelect(
                 return;
             }
             const t = e.touches[0];
-            const id = mediaIdAtPoint(t.clientX, t.clientY);
-            if (!id) return; // not on a photo (e.g. date header) — leave scroll alone
             startX.current = t.clientX;
             startY.current = t.clientY;
             lastX.current = t.clientX;
             lastY.current = t.clientY;
             activeTouchId.current = t.identifier;
             clearLongPress();
-            longPressTimer.current = setTimeout(() => startDrag(id), LONG_PRESS_MS);
+            /**
+             * The photo under the finger is resolved when the long press *fires*, not
+             * on touchstart. `elementFromPoint` forces a synchronous layout, and
+             * touchstart is the first event of every scroll gesture — so every flick
+             * began with a layout flush it did not need. A press that moves past the
+             * slop, or that scrolls, is cancelled before the timer fires and never
+             * pays for the hit test; a press on a header resolves to nothing and is
+             * dropped here instead.
+             */
+            longPressTimer.current = setTimeout(() => {
+                longPressTimer.current = null;
+                const id = mediaIdAtPoint(startX.current, startY.current);
+                if (id) startDrag(id);
+            }, LONG_PRESS_MS);
         };
 
         /**

@@ -1,6 +1,7 @@
 'use client';
 
 import { memo } from 'react';
+import { MOBILE_HEADER_INSET } from '@/lib/constants/layout';
 
 export const DateHeader = memo(function DateHeader({
     label,
@@ -20,7 +21,13 @@ export const DateHeader = memo(function DateHeader({
              * the timeline overlay instead (see TimelineScrollbar).
              */
             className="py-2 bg-stone-50/90 text-left"
-            style={contentOffset ? { paddingLeft: Math.max(0, contentOffset - 4) } : { paddingLeft: 4 }}
+            // Desktop rows are centred, so the label lines up with the row's first
+            // photo. The mobile grid is edge to edge, so the label gets its own inset.
+            style={
+                contentOffset
+                    ? { paddingLeft: Math.max(0, contentOffset - 4) }
+                    : { paddingLeft: MOBILE_HEADER_INSET }
+            }
         >
             <h2 className="text-sm font-serif text-stone-700">{label}</h2>
         </div>

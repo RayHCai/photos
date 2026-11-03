@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 
 const MIN_COLUMNS = 2;
 const MAX_COLUMNS = 6;
-const DEFAULT_COLUMNS = 2;
+/** Three across is what the phone photo apps open on; pinch moves either way. */
+const DEFAULT_COLUMNS = 3;
 const WHEEL_THRESHOLD = 80;
 
 function getTouchDistance(t1: Touch, t2: Touch): number {

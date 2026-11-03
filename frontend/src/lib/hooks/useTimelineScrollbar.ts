@@ -52,6 +52,15 @@ interface UseTimelineScrollbarOptions {
      * between. Rejects if the fetch fails.
      */
     onSeekToIndex?: (index: number) => Promise<void>;
+    /**
+     * Height of the empty strip the grid keeps above its first loaded row in place of
+     * the pages evicted above the window (see GalleryGrid). Every row offset this hook
+     * computes is relative to the first loaded row, so `scrollTop` is read through
+     * this and written through `scrollToLocal`.
+     */
+    leadingSpace?: number;
+    /** Scrolls so the loaded row at this offset (strip excluded) is at the top. */
+    scrollToLocal: (offset: number) => void;
 }
 
 /**
@@ -81,9 +90,19 @@ export function useTimelineScrollbar(
     containerRef: RefObject<HTMLDivElement | null>,
     virtualRows: VirtualRow[],
     timeline: TimelineMonth[] | undefined,
-    { hasMore = false, onLoadMore, windowStart = 0, onSeekToIndex }: UseTimelineScrollbarOptions = {},
+    {
+        hasMore = false,
+        onLoadMore,
+        windowStart = 0,
+        onSeekToIndex,
+        leadingSpace = 0,
+        scrollToLocal,
+    }: UseTimelineScrollbarOptions,
 ): UseTimelineScrollbarResult {
     const [thumbFraction, setThumbFraction] = useState(0);
+    /** Latest committed thumb position, for a drag that starts on the thumb itself. */
+    const thumbFractionRef = useRef(0);
+    thumbFractionRef.current = thumbFraction;
     const [activeLabel, setActiveLabel] = useState<string | null>(null);
     const [isHovering, setIsHovering] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
@@ -193,13 +212,14 @@ export function useTimelineScrollbar(
         if (maxScroll <= 0) return;
 
         const atEnd = maxScroll - container.scrollTop < 2;
+        const localTop = Math.max(0, container.scrollTop - leadingSpace);
         const fraction = atEnd && !hasMore
             ? 1
             : totalItems > 1
-                ? (windowStart + itemIndexAtScrollTop(rowIndex, container.scrollTop)) / (totalItems - 1)
+                ? (windowStart + itemIndexAtScrollTop(rowIndex, localTop)) / (totalItems - 1)
                 : 0;
         setThumbFraction(Math.max(0, Math.min(1, fraction)));
-    }, [containerRef, rowIndex, totalItems, hasMore, windowStart]);
+    }, [containerRef, rowIndex, totalItems, hasMore, windowStart, leadingSpace]);
 
     // Track scroll position → thumb fraction (direct 1:1 mapping)
     useEffect(() => {
@@ -215,7 +235,10 @@ export function useTimelineScrollbar(
                 resyncThumb();
             }
 
-            const currentDate = findCurrentDateBinary(dateIndex, container.scrollTop);
+            const currentDate = findCurrentDateBinary(
+                dateIndex,
+                Math.max(0, container.scrollTop - leadingSpace)
+            );
             if (currentDate) {
                 commitLabel(formatDate(currentDate));
             }
@@ -253,7 +276,7 @@ export function useTimelineScrollbar(
             if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
             if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
         };
-    }, [containerRef, markers, dateIndex, resyncThumb, setPendingIndex, commitLabel]);
+    }, [containerRef, markers, dateIndex, resyncThumb, setPendingIndex, commitLabel, leadingSpace]);
 
     // Hover detection
     useEffect(() => {
@@ -416,7 +439,7 @@ export function useTimelineScrollbar(
         }
 
         setPendingIndex(null);
-        container.scrollTop = scrollTop;
+        scrollToLocal(scrollTop);
 
         const currentDate = findCurrentDateBinary(dateIndex, scrollTop);
         commitLabel(
@@ -424,7 +447,7 @@ export function useTimelineScrollbar(
                 ? formatDate(currentDate)
                 : (findMarkerAtFraction(markers, clamped)?.label ?? null)
         );
-    }, [containerRef, markers, dateIndex, rowIndex, totalItems, windowStart, requestPages, setPendingIndex, commitLabel]);
+    }, [containerRef, markers, dateIndex, rowIndex, totalItems, windowStart, requestPages, setPendingIndex, commitLabel, scrollToLocal]);
 
     /**
      * Land a jump once the pages holding its target arrive.
@@ -447,7 +470,7 @@ export function useTimelineScrollbar(
         const scrollTop = scrollTopForItemIndex(rowIndex, target - windowStart);
         if (scrollTop !== null) {
             setPendingIndex(null);
-            container.scrollTop = scrollTop;
+            scrollToLocal(scrollTop);
             const currentDate = findCurrentDateBinary(dateIndex, scrollTop);
             if (currentDate) commitLabel(formatDate(currentDate));
             return;
@@ -458,12 +481,12 @@ export function useTimelineScrollbar(
         }
         else {
             // Ran out of library before reaching the target — settle at the end,
-            // which is as near the requested date as the data goes.
+            // which is as near the requested date as the data goes. The browser
+            // clamps the overshoot to the real maximum.
             setPendingIndex(null);
-            const maxScroll = container.scrollHeight - container.clientHeight;
-            if (maxScroll > 0) container.scrollTop = maxScroll;
+            scrollToLocal(rowIndex.totalHeight);
         }
-    }, [containerRef, rowIndex, dateIndex, hasMore, windowStart, requestPages, setPendingIndex, commitLabel]);
+    }, [containerRef, rowIndex, dateIndex, hasMore, windowStart, requestPages, setPendingIndex, commitLabel, scrollToLocal]);
 
     // rAF-throttle drag updates: pointermove fires far more often than the
     // display refreshes, so coalesce to at most one scrollTop write per frame.
@@ -513,7 +536,21 @@ export function useTimelineScrollbar(
         setIsDragging(true);
 
         const trackRect = track.getBoundingClientRect();
-        const fraction = Math.max(0, Math.min(1, (e.clientY - trackRect.top) / trackRect.height));
+        /**
+         * Grabbing the thumb drags it from where it is. The fraction used to come
+         * from the pointer's own position on the track, so a finger that landed a
+         * little above or below the thumb's centre teleported the thumb to the finger
+         * on the first move — a few per cent of the library before the drag had
+         * begun. Pressing elsewhere on the track (mouse only) still jumps to the press.
+         */
+        const grabbedThumb =
+            e.target instanceof Element && e.target.closest('[data-timeline-thumb]') !== null;
+        const grabOffset = grabbedThumb
+            ? e.clientY - (trackRect.top + thumbFractionRef.current * trackRect.height)
+            : 0;
+        const fractionAt = (clientY: number, rect: DOMRect) =>
+            Math.max(0, Math.min(1, (clientY - grabOffset - rect.top) / rect.height));
+        const fraction = fractionAt(e.clientY, trackRect);
         dragFractionRef.current = fraction;
         // Immediate feedback on the initial press, but not a commitment: a click is
         // only what the pointer was over when it came *up*.
@@ -525,9 +562,7 @@ export function useTimelineScrollbar(
                 if (Math.abs(ev.clientY - startClientY) < TOUCH_SCRUB_THRESHOLD_PX) return;
                 moved = true;
             }
-            const rect = track.getBoundingClientRect();
-            const f = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
-            scheduleDragFrame(f);
+            scheduleDragFrame(fractionAt(ev.clientY, track.getBoundingClientRect()));
         };
 
         const handlePointerUp = () => {
