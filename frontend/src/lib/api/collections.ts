@@ -1,4 +1,4 @@
-import { apiFetch, buildQueryString } from './client';
+import { apiFetch, buildQueryString, LONG_TIMEOUT_MS } from './client';
 import type {
     Collection,
     CollectionSummary,
@@ -6,6 +6,8 @@ import type {
     SystemCollectionRef,
 } from '../types/collections';
 import type { TimelineMonth } from '../types/media';
+import type { CursorPaginatedResponse } from '../types/api';
+import type { CollectionEvent, EventUpload, UndoResult } from '../types/contributions';
 
 interface PageParams {
     cursor?: string;
@@ -116,5 +118,32 @@ export function getCollectionMembership(
     return apiFetch('/collections/membership', {
         method: 'POST',
         body: JSON.stringify({ mediaItemIds }),
+    });
+}
+
+/** Every user album's id and name, for labelling where a guest upload came from. */
+export function getCollectionNames(): Promise<Array<{ id: string; name: string }>> {
+    return apiFetch('/collections/names');
+}
+
+/** One page of an album's change log, newest first. */
+export function getCollectionEvents(
+    id: string,
+    params: { cursor?: string } = {}
+): Promise<CursorPaginatedResponse<CollectionEvent>> {
+    const qs = buildQueryString(params);
+    return apiFetch(`/collections/${id}/events${qs ? `?${qs}` : ''}`);
+}
+
+/** Every file in one upload entry, with where each stands in review. */
+export function getEventUploads(id: string, eventId: string): Promise<EventUpload[]> {
+    return apiFetch(`/collections/${id}/events/${eventId}/uploads`);
+}
+
+export function undoCollectionEvents(id: string, eventIds: string[]): Promise<UndoResult> {
+    return apiFetch(`/collections/${id}/events/undo`, {
+        method: 'POST',
+        body: JSON.stringify({ eventIds }),
+        timeoutMs: LONG_TIMEOUT_MS,
     });
 }

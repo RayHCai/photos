@@ -6,6 +6,7 @@ import personsRoutes from './persons.routes.js';
 import searchRoutes from './search.routes.js';
 import shareRoutes from './share.routes.js';
 import jobsRoutes from './jobs.routes.js';
+import contributionsRoutes from './contributions.routes.js';
 
 const router = Router();
 
@@ -16,5 +17,6 @@ router.use('/persons', personsRoutes);
 router.use('/search', searchRoutes);
 router.use('/', shareRoutes);
 router.use('/jobs', jobsRoutes);
+router.use('/contributions', contributionsRoutes);
 
 export default router;

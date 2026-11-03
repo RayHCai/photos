@@ -165,45 +165,19 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
 export const archive = asyncHandler(async (req: Request, res: Response) => {
     const progressToken = (req.body.progressToken as string | undefined) ?? null;
 
-    try {
-        const ids = archiveService.parseArchiveIds(req.body.ids);
-        logger.info({ count: ids.length }, 'archive requested');
-
-        /**
-         * Recorded before the work starts, so the client's poll has something to
-         * find from its first tick. A poll that finds nothing cannot tell a request
-         * that was rejected from one that has not arrived yet, and can only sit
-         * there until it gives up — whereas a record can carry the rejection.
-         */
-        if (progressToken) await archiveProgress.startProgress(progressToken, ids.length);
-
-        const entries = await mediaService.getArchiveEntries(ids);
-        if (entries.length === 0) throw new AppError(404, 'None of these items exist');
-
-        await archiveService.streamArchive(
-            res,
-            entries,
-            archiveService.archiveFileName(entries.length),
-            progressToken
-        );
-    }
-    catch (err) {
-        /**
-         * The response is a download in a tab or a hidden frame, so the status code
-         * this rethrow produces is read by nobody. The progress record is the only
-         * channel back to the app — and it is written even for a failure that
-         * happened before startProgress, since the alternative is a panel that waits
-         * out its timeout on a request that was rejected immediately.
-         */
-        if (progressToken) {
-            await archiveProgress.finishProgress(
-                progressToken,
-                'failed',
-                err instanceof AppError ? err.message : 'Download failed'
-            );
+    await archiveService.serveArchive(
+        res,
+        progressToken,
+        () => {
+            const ids = archiveService.parseArchiveIds(req.body.ids);
+            logger.info({ count: ids.length }, 'archive requested');
+            return { expectedItems: ids.length, request: ids };
+        },
+        async (ids) => {
+            const entries = await mediaService.getArchiveEntries(ids);
+            return { entries, archiveName: archiveService.archiveFileName(entries.length) };
         }
-        throw err;
-    }
+    );
 });
 
 /**

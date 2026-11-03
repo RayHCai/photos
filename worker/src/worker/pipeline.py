@@ -418,7 +418,21 @@ async def _store_face(media_item_id: str, face: DetectedFace, **log_ctx: object)
     return True
 
 
-async def _stage_faces_photo(image: Image.Image, media_item_id: str) -> None:
+def _faces_skipped(media_item_id: str, skip: bool) -> bool:
+    """Face detection is left out for a guest's upload awaiting review.
+
+    The backend decides, when the task is claimed: such an upload is not the
+    owner's yet, and its faces should not seed or join anyone in People. It is
+    not marked scanned, so the faces pass runs once it is approved.
+    """
+    if skip:
+        logger.info("stage_faces_skipped", media_item_id=media_item_id, reason="pending_review")
+    return skip
+
+
+async def _stage_faces_photo(image: Image.Image, media_item_id: str, *, skip: bool = False) -> None:
+    if _faces_skipped(media_item_id, skip):
+        return
     logger.info("step_clear_faces", media_item_id=media_item_id)
     await api.clear_faces(media_item_id)
 
@@ -444,7 +458,11 @@ async def _stage_faces_photo(image: Image.Image, media_item_id: str) -> None:
     logger.info("stage_faces_done", media_item_id=media_item_id, count=stored)
 
 
-async def _stage_faces_video(frames: list[Image.Image], media_item_id: str) -> None:
+async def _stage_faces_video(
+    frames: list[Image.Image], media_item_id: str, *, skip: bool = False
+) -> None:
+    if _faces_skipped(media_item_id, skip):
+        return
     logger.info("step_clear_faces", media_item_id=media_item_id)
     await api.clear_faces(media_item_id)
 
@@ -553,6 +571,7 @@ async def process_photo(
     original_key: str,
     file_name: str,
     start_stage: Stage = "full",
+    skip_faces: bool = False,
 ) -> None:
     logger.info("processing_photo", media_item_id=media_item_id, stage=start_stage)
 
@@ -603,12 +622,12 @@ async def process_photo(
         try:
             if start_stage == "full":
                 await _stage_content_photo(image, meta, media_item_id, file_name)
-                await _stage_faces_photo(image, media_item_id)
+                await _stage_faces_photo(image, media_item_id, skip=skip_faces)
             elif start_stage == "clip":
                 await _stage_clip_photo(image, media_item_id)
-                await _stage_faces_photo(image, media_item_id)
+                await _stage_faces_photo(image, media_item_id, skip=skip_faces)
             elif start_stage == "faces":
-                await _stage_faces_photo(image, media_item_id)
+                await _stage_faces_photo(image, media_item_id, skip=skip_faces)
                 await api.set_processing_status(media_item_id, "COMPLETED")
             elif start_stage == "web":
                 await _stage_web(image, media_item_id)
@@ -668,6 +687,7 @@ async def process_video(
     original_key: str,
     file_name: str,
     start_stage: Stage = "full",
+    skip_faces: bool = False,
 ) -> None:
     logger.info("processing_video", media_item_id=media_item_id, stage=start_stage)
 
@@ -736,13 +756,13 @@ async def process_video(
 
         if start_stage == "full":
             await _stage_content_video(tmp_path, frames, media_item_id, file_name)
-            await _stage_faces_video(frames, media_item_id)
+            await _stage_faces_video(frames, media_item_id, skip=skip_faces)
             await _stage_transcode(tmp_path, media_item_id)
         elif start_stage == "clip":
             await _stage_clip_video(frames, media_item_id)
-            await _stage_faces_video(frames, media_item_id)
+            await _stage_faces_video(frames, media_item_id, skip=skip_faces)
         elif start_stage == "faces":
-            await _stage_faces_video(frames, media_item_id)
+            await _stage_faces_video(frames, media_item_id, skip=skip_faces)
             await api.set_processing_status(media_item_id, "COMPLETED")
         else:
             # process_photo grew this guard; the video chain never did, so a stage
@@ -764,14 +784,15 @@ async def process_media(
     mime_type: str,
     media_type: str,
     start_stage: Stage = "full",
+    skip_faces: bool = False,
 ) -> None:
     try:
         file_name = await api.get_file_name(media_item_id)
 
         if media_type == "PHOTO":
-            await process_photo(media_item_id, original_key, file_name, start_stage)
+            await process_photo(media_item_id, original_key, file_name, start_stage, skip_faces)
         elif media_type == "VIDEO":
-            await process_video(media_item_id, original_key, file_name, start_stage)
+            await process_video(media_item_id, original_key, file_name, start_stage, skip_faces)
         else:
             raise ValueError(f"Unknown media type: {media_type}")
 

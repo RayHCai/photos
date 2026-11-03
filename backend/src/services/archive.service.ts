@@ -94,10 +94,11 @@ export function uniqueNames(entries: ArchiveEntry[]): ArchiveEntry[] {
 /**
  * Read one object, yielding nothing if it cannot be read.
  *
- * Wrapped in a generator so the S3 GET is not issued until the archiver actually
- * reaches this entry: `Readable.from` does not start the generator body until the
- * first read. Opening every object up front would leave dozens of S3 connections
- * idle in the queue, and the ones at the back would time out before their turn.
+ * Wrapped in a generator so the S3 GET is not issued until the stream is first
+ * read: `Readable.from` does not start the generator body before then. That alone
+ * is not enough, because archiver pipes every appended stream into a PassThrough
+ * the moment it is appended, which is a read — so streamArchive appends one entry
+ * at a time, and this is only ever handed to archiver when it is the next to go.
  *
  * A failure here must not reject. Headers are long gone by the time most of these
  * run, so there is no status code left to send — throwing would abort the archiver
@@ -190,10 +191,18 @@ export async function streamArchive(
     // Captured as a const so its narrowing survives into the callbacks below.
     const token = progressToken ?? null;
 
+    /** The entry archiver is writing, which holds an S3 connection until it ends. */
+    let currentSource: Readable | null = null;
+
     const stop = (status: archiveProgress.ArchiveProgressStatus, error?: string) => {
         if (stopped) return;
         stopped = true;
         archive.abort();
+        // archiver's abort only stops its queue; the stream it was reading stays
+        // open, and with it the S3 connection — leak enough of those and the
+        // client's pool is full, which stalls every later archive at its first
+        // entry.
+        currentSource?.destroy();
         if (token) {
             fireAndForget(
                 () => archiveProgress.finishProgress(token, status, error),
@@ -291,9 +300,30 @@ export async function streamArchive(
         });
     }
 
+    /**
+     * One entry at a time, each appended only once the last has been written.
+     *
+     * archiver starts reading a stream as soon as it is appended (see readObject),
+     * so appending the whole list up front issued every S3 GET at once. All but
+     * the entry being written then sat paused holding a connection, the rest
+     * queued behind the client's socket limit, and an album of a few hundred
+     * starved itself. It also meant finalize() ran before the first byte went
+     * out, and archiver ignores abort() once finalized — so a cancelled download
+     * never let go of any of those connections.
+     */
     for (const entry of uniqueNames(entries)) {
-        archive.append(Readable.from(readObject(entry)), { name: entry.fileName });
+        if (stopped) break;
+        const written = new Promise<void>((resolve) => {
+            archive.once('entry', () => resolve());
+        });
+        currentSource = Readable.from(readObject(entry));
+        archive.append(currentSource, { name: entry.fileName });
+        await Promise.race([written, stoppedSignal]);
     }
+    currentSource = null;
+
+    // Teardown has already published its own terminal status.
+    if (stopped) return;
 
     /**
      * Raced against teardown rather than simply awaited.
@@ -331,4 +361,68 @@ export async function streamArchive(
         await archiveProgress.finishProgress(token, 'completed');
     }
     logger.info({ archiveName, count: entries.length }, 'archive complete');
+}
+
+/** What to put in an archive, resolved once the request has been accepted. */
+export interface ArchiveContents {
+    entries: ArchiveEntry[];
+    archiveName: string;
+}
+
+/**
+ * Validate, resolve and stream one archive request, reporting every outcome
+ * against `progressToken`.
+ *
+ * Shared by every endpoint that answers with a zip — a selection, a whole album,
+ * a public share link — because they differ only in which entries go in. The
+ * response is a download in a tab or a hidden frame, so the status code a
+ * rethrow produces is read by nobody; the progress record is the only channel
+ * back to the app, and it is written even for a failure that happened before
+ * startProgress, since the alternative is a panel that waits out its timeout on
+ * a request that was rejected immediately.
+ *
+ * `accept` validates the request and says how many items to expect, which
+ * seeds the record before the entries are looked up so the client's first poll
+ * has something to find — a poll that finds nothing cannot tell a rejected
+ * request from one that has not arrived yet. Return 0 when the count is not
+ * known until `resolve` runs.
+ */
+export async function serveArchive<T>(
+    res: Response,
+    progressToken: string | null,
+    accept: () => { expectedItems: number; request: T },
+    resolve: (request: T) => Promise<ArchiveContents>
+): Promise<void> {
+    try {
+        const { expectedItems, request } = accept();
+        if (progressToken) await archiveProgress.startProgress(progressToken, expectedItems);
+
+        const { entries, archiveName } = await resolve(request);
+        if (entries.length === 0) throw new AppError(404, 'There is nothing to download');
+
+        await streamArchive(res, entries, archiveName, progressToken);
+    }
+    catch (err) {
+        if (progressToken) {
+            await archiveProgress.finishProgress(
+                progressToken,
+                'failed',
+                err instanceof AppError ? err.message : 'Download failed'
+            );
+        }
+        throw err;
+    }
+}
+
+/**
+ * Names the zip of a whole album after the album. Path separators and control
+ * characters are dropped, since some unpackers name the extraction folder after
+ * the archive.
+ */
+export function albumArchiveFileName(albumName: string): string {
+    const safe = [...albumName]
+        .map((ch) => (ch.charCodeAt(0) < 0x20 || '\\/:*?"<>|'.includes(ch) ? '_' : ch))
+        .join('')
+        .trim();
+    return `${safe || 'album'}.zip`;
 }

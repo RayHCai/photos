@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
 import * as collectionsService from '../services/collections.service.js';
+import * as archiveService from '../services/archive.service.js';
+import * as collectionEvents from '../services/collectionEvents.service.js';
+import * as collectionUndo from '../services/collectionUndo.service.js';
+import * as contributionsService from '../services/contributions.service.js';
 import { asyncHandler } from '../utils/async.js';
 import { logger } from '../utils/logger.js';
 
@@ -7,6 +11,10 @@ export const list = asyncHandler(async (_req: Request, res: Response) => {
     const collections = await collectionsService.listCollections();
     logger.debug({ count: collections.length }, 'collections listed');
     res.json(collections);
+});
+
+export const names = asyncHandler(async (_req: Request, res: Response) => {
+    res.json(await collectionsService.listCollectionNames());
 });
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
@@ -93,7 +101,7 @@ export const addItems = asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const itemCount = req.body.mediaItemIds?.length ?? 0;
     logger.info({ collectionId: id, itemCount }, 'adding items to collection');
-    await collectionsService.addItems(id, req.body.mediaItemIds);
+    await collectionsService.addItems(id, req.body.mediaItemIds as string[]);
     logger.info({ collectionId: id, itemCount }, 'items added to collection');
     res.status(201).json({ message: 'Items added' });
 });
@@ -102,7 +110,7 @@ export const removeItems = asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const itemCount = req.body.mediaItemIds?.length ?? 0;
     logger.info({ collectionId: id, itemCount }, 'removing items from collection');
-    await collectionsService.removeItems(id, req.body.mediaItemIds);
+    await collectionsService.removeItems(id, req.body.mediaItemIds as string[]);
     logger.info({ collectionId: id, itemCount }, 'items removed from collection');
     res.json({ message: 'Items removed' });
 });
@@ -110,4 +118,50 @@ export const removeItems = asyncHandler(async (req: Request, res: Response) => {
 export const membership = asyncHandler(async (req: Request, res: Response) => {
     const collectionIds = await collectionsService.getCollectionMembership(req.body.mediaItemIds);
     res.json({ collectionIds });
+});
+
+/**
+ * Stream a zip of every item in the album. A form POST navigation like
+ * mediaController.archive; the progress and cancel routes are the library's own
+ * /media/archive/:token ones, since the token is all they key on.
+ */
+export const archive = asyncHandler(async (req: Request, res: Response) => {
+    const progressToken = (req.body.progressToken as string | undefined) ?? null;
+    await archiveService.serveArchive(
+        res,
+        progressToken,
+        () => ({ expectedItems: 0, request: req.params.id as string }),
+        async (id) => {
+            const contents = await collectionsService.getCollectionArchive(id);
+            logger.info({ collectionId: id, count: contents.entries.length }, 'album archive requested');
+            return contents;
+        }
+    );
+});
+
+/** The album's change log, newest first. */
+export const events = asyncHandler(async (req: Request, res: Response) => {
+    const result = await collectionEvents.listEvents(req.params.id as string, {
+        ...(req.query.cursor ? { cursor: req.query.cursor as string } : {}),
+        ...(req.query.limit ? { limit: Number(req.query.limit) } : {}),
+    });
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+});
+
+/** Every file in one upload entry, with where each stands in review. */
+export const eventUploads = asyncHandler(async (req: Request, res: Response) => {
+    const result = await contributionsService.listEventUploads(
+        req.params.id as string,
+        req.params.eventId as string
+    );
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+});
+
+export const undoEvents = asyncHandler(async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    logger.info({ collectionId: id, count: req.body.eventIds.length }, 'undoing collection changes');
+    const result = await collectionUndo.undoEvents(id, req.body.eventIds as string[]);
+    res.json(result);
 });

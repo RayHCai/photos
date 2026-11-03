@@ -10,6 +10,7 @@ import {
     startStalledProcessingReaper,
 } from './services/queue.service.js';
 import { reapStalledProcessing } from './services/media.service.js';
+import { startContributionTimers } from './services/contributions.service.js';
 import { logger } from './utils/logger.js';
 import { fireAndForget } from './utils/async.js';
 
@@ -72,6 +73,9 @@ async function main() {
 
     startStalledProcessingReaper(() => reapStalledProcessing());
     logger.info('Stalled-processing reaper started');
+
+    startContributionTimers();
+    logger.info('Guest upload digest and purge timers started');
 
     const app = createApp();
 

@@ -149,6 +149,17 @@ export function archiveUrl(): string {
     return apiUrl('/media/archive');
 }
 
+/** Endpoint that streams a zip of a whole album (no ids needed). */
+export function collectionArchiveUrl(collectionId: string): string {
+    return apiUrl(`/collections/${collectionId}/archive`);
+}
+
+/**
+ * Path the progress and cancel routes for an archive hang off. The library's;
+ * a public share link has its own (see sharedArchiveProgressBase).
+ */
+export const ARCHIVE_PROGRESS_BASE = '/media/archive';
+
 export interface ArchiveProgress {
     status: 'preparing' | 'streaming' | 'completed' | 'failed' | 'cancelled';
     totalItems: number;
@@ -171,9 +182,12 @@ export interface ArchiveProgress {
  * Null means the server has no record of this token, which for a download that has
  * only just been submitted means "not yet", and later means it has expired.
  */
-export async function fetchArchiveProgress(token: string): Promise<ArchiveProgress | null> {
+export async function fetchArchiveProgress(
+    token: string,
+    base: string = ARCHIVE_PROGRESS_BASE
+): Promise<ArchiveProgress | null> {
     try {
-        return await apiFetch<ArchiveProgress>(`/media/archive/${token}/progress`);
+        return await apiFetch<ArchiveProgress>(`${base}/${token}/progress`);
     }
     catch (err) {
         if (err instanceof ApiError && err.status === 404) return null;
@@ -185,6 +199,9 @@ export async function fetchArchiveProgress(token: string): Promise<ArchiveProgre
  * Ask the server to stop writing an archive. The transfer belongs to the browser,
  * so this cannot cancel it directly — ending the response is what interrupts it.
  */
-export function cancelArchive(token: string): Promise<{ cancelled: boolean }> {
-    return apiFetch(`/media/archive/${token}/cancel`, { method: 'POST' });
+export function cancelArchive(
+    token: string,
+    base: string = ARCHIVE_PROGRESS_BASE
+): Promise<{ cancelled: boolean }> {
+    return apiFetch(`${base}/${token}/cancel`, { method: 'POST' });
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
     getSharedItems,
@@ -8,10 +8,17 @@ import {
     sharedThumbnailUrl,
     sharedOriginalUrl,
     sharedDownloadUrl,
+    sharedArchiveUrl,
+    sharedArchiveProgressBase,
 } from '@/lib/api/share';
+import { Download, History } from 'lucide-react';
+import { IconButton } from '@/components/ui/IconButton';
+import { useDownload } from '@/lib/hooks/useDownload';
 import { useWindowedMedia } from '@/lib/hooks/useWindowedMedia';
 import { PhotoGallery, type LightboxConfig } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
+import { GuestUpload } from './GuestUpload';
+import { SharedActivityPanel } from './SharedActivityPanel';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 import { pluralize } from '@/lib/utils/pluralize';
 import type { SharedCollection } from '@/lib/types/share';
@@ -26,6 +33,13 @@ export function SharedCollectionView({
     slug,
 }: SharedCollectionViewProps) {
     const selection = useMediaSelection();
+    const { triggerArchive } = useDownload();
+    const [activityOpen, setActivityOpen] = useState(false);
+
+    // Not async: the form navigation must spend the click's user activation.
+    const handleDownloadAll = useCallback(() => {
+        triggerArchive(sharedArchiveUrl(slug), { progressBase: sharedArchiveProgressBase(slug) });
+    }, [slug, triggerArchive]);
 
     /**
      * Items are windowed exactly like the authenticated gallery — a large public
@@ -71,13 +85,36 @@ export function SharedCollectionView({
 
     return (
         <div className="h-[100dvh] bg-stone-50 select-none flex flex-col">
-            <header className="relative bg-stone-50 px-6 py-4">
+            <header className="relative z-30 bg-stone-50 px-6 py-4">
                 <h1 className="text-xl font-serif text-stone-900">
                     {collection.name}
                 </h1>
                 <p className="text-xs text-stone-400 mt-1">
                     {pluralize(collection.itemCount, 'item')}
                 </p>
+                {!selection.isSelecting && (
+                    <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                        {collection.upload && (
+                            <GuestUpload slug={slug} limits={collection.upload} />
+                        )}
+                        {collection.itemCount > 0 && (
+                            <IconButton
+                                icon={Download}
+                                size="sm"
+                                variant="ghost"
+                                onClick={handleDownloadAll}
+                                title="Download all"
+                            />
+                        )}
+                        <IconButton
+                            icon={History}
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setActivityOpen(true)}
+                            title="Activity"
+                        />
+                    </div>
+                )}
                 <SelectionToolbar
                     selection={selection}
                     showDownload
@@ -92,6 +129,7 @@ export function SharedCollectionView({
             <PhotoGallery
                 items={windowed.items}
                 isLoading={windowed.isLoading}
+                emptyMessage={collection.upload ? 'No photos yet. Add yours.' : undefined}
                 selection={selection}
                 thumbnailSrcFn={thumbnailSrcFn}
                 lightboxConfig={lightboxConfig}
@@ -105,6 +143,9 @@ export function SharedCollectionView({
                 windowStart={windowed.windowStart}
                 onSeekToIndex={windowed.seekToIndex}
             />
+
+            {/* Outside the header: its translate would contain the drawer's fixed position. */}
+            <SharedActivityPanel slug={slug} open={activityOpen} onClose={() => setActivityOpen(false)} />
         </div>
     );
 }

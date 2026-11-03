@@ -54,16 +54,26 @@ export async function markFacesScanned(mediaItemId: string) {
     });
 }
 
-export async function claimTask(mediaItemId: string, taskId: string): Promise<boolean> {
-    const result = await prisma.$executeRaw`
+/**
+ * Claim a processing task. `skipFaces` tells the worker to leave face detection
+ * out: a guest's upload awaiting review is not the owner's, and its faces should
+ * not seed or join anyone in People until it is approved. Decided here rather
+ * than when the job is queued, so retries and backfills get it right too.
+ */
+export async function claimTask(
+    mediaItemId: string,
+    taskId: string
+): Promise<{ claimed: boolean; skipFaces: boolean }> {
+    const rows = await prisma.$queryRaw<Array<{ pendingReview: boolean }>>`
         UPDATE media_items
         SET processing_status = 'PROCESSING',
             processing_error = NULL,
             processing_at = now(),
             updated_at = now()
         WHERE id = ${mediaItemId} AND current_task_id = ${taskId}
+        RETURNING pending_review AS "pendingReview"
     `;
-    return result > 0;
+    return { claimed: rows.length > 0, skipFaces: rows[0]?.pendingReview ?? false };
 }
 
 export async function createRetryTask(
@@ -476,6 +486,8 @@ export async function queryMediaItemsForRetry(filter: RetryFilter) {
         // predicate re-processed on every run forever.
         whereClause =
                 `processing_status = 'COMPLETED' AND clip_embedding IS NOT NULL AND faces_scanned = false ` +
+                // Unreviewed guest uploads skip faces on purpose; see claimTask.
+                'AND pending_review = false ' +
                 `AND NOT EXISTS (SELECT 1 FROM faces f WHERE f.media_item_id = media_items.id)`;
         break;
     case 'missing_blurhash':

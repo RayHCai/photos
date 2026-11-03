@@ -1,14 +1,17 @@
 import { nanoid } from 'nanoid';
 import { prisma } from '../config/prisma.js';
+import { env } from '../config/env.js';
 import { redisConnection } from '../config/redis.js';
 import { AppError } from '../middleware/errorHandler.js';
 import * as s3Service from './s3.service.js';
+import { unprocessedPreview } from './media.service.js';
 import { logger } from '../utils/logger.js';
 import { fireAndForget } from '../utils/async.js';
 import { applyCursor, paginateResults } from '../utils/db.js';
-import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
-import { HIDDEN_EXCLUSION } from '../utils/filters.js';
-import { COLLECTION_ITEM_ORDER_BY } from './collections.service.js';
+import { MEDIA_ITEM_PUBLIC_SELECT } from '../utils/select.js';
+import { HIDDEN_EXCLUSION, QUOTA_HOLDING_CONTRIBUTIONS } from '../utils/filters.js';
+import { COLLECTION_ITEM_ORDER_BY, getCollectionArchive } from './collections.service.js';
+import { listPublicEvents, recordEvent } from './collectionEvents.service.js';
 
 /** 10 nanoid chars ≈ 60 bits of entropy, which is not brute-forcible. */
 const SLUG_LENGTH = 10;
@@ -25,9 +28,27 @@ function validateShareLink(link: { isActive: boolean; expiresAt: Date | null } |
     }
 }
 
+/** What a share link lets a guest upload into its album. */
+export function uploadLimits() {
+    return {
+        quotaBytes: Math.floor(env.CONTRIBUTION_LINK_QUOTA_GB * 1024 ** 3),
+        maxFileBytes: env.MAX_FILE_SIZE_MB * 1024 * 1024,
+        maxPending: env.CONTRIBUTION_MAX_PENDING_PER_LINK,
+    };
+}
+
+/**
+ * Every link to one of the owner's own albums takes uploads. Favourites and
+ * hidden are private bookkeeping, and a person album's membership is decided by
+ * face recognition, so links to those stay view-only.
+ */
+function takesUploads(collection: { systemType: string | null; personId: string | null }): boolean {
+    return collection.systemType === null && collection.personId === null;
+}
+
 export async function createShareLink(
     collectionId: string,
-    options?: { slug?: string; expiresAt?: Date }
+    options?: { slug?: string; expiresAt?: Date; label?: string }
 ) {
     const collection = await prisma.collection.findUnique({
         where: { id: collectionId },
@@ -48,9 +69,16 @@ export async function createShareLink(
                 collectionId,
                 slug,
                 ...(options?.expiresAt ? { expiresAt: options.expiresAt } : {}),
+                ...(options?.label?.trim() ? { label: options.label.trim() } : {}),
             },
         });
         logger.info({ linkId: link.id, collectionId }, 'share: link created');
+        await recordEvent({
+            collectionId,
+            type: 'LINK_CREATED',
+            actor: 'OWNER',
+            shareLinkId: link.id,
+        });
         return link;
     }
     catch (err) {
@@ -62,14 +90,43 @@ export async function createShareLink(
     }
 }
 
+/** Bytes held against each link's quota, and how many uploads await review. */
+async function uploadUsage(linkIds: string[]) {
+    const usage = new Map(linkIds.map((id) => [id, { usedBytes: 0, pendingCount: 0 }]));
+    if (linkIds.length === 0) return usage;
+
+    const [held, pending] = await Promise.all([
+        prisma.contribution.groupBy({
+            by: ['shareLinkId'],
+            where: { shareLinkId: { in: linkIds }, ...QUOTA_HOLDING_CONTRIBUTIONS },
+            _sum: { fileSize: true },
+        }),
+        prisma.contribution.groupBy({
+            by: ['shareLinkId'],
+            // Deleted from the album since, by the owner, is as good as denied.
+            where: { shareLinkId: { in: linkIds }, status: 'PENDING', mediaItemId: { not: null } },
+            _count: { _all: true },
+        }),
+    ]);
+
+    // fileSize is a BigInt column; Number is exact far past any quota.
+    for (const row of held) usage.get(row.shareLinkId)!.usedBytes = Number(row._sum.fileSize ?? 0);
+    for (const row of pending) usage.get(row.shareLinkId)!.pendingCount = row._count._all;
+    return usage;
+}
+
 export async function listShareLinks(collectionId: string) {
-    return prisma.shareLink.findMany({
+    const links = await prisma.shareLink.findMany({
         where: { collectionId, isActive: true },
         orderBy: { createdAt: 'desc' },
     });
+
+    const usage = await uploadUsage(links.map((l) => l.id));
+    const { quotaBytes } = uploadLimits();
+    return links.map((link) => ({ ...link, ...usage.get(link.id)!, quotaBytes }));
 }
 
-export async function revokeShareLink(linkId: string) {
+export async function revokeShareLink(linkId: string, opts: { undoOfId?: string } = {}) {
     const link = await prisma.shareLink.findUnique({
         where: { id: linkId },
     });
@@ -86,6 +143,16 @@ export async function revokeShareLink(linkId: string) {
     // than after the TTL.
     await redisConnection.del(shareCacheKey(link.slug));
     logger.info({ linkId }, 'share: link revoked');
+
+    if (link.isActive) {
+        await recordEvent({
+            collectionId: link.collectionId,
+            type: 'LINK_REVOKED',
+            actor: 'OWNER',
+            shareLinkId: link.id,
+            ...opts,
+        });
+    }
 }
 
 /**
@@ -96,22 +163,48 @@ export async function revokeShareLink(linkId: string) {
  * SELECT * including the FTS document — so viewing one album issued one such
  * query per image.
  */
-async function resolveSlug(slug: string): Promise<{ linkId: string; collectionId: string }> {
+interface ResolvedLink {
+    linkId: string;
+    collectionId: string;
+    /** Absent from entries cached before uploads existed, which reads as false. */
+    acceptsUploads?: boolean;
+}
+
+async function resolveSlug(slug: string): Promise<ResolvedLink> {
     const cached = await redisConnection.get(shareCacheKey(slug));
     if (cached) {
-        return JSON.parse(cached) as { linkId: string; collectionId: string };
+        return JSON.parse(cached) as ResolvedLink;
     }
 
     const link = await prisma.shareLink.findUnique({
         where: { slug },
-        select: { id: true, collectionId: true, isActive: true, expiresAt: true },
+        select: {
+            id: true,
+            collectionId: true,
+            isActive: true,
+            expiresAt: true,
+            collection: { select: { systemType: true, personId: true } },
+        },
     });
 
     validateShareLink(link);
 
-    const resolved = { linkId: link!.id, collectionId: link!.collectionId };
+    const resolved: ResolvedLink = {
+        linkId: link!.id,
+        collectionId: link!.collectionId,
+        acceptsUploads: takesUploads(link!.collection),
+    };
     await redisConnection.setex(shareCacheKey(slug), SHARE_RESOLVE_TTL, JSON.stringify(resolved));
     return resolved;
+}
+
+/** A live link that takes uploads, or a 403 saying it does not. */
+export async function resolveUploadLink(slug: string): Promise<{ linkId: string; collectionId: string }> {
+    const { linkId, collectionId, acceptsUploads } = await resolveSlug(slug);
+    if (!acceptsUploads) {
+        throw new AppError(403, 'This link does not accept uploads');
+    }
+    return { linkId, collectionId };
 }
 
 /** Cap on a page of shared items, and the public timeline's cache lifetime. */
@@ -129,7 +222,7 @@ const shareTimelineKey = (collectionId: string) => `timeline:share:${collectionI
  * (name) and the total, and is the request that counts a view.
  */
 export async function getSharedCollection(slug: string) {
-    const { linkId, collectionId } = await resolveSlug(slug);
+    const { linkId, collectionId, acceptsUploads = false } = await resolveSlug(slug);
 
     const collection = await prisma.collection.findUnique({
         where: { id: collectionId },
@@ -160,7 +253,19 @@ export async function getSharedCollection(slug: string) {
         (err) => logger.warn({ err }, 'share: view count increment failed')
     );
 
-    return { ...collection, itemCount };
+    if (!acceptsUploads) {
+        return { ...collection, itemCount };
+    }
+
+    // What a guest needs to know before picking files: how big each may be and
+    // how much room the link has left.
+    const { quotaBytes, maxFileBytes } = uploadLimits();
+    const { usedBytes } = (await uploadUsage([linkId])).get(linkId)!;
+    return {
+        ...collection,
+        itemCount,
+        upload: { usedBytes, quotaBytes, maxFileBytes },
+    };
 }
 
 /**
@@ -187,12 +292,19 @@ export async function getSharedItems(
                 : {}),
         select: {
             id: true,
-            mediaItem: { select: MEDIA_ITEM_SUMMARY_SELECT },
+            mediaItem: { select: MEDIA_ITEM_PUBLIC_SELECT },
         },
     });
 
     const { items, nextCursor, hasMore } = paginateResults(rows, limit);
-    return { items: items.map((r) => r.mediaItem), nextCursor, hasMore };
+    return {
+        items: items.map(({ mediaItem: { sourceCollectionId, ...item } }) => ({
+            ...item,
+            guestUpload: sourceCollectionId !== null,
+        })),
+        nextCursor,
+        hasMore,
+    };
 }
 
 /**
@@ -267,6 +379,7 @@ export async function getSharedMediaUrl(
                     webKey: true,
                     streamingKey: true,
                     type: true,
+                    sourceCollectionId: true,
                 },
             },
         },
@@ -283,8 +396,9 @@ export async function getSharedMediaUrl(
     }
 
     if (variant === 'thumbnail') {
-        if (!media.thumbnailKey) throw new AppError(404, 'thumbnail not available');
-        return s3Service.getMediaUrlWithExpiry(media.thumbnailKey);
+        if (media.thumbnailKey) return s3Service.getMediaUrlWithExpiry(media.thumbnailKey);
+        if (media.sourceCollectionId && media.type === 'PHOTO') return unprocessedPreview(media.originalKey);
+        throw new AppError(404, 'thumbnail not available');
     }
 
     if (variant === 'web') {
@@ -300,4 +414,25 @@ export async function getSharedMediaUrl(
 
     // variant === 'original' — always presigned, never the public CDN.
     return s3Service.getMediaUrlWithExpiry(media.originalKey, undefined, false);
+}
+
+/** The album's change log as a guest may see it; see listPublicEvents. */
+export async function getSharedEvents(slug: string, opts: { cursor?: string; limit?: number } = {}) {
+    const { collectionId } = await resolveSlug(slug);
+    return listPublicEvents(collectionId, opts);
+}
+
+/** Every item a guest can see in a shared collection, as one archive. */
+export async function getSharedArchive(slug: string) {
+    const { collectionId } = await resolveSlug(slug);
+    return getCollectionArchive(collectionId, HIDDEN_EXCLUSION);
+}
+
+/**
+ * Check a slug still resolves to a live link. The archive progress and cancel
+ * routes are keyed by an unguessable token, but should still stop answering
+ * once the link that started the download is revoked or expires.
+ */
+export async function assertShareLinkActive(slug: string): Promise<void> {
+    await resolveSlug(slug);
 }

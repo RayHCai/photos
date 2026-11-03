@@ -26,6 +26,13 @@ export interface MediaShellItem {
     createdAt: string;
     /** Present on list responses; the shell projection omits it to stay small. */
     fileName?: string;
+    /**
+     * The album a guest uploaded this to, for items that arrived through a share
+     * link. Absent on public share reads, which carry `guestUpload` instead.
+     */
+    sourceCollectionId?: string | null;
+    /** On public share reads: a guest uploaded this through a share link. */
+    guestUpload?: boolean;
 }
 
 /** Narrow payload from /media/processing-updates. */

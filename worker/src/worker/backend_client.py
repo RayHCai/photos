@@ -170,9 +170,13 @@ async def set_processing_status(
     })
 
 
-async def claim_task(media_item_id: str, task_id: str) -> bool:
+async def claim_task(media_item_id: str, task_id: str) -> tuple[bool, bool]:
+    """Claim a task: whether it is still current, and whether to skip face detection.
+
+    `skipFaces` is absent from a backend older than guest uploads, which reads as no.
+    """
     data = await _request("POST", f"/media/{media_item_id}/claim-task", json={"taskId": task_id})
-    return data["claimed"]
+    return data["claimed"], data.get("skipFaces", False)
 
 
 async def create_retry_task(media_item_id: str, start_stage: str = "full") -> str:

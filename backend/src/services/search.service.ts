@@ -6,7 +6,7 @@ import { redisConnection } from '../config/redis.js';
 import { logger } from '../utils/logger.js';
 import { toVectorLiteral } from '../utils/embeddings.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
-import { HIDDEN_EXCLUSION, HIDDEN_NOT_EXISTS } from '../utils/filters.js';
+import { LIBRARY_SQL, LIBRARY_WHERE } from '../utils/filters.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -470,7 +470,7 @@ async function searchWithClipAndFilters(
             JOIN media_items m ON m.id = c.id
             WHERE TRUE
               ${filterSql}
-              AND ${HIDDEN_NOT_EXISTS}
+              AND ${LIBRARY_SQL}
             ORDER BY c.distance
             LIMIT ${limit} OFFSET ${offset}
         `;
@@ -504,7 +504,7 @@ async function searchWithFtsAndFilters(
             FROM media_items m
             WHERE m.fts_vector @@ plainto_tsquery('english', ${parsed.clipText})
               ${filterSql}
-              AND ${HIDDEN_NOT_EXISTS}
+              AND ${LIBRARY_SQL}
             -- m.id breaks rank ties so pagination is stable; without it two pages
             -- could return the same row or skip one.
             ORDER BY rank DESC, m.id
@@ -514,7 +514,7 @@ async function searchWithFtsAndFilters(
             SELECT COUNT(*) AS count FROM media_items m
             WHERE m.fts_vector @@ plainto_tsquery('english', ${parsed.clipText})
               ${filterSql}
-              AND ${HIDDEN_NOT_EXISTS}
+              AND ${LIBRARY_SQL}
         `,
     ]);
 
@@ -535,8 +535,8 @@ async function searchWithFiltersOnly(
 ) {
     const conditions = buildFilterConditions(parsed);
     const mainWhere = conditions.length > 0
-        ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')} AND ${HIDDEN_NOT_EXISTS}`
-        : Prisma.sql`WHERE ${HIDDEN_NOT_EXISTS}`;
+        ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')} AND ${LIBRARY_SQL}`
+        : Prisma.sql`WHERE ${LIBRARY_SQL}`;
 
     const [results, countResult] = await Promise.all([
         prisma.$queryRaw<SearchResult[]>`
@@ -568,7 +568,7 @@ export async function search(params: SearchParams) {
     const offset = (page - 1) * limit;
 
     if (!q || q.trim().length === 0) {
-        const where = { ...HIDDEN_EXCLUSION, ...(type ? { type } : {}) };
+        const where = { ...LIBRARY_WHERE, ...(type ? { type } : {}) };
         const [items, total] = await Promise.all([
             prisma.mediaItem.findMany({
                 where,
@@ -638,14 +638,14 @@ export async function search(params: SearchParams) {
                    ts_rank(m.fts_vector, plainto_tsquery('english', ${q})) AS rank
             FROM media_items m
             WHERE m.fts_vector @@ plainto_tsquery('english', ${q})
-              AND ${HIDDEN_NOT_EXISTS}
+              AND ${LIBRARY_SQL}
             ORDER BY rank DESC, m.id
             LIMIT ${limit} OFFSET ${offset}
         `,
         prisma.$queryRaw<[{ count: bigint }]>`
             SELECT COUNT(*) AS count FROM media_items m
             WHERE m.fts_vector @@ plainto_tsquery('english', ${q})
-              AND ${HIDDEN_NOT_EXISTS}
+              AND ${LIBRARY_SQL}
         `,
     ]);
 

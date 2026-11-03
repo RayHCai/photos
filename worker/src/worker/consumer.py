@@ -77,9 +77,10 @@ async def _handle_process_media(job: Any, token: str | None = None) -> str:
         start_stage=start_stage,
     )
 
+    skip_faces = False
     try:
         if task_id:
-            claimed = await api.claim_task(media_item_id, task_id)
+            claimed, skip_faces = await api.claim_task(media_item_id, task_id)
             if not claimed:
                 logger.info(
                     "task_superseded",
@@ -95,6 +96,7 @@ async def _handle_process_media(job: Any, token: str | None = None) -> str:
             mime_type=data["mimeType"],
             media_type=data["type"],
             start_stage=start_stage,
+            skip_faces=skip_faces,
         )
     except Exception:
         logger.exception("job_failed", task_id=task_id)

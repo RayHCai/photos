@@ -69,6 +69,46 @@ interface ConfirmedUpload {
     id: string;
 }
 
+/**
+ * Where an upload's calls go. The library and a guest uploading through a share
+ * link speak the same protocol — presign or multipart, then confirm — against
+ * different routes.
+ */
+export interface UploadEndpoints {
+    presign: string;
+    confirm: string;
+    multipartInit: string;
+    multipartPresign: string;
+    multipartComplete: string;
+    /** Sent alongside the file details at presign/init, e.g. a guest's name. */
+    extraFields?: Record<string, unknown>;
+}
+
+export const LIBRARY_UPLOAD_ENDPOINTS: UploadEndpoints = {
+    presign: '/media/upload/presign',
+    confirm: '/media/upload/confirm',
+    multipartInit: '/media/upload/multipart/init',
+    multipartPresign: '/media/upload/multipart/presign',
+    multipartComplete: '/media/upload/multipart/complete',
+};
+
+/**
+ * A guest's upload into a shared album. Confirming resolves to the id of the
+ * queued upload, not a library item: nothing reaches the library until the
+ * owner approves it.
+ */
+export function guestUploadEndpoints(slug: string, contributorName?: string): UploadEndpoints {
+    const base = `/public/s/${slug}/uploads`;
+    return {
+        presign: `${base}/presign`,
+        confirm: `${base}/confirm`,
+        multipartInit: `${base}/multipart/init`,
+        multipartPresign: `${base}/multipart/presign`,
+        multipartComplete: `${base}/multipart/complete`,
+        ...(contributorName ? { extraFields: { contributorName } } : {}),
+    };
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -234,18 +274,20 @@ async function runWithConcurrency(
 async function singleUpload(
     file: File,
     onProgress: (pct: number) => void,
+    endpoints: UploadEndpoints,
     fileName?: string,
     onRetry?: UploadRetryHandler,
     signal?: AbortSignal
 ): Promise<string> {
     const { presignedUrl, headers, uploadToken } = await apiFetch<PresignResponse>(
-        '/media/upload/presign',
+        endpoints.presign,
         {
             method: 'POST',
             body: JSON.stringify({
                 fileName: fileName || file.name,
                 mimeType: resolveMimeType(file),
                 fileSize: file.size,
+                ...endpoints.extraFields,
             }),
         }
     );
@@ -260,12 +302,13 @@ async function singleUpload(
         signal
     );
 
-    return finalizeWithRetry('/media/upload/confirm', { uploadToken }, onRetry, signal);
+    return finalizeWithRetry(endpoints.confirm, { uploadToken }, onRetry, signal);
 }
 
 async function multipartUpload(
     file: File,
     onProgress: (pct: number) => void,
+    endpoints: UploadEndpoints,
     fileName?: string,
     onRetry?: UploadRetryHandler,
     signal?: AbortSignal
@@ -273,13 +316,14 @@ async function multipartUpload(
     const totalParts = Math.ceil(file.size / PART_SIZE);
 
     const { uploadToken } = await apiFetch<MultipartInitResponse>(
-        '/media/upload/multipart/init',
+        endpoints.multipartInit,
         {
             method: 'POST',
             body: JSON.stringify({
                 fileName: fileName || file.name,
                 mimeType: resolveMimeType(file),
                 fileSize: file.size,
+                ...endpoints.extraFields,
             }),
         }
     );
@@ -297,7 +341,7 @@ async function multipartUpload(
         const etag = await putToS3WithRetry(
             async () => {
                 const { presignedUrl } = await apiFetch<{ presignedUrl: string }>(
-                    '/media/upload/multipart/presign',
+                    endpoints.multipartPresign,
                     {
                         method: 'POST',
                         body: JSON.stringify({ uploadToken, partNumber }),
@@ -330,7 +374,7 @@ async function multipartUpload(
 
     parts.sort((a, b) => a.PartNumber - b.PartNumber);
     return finalizeWithRetry(
-        '/media/upload/multipart/complete',
+        endpoints.multipartComplete,
         { uploadToken, parts },
         onRetry,
         signal
@@ -346,12 +390,13 @@ export async function uploadFile(
      * Aborts the upload. There was no way to cancel at all: the panel's remove button
      * hid the row while the request kept running to completion.
      */
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    endpoints: UploadEndpoints = LIBRARY_UPLOAD_ENDPOINTS
 ): Promise<string> {
     if (signal?.aborted) throw new Error('Cancelled');
 
     if (file.size > MULTIPART_THRESHOLD) {
-        return multipartUpload(file, onProgress, fileName, onRetry, signal);
+        return multipartUpload(file, onProgress, endpoints, fileName, onRetry, signal);
     }
-    return singleUpload(file, onProgress, fileName, onRetry, signal);
+    return singleUpload(file, onProgress, endpoints, fileName, onRetry, signal);
 }

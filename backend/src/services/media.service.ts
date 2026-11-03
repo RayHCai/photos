@@ -12,7 +12,7 @@ import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
 import { mapWithConcurrency } from '../utils/async.js';
 import { signUploadToken, verifyUploadToken, type UploadClaims } from '../utils/uploadToken.js';
 import { MEDIA_ITEM_SUMMARY_SELECT, MEDIA_ITEM_SHELL_SELECT } from '../utils/select.js';
-import { HIDDEN_EXCLUSION, HIDDEN_NOT_EXISTS } from '../utils/filters.js';
+import { LIBRARY_SQL, LIBRARY_WHERE } from '../utils/filters.js';
 import { collectMediaS3Keys, MEDIA_S3_KEY_SELECT } from '../utils/s3.js';
 import { isSupportedMimeType } from '../constants/mediaFormats.js';
 import { safeExtension, THUMBNAIL_WIDTHS } from '../constants/storage.js';
@@ -151,7 +151,7 @@ export async function queryAndEnqueue(
  * COALESCEs down to `takenAt`, and `backfillMetadata` keys off
  * `takenAtLocal IS NULL` to find rows still worth re-extracting.
  */
-function newMediaItemData(
+export function newMediaItemData(
     fileName: string,
     mimeType: string,
     fileSize: number,
@@ -301,7 +301,7 @@ export async function listMedia(params: {
 }) {
     const { cursor, limit, type, sort = 'date_desc' } = params;
 
-    const where: Prisma.MediaItemWhereInput = { ...HIDDEN_EXCLUSION };
+    const where: Prisma.MediaItemWhereInput = { ...LIBRARY_WHERE };
     if (type) {
         where.type = type;
     }
@@ -365,7 +365,7 @@ export async function getShellData(
     const limit = Math.min(params.limit ?? SHELL_PAGE_SIZE, SHELL_PAGE_SIZE);
 
     const items = await prisma.mediaItem.findMany({
-        where: HIDDEN_EXCLUSION,
+        where: LIBRARY_WHERE,
         orderBy: SHELL_ORDER_BY,
         take: limit + 1,
         // A cursor wins when both are supplied: it is the exact address, whereas
@@ -391,7 +391,7 @@ export async function getShellData(
 export async function getProcessingUpdates(since?: Date) {
     const items = await prisma.mediaItem.findMany({
         where: {
-            ...HIDDEN_EXCLUSION,
+            ...LIBRARY_WHERE,
             ...(since ? { updatedAt: { gt: since } } : {}),
         },
         orderBy: { updatedAt: 'asc' },
@@ -410,7 +410,7 @@ export async function getProcessingUpdates(since?: Date) {
     });
 
     const pendingCount = await prisma.mediaItem.count({
-        where: { ...HIDDEN_EXCLUSION, processingStatus: { in: ['PENDING', 'PROCESSING'] } },
+        where: { ...LIBRARY_WHERE, processingStatus: { in: ['PENDING', 'PROCESSING'] } },
     });
 
     return {
@@ -447,7 +447,7 @@ export async function getTimeline() {
         SELECT to_char(COALESCE("taken_at_local", "taken_at", "created_at"), 'YYYY-MM') AS month,
                COUNT(*)::bigint AS count
         FROM "media_items" m
-        WHERE ${HIDDEN_NOT_EXISTS}
+        WHERE ${LIBRARY_SQL}
         GROUP BY month
         ORDER BY month DESC
     `;
@@ -528,20 +528,31 @@ export async function batchDeleteMedia(ids: string[]) {
     return deleted.count;
 }
 
+/**
+ * A guest's photo shows from the moment it lands, before the worker has made a
+ * thumbnail (see GalleryItem), so its thumbnail stands in as the original.
+ * Presigned, since an original is never public, and uncached: the same URL
+ * should give the real thumbnail as soon as there is one.
+ */
+export async function unprocessedPreview(originalKey: string) {
+    const { url } = await s3Service.getMediaUrlWithExpiry(originalKey, undefined, false);
+    return { url, expiresInSeconds: 0 };
+}
+
 export async function getThumbnailUrl(id: string) {
     const item = await findOrThrow(
         () => prisma.mediaItem.findUnique({
             where: { id },
-            select: { thumbnailKey: true },
+            select: { thumbnailKey: true, type: true, originalKey: true, sourceCollectionId: true },
         }),
         'Media item'
     );
 
-    if (!item.thumbnailKey) {
-        throw new AppError(404, 'Thumbnail not yet available');
-    }
+    if (item.thumbnailKey) return s3Service.getMediaUrlWithExpiry(item.thumbnailKey);
 
-    return s3Service.getMediaUrlWithExpiry(item.thumbnailKey);
+    if (item.sourceCollectionId && item.type === 'PHOTO') return unprocessedPreview(item.originalKey);
+
+    throw new AppError(404, 'Thumbnail not yet available');
 }
 
 export async function getBatchThumbnailUrls(ids: string[]) {

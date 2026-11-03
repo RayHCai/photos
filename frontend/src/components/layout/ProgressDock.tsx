@@ -15,6 +15,9 @@ import { DownloadProgress } from '@/components/download/DownloadProgress';
  * A flex column means each panel only has to size itself, and adding a third kind of
  * transfer later needs no coordinate arithmetic.
  */
+/** Where panels that live outside the app's providers (a guest's uploads) mount. */
+export const PROGRESS_DOCK_SLOT_ID = 'progress-dock-slot';
+
 export function ProgressDock() {
     return (
         <div className="fixed bottom-5 right-5 z-50 flex flex-col-reverse gap-3 items-end pointer-events-none">
@@ -26,6 +29,7 @@ export function ProgressDock() {
             <div className="pointer-events-auto">
                 <DownloadProgress />
             </div>
+            <div id={PROGRESS_DOCK_SLOT_ID} className="pointer-events-auto empty:hidden" />
         </div>
     );
 }

@@ -38,6 +38,10 @@ export const queryKeys = {
             ['collections', 'membership', [...mediaItemIds].sort().join(',')] as const,
         shareLinks: (collectionId: string) =>
             ['collections', collectionId, 'share-links'] as const,
+        names: () => ['collections', 'names'] as const,
+        events: (collectionId: string) => ['collections', collectionId, 'events'] as const,
+        eventUploads: (collectionId: string, eventId: string) =>
+            ['collections', collectionId, 'events', eventId, 'uploads'] as const,
     },
     persons: {
         all: ['persons'] as const,
@@ -73,7 +77,9 @@ export type MutationEffect =
     /** Face/person assignments or names changed. */
     | 'persons'
     /** A share link was created or revoked. */
-    | 'share-links';
+    | 'share-links'
+    /** A guest upload was approved or denied. */
+    | 'contributions';
 
 type Key = readonly unknown[];
 
@@ -126,6 +132,17 @@ export function invalidationsFor(effects: readonly MutationEffect[]): Key[] {
             break;
         case 'share-links':
             add(queryKeys.collections.all);
+            add(['share-links']);
+            break;
+        case 'contributions':
+            // Change logs (their review marks) and albums sit under collections;
+            // an approval puts items into the library and a denial deletes them.
+            // Share links carry their quota usage.
+            add(queryKeys.media.all);
+            add(queryKeys.collections.all);
+            add(queryKeys.persons.all);
+            add(queryKeys.search.all);
+            add(['share-links']);
             break;
         }
     }

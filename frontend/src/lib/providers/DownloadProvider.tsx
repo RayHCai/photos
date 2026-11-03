@@ -42,6 +42,11 @@ export interface DownloadOptions {
     archiveUrl?: string;
 }
 
+export interface ArchiveOptions {
+    /** Base path of the progress/cancel routes; defaults to the library's. */
+    progressBase?: string;
+}
+
 type DownloadStatus = 'pending' | 'downloading' | 'completed' | 'failed';
 
 /**
@@ -178,6 +183,11 @@ interface DownloadContextValue {
      * the activation the handler carries is what makes that allowed.
      */
     triggerDownload: (requests: DownloadRequest[], options?: DownloadOptions) => void;
+    /**
+     * Download everything an archive endpoint covers — a whole album — as one zip,
+     * without the page needing the ids. Same click-handler rule as triggerDownload.
+     */
+    triggerArchive: (archiveUrl: string, options?: ArchiveOptions) => void;
     /** Abort every in-flight and queued download. */
     cancelAll: () => void;
     clearFinished: () => void;
@@ -312,7 +322,7 @@ function openDownloadTab(url: string) {
  * sees, which is why the same failure is also recorded against `progressToken` and
  * surfaced by the panel.
  */
-function submitArchiveRequest(action: string, ids: string[], progressToken: string) {
+function submitArchiveRequest(action: string, ids: string[] | null, progressToken: string) {
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = action;
@@ -334,11 +344,14 @@ function submitArchiveRequest(action: string, ids: string[], progressToken: stri
 
     // One field rather than one input per id: a selection of two thousand would
     // otherwise put two thousand nodes in the document while a tap is handled.
-    const idsField = document.createElement('input');
-    idsField.type = 'hidden';
-    idsField.name = 'ids';
-    idsField.value = ids.join(',');
-    form.appendChild(idsField);
+    // Null for an endpoint that knows its own contents, such as a whole album.
+    if (ids) {
+        const idsField = document.createElement('input');
+        idsField.type = 'hidden';
+        idsField.name = 'ids';
+        idsField.value = ids.join(',');
+        form.appendChild(idsField);
+    }
 
     const tokenField = document.createElement('input');
     tokenField.type = 'hidden';
@@ -432,6 +445,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     const queueRef = useRef<QueueEntry[]>([]);
     /** Live archive downloads, keyed by progress token, each holding its poll. */
     const archivePollsRef = useRef(new Map<string, () => void>());
+    /** Progress/cancel base per live archive token, for those not on the library's. */
+    const archiveBasesRef = useRef(new Map<string, string>());
 
     /**
      * Stop polling on unmount.
@@ -455,7 +470,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
      * whose response the browser owns, and the server is the only party that knows
      * how much of it has been written (see archiveProgress.service on the backend).
      */
-    const pollArchive = useCallback((token: string) => {
+    const pollArchive = useCallback((token: string, progressBase?: string) => {
         let timer = 0;
         let stopped = false;
         let everSeen = false;
@@ -467,6 +482,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
             stopped = true;
             window.clearTimeout(timer);
             archivePollsRef.current.delete(token);
+            archiveBasesRef.current.delete(token);
         };
 
         const finish = (progress: ArchiveProgress) => {
@@ -508,7 +524,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         const tick = async () => {
             let progress: ArchiveProgress | null = null;
             try {
-                progress = await fetchArchiveProgress(token);
+                progress = await fetchArchiveProgress(token, progressBase);
                 unreachableSince = 0;
             }
             catch {
@@ -571,6 +587,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         };
 
         archivePollsRef.current.set(token, stop);
+        if (progressBase) archiveBasesRef.current.set(token, progressBase);
         tick();
     }, []);
 
@@ -582,7 +599,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
      * file — which a desktop browser prompts about and a phone refuses outright.
      */
     const startArchive = useCallback(
-        (requests: DownloadRequest[], archiveEndpoint: string) => {
+        (ids: string[] | null, archiveEndpoint: string, progressBase?: string) => {
             const token = crypto.randomUUID();
             dispatch({
                 type: 'ADD',
@@ -592,8 +609,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
             dispatch({ type: 'SET_DOWNLOADING', key: token });
             // Synchronous, and before the poll: this is what spends the tap's user
             // activation, and awaiting anything first would lose it.
-            submitArchiveRequest(archiveEndpoint, requests.map((r) => r.id), token);
-            pollArchive(token);
+            submitArchiveRequest(archiveEndpoint, ids, token);
+            pollArchive(token, progressBase);
         },
         [pollArchive]
     );
@@ -646,8 +663,9 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
          */
         const archives = [...archivePollsRef.current.keys()];
         for (const token of archives) {
+            const base = archiveBasesRef.current.get(token);
             archivePollsRef.current.get(token)?.();
-            cancelArchive(token).catch(() => {
+            cancelArchive(token, base).catch(() => {
                 // Best effort. The panel has stopped tracking it either way, and a
                 // zip that keeps arriving is a far smaller surprise than an error.
             });
@@ -740,7 +758,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
              * permission prompt — and it is also N round trips where this is one.
              */
             if (requests.length > 1 && options.archiveUrl) {
-                startArchive(requests, options.archiveUrl);
+                startArchive(requests.map((r) => r.id), options.archiveUrl);
                 return;
             }
 
@@ -768,6 +786,13 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         [processQueue, handOffToBrowser, startArchive]
     );
 
+    const triggerArchive = useCallback(
+        (archiveEndpoint: string, options: ArchiveOptions = {}) => {
+            startArchive(null, archiveEndpoint, options.progressBase);
+        },
+        [startArchive]
+    );
+
     const clearFinished = useCallback(() => {
         dispatch({ type: 'CLEAR_FINISHED' });
     }, []);
@@ -787,11 +812,12 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
             items: state.items,
             isOpen: state.isOpen,
             triggerDownload,
+            triggerArchive,
             cancelAll,
             clearFinished,
             togglePanel,
         }),
-        [state.items, state.isOpen, triggerDownload, cancelAll, clearFinished, togglePanel]
+        [state.items, state.isOpen, triggerDownload, triggerArchive, cancelAll, clearFinished, togglePanel]
     );
 
     return <DownloadContext.Provider value={value}>{children}</DownloadContext.Provider>;

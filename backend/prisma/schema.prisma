@@ -81,6 +81,12 @@ model MediaItem {
     /// True once face detection has run and found nothing, so the
     /// `missing_faces` retry filter stops re-downloading landscapes forever.
     facesScanned     Boolean          @default(false) @map("faces_scanned")
+    /// The shared album a guest uploaded this to. Drives the gallery's source
+    /// marker. Null for the owner's own uploads, and once that album is deleted.
+    sourceCollectionId String?        @map("source_collection_id")
+    /// A guest's upload the owner has not approved yet: it is in its album, but
+    /// kept out of the library (gallery, search, timeline) and face detection.
+    pendingReview    Boolean          @default(false) @map("pending_review")
     createdAt        DateTime         @default(now()) @map("created_at")
     updatedAt        DateTime         @updatedAt @map("updated_at")
 
@@ -90,8 +96,10 @@ model MediaItem {
     /// Generated tsvector maintained by a trigger; see migration 0001.
     ftsVector     Unsupported("tsvector")?    @map("fts_vector")
 
-    faces           Face[]
-    collectionItems CollectionItem[]
+    faces            Face[]
+    collectionItems  CollectionItem[]
+    sourceCollection Collection?      @relation("MediaSource", fields: [sourceCollectionId], references: [id], onDelete: SetNull)
+    contribution     Contribution?
 
     // Supports the timeline's `ORDER BY taken_at DESC NULLS LAST, created_at DESC`.
     // The plain ascending (taken_at) index could not satisfy it, so every listing
@@ -162,9 +170,12 @@ model Collection {
     // Cascade, not SetNull: a person's auto-generated album (and therefore its
     // public share links) must not outlive the person. SetNull left a live,
     // publicly reachable share link pointing at a deleted person's photos.
-    person     Person?          @relation(fields: [personId], references: [id], onDelete: Cascade)
-    items      CollectionItem[]
-    shareLinks ShareLink[]
+    person        Person?           @relation(fields: [personId], references: [id], onDelete: Cascade)
+    items         CollectionItem[]
+    shareLinks    ShareLink[]
+    sourcedMedia  MediaItem[]       @relation("MediaSource")
+    contributions Contribution[]
+    events        CollectionEvent[]
 
     @@map("collections")
 }
@@ -194,12 +205,121 @@ model ShareLink {
     isActive     Boolean   @default(true) @map("is_active")
     expiresAt    DateTime? @map("expires_at")
     viewCount    Int       @default(0) @map("view_count")
+    /// Owner-facing name ("Family chat"), so the change log and the upload
+    /// emails can say which link something came through.
+    label        String?
     createdAt    DateTime  @default(now()) @map("created_at")
 
-    collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    collection    Collection        @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    contributions Contribution[]
+    events        CollectionEvent[]
 
     @@index([collectionId])
     @@map("share_links")
+}
+
+// ─── Group Buckets ─────────────────────────────────────────
+enum ContributionStatus {
+    /// Presigned but not yet confirmed. Already holds its share of the link's
+    /// quota, so concurrent presigns cannot overrun it.
+    UPLOADING
+    /// Confirmed: in its album, waiting for the owner to approve it into the
+    /// library or deny it.
+    PENDING
+    APPROVED
+    /// Denied; the item and its bytes are deleted.
+    REJECTED
+    /// No longer produced: unreviewed uploads used to be purged after a window.
+    EXPIRED
+    /// Approved, then deleted again (remove-by-link).
+    REMOVED
+}
+
+/// A file a guest uploaded through a share link.
+///
+/// Confirming the upload creates its media item straight away, in the album and
+/// flagged `pendingReview` so the library leaves it out. Approval clears the flag;
+/// denial deletes the item. The row is kept either way, as the record the change
+/// log's review status and the link quota read.
+model Contribution {
+    id              String             @id @default(cuid())
+    shareLinkId     String             @map("share_link_id")
+    collectionId    String             @map("collection_id")
+    objectKey       String             @unique @map("object_key")
+    fileName        String             @map("file_name")
+    mimeType        String             @map("mime_type")
+    fileSize        BigInt             @map("file_size")
+    /// Self-reported by the guest; nothing verifies it.
+    contributorName String?            @map("contributor_name")
+    status          ContributionStatus @default(UPLOADING)
+    /// The album item the upload became once it finished. Null again if that
+    /// item is deleted.
+    mediaItemId     String?            @unique @map("media_item_id")
+    uploadedAt      DateTime?          @map("uploaded_at")
+    reviewedAt      DateTime?          @map("reviewed_at")
+    /// When the upload email that mentioned this went out.
+    notifiedAt      DateTime?          @map("notified_at")
+    createdAt       DateTime           @default(now()) @map("created_at")
+
+    shareLink  ShareLink  @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+    collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    mediaItem  MediaItem? @relation(fields: [mediaItemId], references: [id], onDelete: SetNull)
+
+    @@index([collectionId, status, uploadedAt])
+    @@index([shareLinkId, status])
+    @@index([status, uploadedAt])
+    @@map("contributions")
+}
+
+enum CollectionEventType {
+    /// A guest added files to the album; they await review.
+    UPLOADED
+    APPROVED
+    REJECTED
+    /// No longer produced: unreviewed uploads used to be purged after a window.
+    EXPIRED
+    /// Approved guest media deleted from the library.
+    REMOVED
+    ITEMS_ADDED
+    ITEMS_REMOVED
+    RENAMED
+    LINK_CREATED
+    LINK_REVOKED
+}
+
+enum CollectionEventActor {
+    OWNER
+    GUEST
+    SYSTEM
+}
+
+/// One entry in an album's change log: who did what, through which link, when.
+model CollectionEvent {
+    id              String               @id @default(cuid())
+    collectionId    String               @map("collection_id")
+    type            CollectionEventType
+    actor           CollectionEventActor
+    /// The link the change came through or concerns, when there is one.
+    shareLinkId     String?              @map("share_link_id")
+    contributorName String?              @map("contributor_name")
+    mediaItemIds    String[]             @map("media_item_ids")
+    contributionIds String[]             @map("contribution_ids")
+    /// Type-specific detail, e.g. `{ from, to }` for RENAMED.
+    detail          Json?
+    /// Set on an event that reversed an earlier one.
+    undoOfId        String?              @map("undo_of_id")
+    undoneAt        DateTime?            @map("undone_at")
+    createdAt       DateTime             @default(now()) @map("created_at")
+    /// Last time items were folded into this entry. A run of uploads or adds is
+    /// one entry for as long as the gaps between them stay short.
+    updatedAt       DateTime             @updatedAt @map("updated_at")
+
+    collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    shareLink  ShareLink? @relation(fields: [shareLinkId], references: [id], onDelete: SetNull)
+
+    @@index([collectionId, createdAt(sort: Desc)])
+    @@index([shareLinkId])
+    @@map("collection_events")
 }
 
 // ─── Search Query Embedding Cache ──────────────────────────

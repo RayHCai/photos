@@ -4,6 +4,11 @@ import { redisConnection } from '../config/redis.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { findOrThrow, applyCursor, paginateResults } from '../utils/db.js';
 import { MEDIA_ITEM_SUMMARY_SELECT } from '../utils/select.js';
+import { logger } from '../utils/logger.js';
+import { albumArchiveFileName, type ArchiveContents } from './archive.service.js';
+import * as s3Service from './s3.service.js';
+import { recordEvent } from './collectionEvents.service.js';
+import { rejectPendingForItems } from './contributions.service.js';
 
 export async function listCollections() {
     const collections = await prisma.collection.findMany({
@@ -35,6 +40,17 @@ export async function listCollections() {
         ...rest,
         coverItem: items[0]?.mediaItem ?? null,
     }));
+}
+
+/**
+ * Every user album's id and name, for labelling where guest uploads came from.
+ * Only user albums can take uploads, so nothing else can be a source.
+ */
+export async function listCollectionNames() {
+    return prisma.collection.findMany({
+        where: { systemType: null, personId: null },
+        select: { id: true, name: true },
+    });
 }
 
 export async function createCollection(data: {
@@ -126,12 +142,25 @@ export async function getCollection(
 
 export async function updateCollection(
     id: string,
-    data: { name?: string; description?: string; coverKey?: string }
+    data: { name?: string; description?: string; coverKey?: string },
+    opts: { undoOfId?: string } = {}
 ) {
-    return findOrThrow(
-        () => prisma.collection.update({ where: { id }, data }),
+    const before = await findOrThrow(
+        () => prisma.collection.findUnique({ where: { id }, select: { name: true } }),
         'Collection'
     );
+    const updated = await prisma.collection.update({ where: { id }, data });
+
+    if (data.name !== undefined && data.name !== before.name) {
+        await recordEvent({
+            collectionId: id,
+            type: 'RENAMED',
+            actor: 'OWNER',
+            detail: { from: before.name, to: data.name },
+            ...opts,
+        });
+    }
+    return updated;
 }
 
 export async function deleteCollection(id: string) {
@@ -142,6 +171,26 @@ export async function deleteCollection(id: string) {
     if (existing.systemType) {
         throw new AppError(403, 'System collections cannot be deleted');
     }
+
+    /**
+     * Guest uploads still awaiting review cascade away with the album, and nothing
+     * else would ever name their bytes again. Approved ones are library items by
+     * now and stay.
+     */
+    const unreviewed = await prisma.contribution.findMany({
+        where: { collectionId: id, status: { in: ['UPLOADING', 'PENDING'] } },
+        select: { objectKey: true },
+    });
+    if (unreviewed.length > 0) {
+        const { failedKeys } = await s3Service.deleteObjects(unreviewed.map((c) => c.objectKey));
+        if (failedKeys.length > 0) {
+            logger.error(
+                { collectionId: id, failed: failedKeys.length },
+                'collections: could not delete unreviewed uploads; leaving them orphaned'
+            );
+        }
+    }
+
     return prisma.collection.delete({ where: { id } });
 }
 
@@ -205,7 +254,7 @@ export async function getCollectionTimeline(id: string) {
     return result;
 }
 
-async function invalidateCollectionTimelineCache(id: string) {
+export async function invalidateCollectionTimelineCache(id: string) {
     await redisConnection.del(collectionTimelineKey(id));
 }
 
@@ -232,10 +281,34 @@ export async function getSystemCollectionIds(systemType: string): Promise<string
     return rows.map((r) => r.mediaItemId);
 }
 
+/**
+ * Add items to an album, returning the ids that were actually added.
+ *
+ * Narrowed to items that exist and are not already members, so the change log
+ * records exactly what changed — and so re-adding through an undo cannot trip
+ * the foreign key on an item deleted since it was removed.
+ */
 export async function addItems(
     collectionId: string,
-    mediaItemIds: string[]
-) {
+    mediaItemIds: string[],
+    opts: { undoOfId?: string } = {}
+): Promise<string[]> {
+    const requested = [...new Set(mediaItemIds)];
+    const [members, existing] = await Promise.all([
+        prisma.collectionItem.findMany({
+            where: { collectionId, mediaItemId: { in: requested } },
+            select: { mediaItemId: true },
+        }),
+        prisma.mediaItem.findMany({
+            where: { id: { in: requested } },
+            select: { id: true },
+        }),
+    ]);
+    const memberIds = new Set(members.map((m) => m.mediaItemId));
+    const existingIds = new Set(existing.map((m) => m.id));
+    const toAdd = requested.filter((id) => existingIds.has(id) && !memberIds.has(id));
+    if (toAdd.length === 0) return [];
+
     const maxOrder = await prisma.collectionItem.aggregate({
         where: { collectionId },
         _max: { sortOrder: true },
@@ -243,7 +316,7 @@ export async function addItems(
 
     let nextOrder = (maxOrder._max.sortOrder ?? -1) + 1;
 
-    const items = mediaItemIds.map((mediaItemId) => ({
+    const items = toAdd.map((mediaItemId) => ({
         collectionId,
         mediaItemId,
         sortOrder: nextOrder++,
@@ -255,20 +328,48 @@ export async function addItems(
     });
 
     await invalidateCollectionTimelineCache(collectionId);
+    await recordEvent({
+        collectionId,
+        type: 'ITEMS_ADDED',
+        actor: 'OWNER',
+        mediaItemIds: toAdd,
+        ...opts,
+    });
+    return toAdd;
 }
 
+/** Remove items from an album, returning the ids that were actually members. */
 export async function removeItems(
     collectionId: string,
-    mediaItemIds: string[]
-) {
+    mediaItemIds: string[],
+    opts: { undoOfId?: string } = {}
+): Promise<string[]> {
+    const members = await prisma.collectionItem.findMany({
+        where: { collectionId, mediaItemId: { in: mediaItemIds } },
+        select: { mediaItemId: true },
+    });
+    const removed = members.map((m) => m.mediaItemId);
+    if (removed.length === 0) return [];
+
     await prisma.collectionItem.deleteMany({
         where: {
             collectionId,
-            mediaItemId: { in: mediaItemIds },
+            mediaItemId: { in: removed },
         },
     });
+    // A guest upload still awaiting review lives in this album and nowhere else,
+    // so taking it out is denying it.
+    await rejectPendingForItems(collectionId, removed);
 
     await invalidateCollectionTimelineCache(collectionId);
+    await recordEvent({
+        collectionId,
+        type: 'ITEMS_REMOVED',
+        actor: 'OWNER',
+        mediaItemIds: removed,
+        ...opts,
+    });
+    return removed;
 }
 
 export async function getCollectionMembership(mediaItemIds: string[]) {
@@ -285,4 +386,43 @@ export async function getCollectionMembership(mediaItemIds: string[]) {
     return memberships
         .filter((m) => m._count.mediaItemId === unique.length)
         .map((m) => m.collectionId);
+}
+
+/**
+ * Everything in an album, as archive entries named after the album.
+ *
+ * In gallery order, so the zip lists files the way the album shows them.
+ * `mediaItemWhere` narrows the members — a public link passes the hidden
+ * exclusion, since hidden photos are kept out of every public read.
+ */
+export async function getCollectionArchive(
+    collectionId: string,
+    mediaItemWhere?: Prisma.MediaItemWhereInput
+): Promise<ArchiveContents> {
+    const collection = await findOrThrow(
+        () => prisma.collection.findUnique({
+            where: { id: collectionId },
+            select: { name: true },
+        }),
+        'Collection'
+    );
+
+    const rows = await prisma.collectionItem.findMany({
+        where: { collectionId, ...(mediaItemWhere ? { mediaItem: mediaItemWhere } : {}) },
+        orderBy: COLLECTION_ITEM_ORDER_BY,
+        select: {
+            mediaItem: { select: { originalKey: true, fileName: true, fileSize: true } },
+        },
+    });
+
+    return {
+        archiveName: albumArchiveFileName(collection.name),
+        // fileSize is a BigInt column, summed only into a byte total; Number is
+        // exact well past any single file's size.
+        entries: rows.map(({ mediaItem }) => ({
+            key: mediaItem.originalKey,
+            fileName: mediaItem.fileName,
+            size: Number(mediaItem.fileSize),
+        })),
+    };
 }

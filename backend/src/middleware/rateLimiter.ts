@@ -46,6 +46,18 @@ export const publicShareRateLimiter = rateLimit({
     limit: 2000,
 });
 
+/**
+ * Guest uploads through a share link. Every request here signs an S3 write, so
+ * the cap is per IP and well below the viewing limiter's. A file costs two
+ * requests (presign, confirm), or one per 10 MB part for large videos, so this
+ * still lets a guest upload a phone's worth of photos in one sitting; the link's
+ * storage quota is what bounds the bytes.
+ */
+export const publicUploadRateLimiter = rateLimit({
+    ...baseOptions('rl:public-upload:'),
+    limit: 3000,
+});
+
 export const authRateLimiter = rateLimit({
     ...baseOptions('rl:auth:'),
     limit: 10,

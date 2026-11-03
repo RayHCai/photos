@@ -6,6 +6,7 @@ import { CDN_CONFIGURED, thumbnailSrcSet, thumbnailUrlFromKey } from '@/lib/api/
 import { blurhashAverageColor, blurhashToDataUrl } from '@/lib/utils/blurhashCache';
 import { formatDuration } from '@/lib/utils/format';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
+import { SourceMarker } from './SourceMarker';
 import { useSelectableItem } from '@/lib/hooks/useSelectableItem';
 import type { MediaShellItem } from '@/lib/types/media';
 
@@ -49,10 +50,20 @@ export const GalleryItem = memo(function GalleryItem({
     thumbnailSrc,
     hasTouch = false,
 }: GalleryItemProps) {
+    /**
+     * A guest's upload is shown from the moment it lands rather than as
+     * "Processing...": from its original (which the thumbnail endpoints serve until
+     * a thumbnail exists) while the worker runs, and from its thumbnail through any
+     * later pass, such as face detection after approval, that does not change it.
+     */
+    const isGuestUpload = !!item.sourceCollectionId || !!item.guestUpload;
+    const isComplete = item.processingStatus === 'COMPLETED';
+    const canOpen = isComplete || (isGuestUpload && !!item.thumbnailKey);
+
     const { handleClick, handleContextMenu } = useSelectableItem({
         isSelecting,
         onSelect,
-        onClick: item.processingStatus === 'COMPLETED' ? onClick : undefined,
+        onClick: canOpen ? onClick : undefined,
     });
 
     /**
@@ -83,8 +94,21 @@ export const GalleryItem = memo(function GalleryItem({
      */
     const showFavourite = onToggleFavorite && (!hasTouch || isFavorite || isSelecting);
 
-    const isReady = item.processingStatus === 'COMPLETED' && item.thumbnailKey;
+    const isReady = !!item.thumbnailKey && (isComplete || isGuestUpload);
     const baseSrc = thumbnailSrc ?? thumbnailUrlFromKey(item.thumbnailKey, item.id);
+
+    /**
+     * The original stands in only for photos, and only while the browser can
+     * decode it: HEIC outside Safari, or camera RAW, leaves a plain tile until the
+     * thumbnail arrives. Keyed by id so a re-used cell starts afresh.
+     */
+    const [originalFailedFor, setOriginalFailedFor] = useState<string | null>(null);
+    const showsOriginal =
+        isGuestUpload &&
+        !item.thumbnailKey &&
+        item.type === 'PHOTO' &&
+        item.processingStatus !== 'FAILED' &&
+        originalFailedFor !== item.id;
 
     /**
      * Request CDN thumbnails with CORS so the service worker can read their status.
@@ -157,7 +181,7 @@ export const GalleryItem = memo(function GalleryItem({
         <div
             data-media-id={item.id}
             className={`relative overflow-hidden bg-stone-100 flex-shrink-0 group select-none ${
-                item.processingStatus === 'COMPLETED' || isSelecting
+                canOpen || isSelecting
                     ? 'cursor-pointer'
                     : 'cursor-default'
             }`}
@@ -203,7 +227,15 @@ export const GalleryItem = memo(function GalleryItem({
                     }
                     crossOrigin={useCors ? 'anonymous' : undefined}
                     alt={item.fileName ?? (item.type === 'VIDEO' ? 'Video' : 'Photo')}
-                    loading="lazy"
+                    /**
+                     * Eager, not lazy. The virtualizer already mounts only the viewport
+                     * plus a budgeted overscan strip, and that strip exists so a row's
+                     * thumbnail is in flight *before* it scrolls into view. `lazy`
+                     * handed that decision back to the browser's own distance
+                     * heuristics, which on a fast fling meant rows reached the viewport
+                     * still waiting to be asked for.
+                     */
+                    loading="eager"
                     decoding="async"
                     /**
                      * Explicit decode dimensions (the measured cell size). The cell is
@@ -218,7 +250,19 @@ export const GalleryItem = memo(function GalleryItem({
                     className="w-full h-full object-cover"
                     draggable={false}
                 />
-            ) : (
+            ) : showsOriginal ? (
+                <img
+                    src={baseSrc}
+                    onError={() => setOriginalFailedFor(item.id)}
+                    alt={item.fileName ?? 'Photo'}
+                    loading="eager"
+                    decoding="async"
+                    width={Math.round(width)}
+                    height={Math.round(height)}
+                    className="w-full h-full object-cover"
+                    draggable={false}
+                />
+            ) : isGuestUpload && item.processingStatus !== 'FAILED' ? null : (
                 <div className="w-full h-full flex items-center justify-center text-stone-400 text-xs">
                     {item.processingStatus === 'FAILED' ? 'Failed' : 'Processing...'}
                 </div>
@@ -233,6 +277,11 @@ export const GalleryItem = memo(function GalleryItem({
                     )}
                     <PlayCircle className="w-4 h-4" aria-hidden="true" />
                 </div>
+            )}
+
+            {/* Hidden while selecting, where a tap on it would navigate away mid-selection. */}
+            {item.sourceCollectionId && !isSelecting && (
+                <SourceMarker collectionId={item.sourceCollectionId} />
             )}
 
             {showFavourite && (
@@ -260,7 +309,14 @@ export const GalleryItem = memo(function GalleryItem({
                 </button>
             )}
 
-            {onSelect && (
+            {/*
+              * Same gate as the favourite star: the checkbox is hover-revealed, and a
+              * finger cannot hover, so on touch it was an invisible 20px target in the
+              * corner of every cell that entered selection mode instead of opening the
+              * photo. Touch enters selection by long-press (useDragSelect); once
+              * selecting, the checkbox is visible and the whole cell toggles anyway.
+              */}
+            {onSelect && (!hasTouch || isSelecting) && (
                 <SelectionCheckbox
                     isSelected={isSelected}
                     isSelecting={isSelecting}

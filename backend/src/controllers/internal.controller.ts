@@ -23,9 +23,9 @@ export const setProcessingStatus = asyncHandler(async (req: Request, res: Respon
 
 export const claimTask = asyncHandler(async (req: Request, res: Response) => {
     const mediaId = req.params.id as string;
-    const claimed = await internalService.claimTask(mediaId, req.body.taskId);
-    logger.info({ mediaId, taskId: req.body.taskId, claimed }, 'task claim attempt');
-    res.json({ claimed });
+    const { claimed, skipFaces } = await internalService.claimTask(mediaId, req.body.taskId);
+    logger.info({ mediaId, taskId: req.body.taskId, claimed, skipFaces }, 'task claim attempt');
+    res.json({ claimed, skipFaces });
 });
 
 export const createRetryTask = asyncHandler(async (req: Request, res: Response) => {

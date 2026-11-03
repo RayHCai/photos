@@ -258,6 +258,26 @@ export async function getObjectState(key: string): Promise<ObjectState> {
 }
 
 /**
+ * An object's size in bytes, or null when it does not exist.
+ *
+ * A presigned PUT signs its Content-Length, but a multipart upload's parts are
+ * not bounded by anything, so this is how a completed multipart upload is held
+ * to the size it declared.
+ */
+export async function getObjectSize(key: string): Promise<number | null> {
+    try {
+        const res = await s3Client.send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+        return res.ContentLength ?? null;
+    }
+    catch (err) {
+        const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata
+            ?.httpStatusCode;
+        if (status === 404) return null;
+        throw err;
+    }
+}
+
+/**
  * Streams every key under a prefix to a callback, one page at a time.
  *
  * A callback rather than a returned array because the thumbnail prefix holds one

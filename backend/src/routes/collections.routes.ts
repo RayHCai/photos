@@ -3,6 +3,7 @@ import { z } from 'zod';
 import * as collectionsController from '../controllers/collections.controller.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
+import { ARCHIVE_TOKEN_PATTERN } from '../services/archiveProgress.service.js';
 
 const router = Router();
 
@@ -42,6 +43,7 @@ const itemPagination = validate({
 });
 
 // Static segments must precede /:id or they are captured as an id.
+router.get('/names', collectionsController.names);
 router.get('/hidden/ids', collectionsController.getHiddenIds);
 router.get('/favorites/ids', collectionsController.getFavoriteIds);
 router.get('/hidden', itemPagination, collectionsController.getHidden);
@@ -49,6 +51,36 @@ router.get('/favorites', itemPagination, collectionsController.getFavorites);
 
 router.get('/:id', itemPagination, collectionsController.getById);
 router.get('/:id/timeline', collectionsController.getTimeline);
+
+router.get(
+    '/:id/events',
+    validate({
+        query: z.object({
+            cursor: z.string().optional(),
+            limit: z.coerce.number().int().min(1).max(100).optional(),
+        }),
+    }),
+    collectionsController.events
+);
+
+router.get('/:id/events/:eventId/uploads', collectionsController.eventUploads);
+
+router.post(
+    '/:id/events/undo',
+    validate({ body: z.object({ eventIds: z.array(z.string()).min(1).max(50) }) }),
+    collectionsController.undoEvents
+);
+
+/** The whole album as one zip, reached by a form POST navigation. */
+router.post(
+    '/:id/archive',
+    validate({
+        body: z.object({
+            progressToken: z.string().regex(ARCHIVE_TOKEN_PATTERN).optional(),
+        }),
+    }),
+    collectionsController.archive
+);
 
 router.patch(
     '/:id',

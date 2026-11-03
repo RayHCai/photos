@@ -1,21 +1,24 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { useCollection, useAddCollectionItems, useRemoveCollectionItems } from '@/lib/hooks/useCollections';
+import { useCollection, useRemoveCollectionItems } from '@/lib/hooks/useCollections';
 import { useMediaSelection } from '@/lib/hooks/useMediaSelection';
 import { useEscapeKey } from '@/lib/hooks/useEscapeKey';
 import { PhotoGallery } from '@/components/gallery/PhotoGallery';
 import { SelectionToolbar } from '@/components/gallery/SelectionToolbar';
-import { CollectionItemPicker } from '@/components/collections/CollectionItemPicker';
 import { CollectionSettingsModal } from '@/components/collections/CollectionSettingsModal';
+import { CollectionActivityPanel } from '@/components/collections/CollectionActivityPanel';
+import { SourceAttributionScope } from '@/lib/providers/SourceAttributionProvider';
 import { useFilePicker } from '@/lib/hooks/useFilePicker';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import { CenteredSpinner } from '@/components/ui/CenteredSpinner';
 import { Button } from '@/components/ui/Button';
 import { FileDropZone } from '@/components/upload/UploadDropzone';
 import { UploadMenu } from '@/components/upload/UploadMenu';
-import { ImagePlus, Settings } from 'lucide-react';
+import { Download, History, Settings } from 'lucide-react';
+import { useDownload } from '@/lib/hooks/useDownload';
+import { collectionArchiveUrl } from '@/lib/api/media';
 import { pluralize } from '@/lib/utils/pluralize';
 import { toast } from 'sonner';
 
@@ -36,14 +39,26 @@ export default function CollectionDetailPage() {
         isLoadingPrevious,
         seekToIndex,
     } = useCollection(id);
-    const [pickerOpen, setPickerOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [activityOpen, setActivityOpen] = useState(false);
+
+    // The upload email links here with ?activity=1, to land on the change log
+    // where uploads are reviewed. Read once rather than through useSearchParams,
+    // which would need a Suspense boundary for a value only the first render uses.
+    useEffect(() => {
+        if (new URLSearchParams(window.location.search).has('activity')) setActivityOpen(true);
+    }, []);
     const selection = useMediaSelection();
     useEscapeKey(selection.clearSelection, selection.isSelecting);
-    const addItems = useAddCollectionItems();
     const removeItems = useRemoveCollectionItems();
     const { openFilePicker, openFolderPicker } = useFilePicker();
     const { favoriteIds, addToFavorites, removeFromFavorites } = useFavorites();
+    const { triggerArchive } = useDownload();
+
+    // Not async: the form navigation must spend the click's user activation.
+    const handleDownloadAll = useCallback(() => {
+        triggerArchive(collectionArchiveUrl(id));
+    }, [id, triggerArchive]);
 
     const handleToggleFavorite = useCallback((mediaId: string, isFavorite: boolean) => {
         if (isFavorite) {
@@ -68,11 +83,6 @@ export default function CollectionDetailPage() {
             );
         });
     }, [id, removeItems]);
-
-    const existingIds = useMemo(
-        () => new Set(mediaItems.map((i) => i.id)),
-        [mediaItems]
-    );
 
     if (isLoading) {
         return <CenteredSpinner />;
@@ -115,21 +125,25 @@ export default function CollectionDetailPage() {
                                 onUploadFiles={() => openFilePicker(id)}
                                 onUploadFolder={() => openFolderPicker(id)}
                             />
-                            {/*
-                              * The only way to reach CollectionItemPicker.
-                              * `setPickerOpen(true)` was never called from anywhere, so
-                              * the picker was unreachable and adding an *existing* photo
-                              * to a collection was only possible from the gallery's
-                              * add-to-collection modal.
-                              */}
+                            {(collection._count?.items ?? mediaItems.length) > 0 && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleDownloadAll}
+                                    title="Download all"
+                                    aria-label="Download all"
+                                >
+                                    <Download className="w-4 h-4" />
+                                </Button>
+                            )}
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => setPickerOpen(true)}
-                                title="Add photos from your library"
-                                aria-label="Add photos from your library"
+                                onClick={() => setActivityOpen(true)}
+                                title="Activity"
+                                aria-label="Activity"
                             >
-                                <ImagePlus className="w-4 h-4" />
+                                <History className="w-4 h-4" />
                             </Button>
                             <Button
                                 variant="ghost"
@@ -144,38 +158,28 @@ export default function CollectionDetailPage() {
             </div>
 
             {/* Gallery — full home parity: windowed both ways + timeline seek. */}
-            <PhotoGallery
-                items={mediaItems}
-                selection={selection}
-                favoriteIds={favoriteIds}
-                onToggleFavorite={handleToggleFavorite}
-                timeline={timeline}
-                onLoadMore={fetchNextPage}
-                hasMore={hasNextPage}
-                isLoadingMore={isLoadingMore}
-                onLoadPrevious={fetchPreviousPage}
-                hasPrevious={hasPreviousPage}
-                isLoadingPrevious={isLoadingPrevious}
-                windowStart={windowStart}
-                onSeekToIndex={seekToIndex}
-            />
+            <SourceAttributionScope currentCollectionId={id}>
+                <PhotoGallery
+                    items={mediaItems}
+                    selection={selection}
+                    favoriteIds={favoriteIds}
+                    onToggleFavorite={handleToggleFavorite}
+                    timeline={timeline}
+                    onLoadMore={fetchNextPage}
+                    hasMore={hasNextPage}
+                    isLoadingMore={isLoadingMore}
+                    onLoadPrevious={fetchPreviousPage}
+                    hasPrevious={hasPreviousPage}
+                    isLoadingPrevious={isLoadingPrevious}
+                    windowStart={windowStart}
+                    onSeekToIndex={seekToIndex}
+                />
+            </SourceAttributionScope>
 
-            <CollectionItemPicker
-                open={pickerOpen}
-                onClose={() => setPickerOpen(false)}
-                excludeIds={existingIds}
-                loading={addItems.isPending}
-                onConfirm={(ids) => {
-                    addItems.mutate(
-                        { collectionId: id, mediaItemIds: ids },
-                        {
-                            onSuccess: () => {
-                                setPickerOpen(false);
-                                toast.success('Items added');
-                            },
-                        }
-                    );
-                }}
+            <CollectionActivityPanel
+                collectionId={id}
+                open={activityOpen}
+                onClose={() => setActivityOpen(false)}
             />
 
             <CollectionSettingsModal

@@ -1,6 +1,14 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+/**
+ * An optional setting where `KEY=` (blank, as an example file ships it) means
+ * unset. dotenv yields an empty string there, which `.url()` or `.email()` would
+ * reject and stop the process booting.
+ */
+const optionalSetting = <T extends z.ZodTypeAny>(schema: T) =>
+    z.preprocess((v) => (v === '' ? undefined : v), schema.optional());
+
 const envSchema = z.object({
     PORT: z.coerce.number().default(4000),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -65,6 +73,29 @@ const envSchema = z.object({
         .enum(['true', 'false'])
         .default('false')
         .transform((v) => v === 'true'),
+    /**
+     * Where the web app is served, for links in outgoing email. Defaults to the
+     * first CORS origin, which is the app in every deployment so far.
+     */
+    APP_URL: optionalSetting(z.string().url()),
+    /** Total bytes one share link may hold across unreviewed and approved uploads. */
+    CONTRIBUTION_LINK_QUOTA_GB: z.coerce.number().positive().default(10),
+    /** Files one share link may have waiting for review at once. */
+    CONTRIBUTION_MAX_PENDING_PER_LINK: z.coerce.number().int().positive().default(2000),
+    /**
+     * Uploads arriving within this many minutes of the first un-notified one share
+     * one email.
+     */
+    CONTRIBUTION_DIGEST_MINUTES: z.coerce.number().positive().default(30),
+    /** Resend API key. Without it, upload emails are skipped and only logged. */
+    RESEND_API_KEY: optionalSetting(z.string()),
+    /** Who the upload emails go to. Unset disables them, like RESEND_API_KEY. */
+    NOTIFY_EMAIL_TO: optionalSetting(z.string().email()),
+    /**
+     * Sender for upload emails. Resend's shared test sender only delivers to the
+     * address that owns the Resend account; use a verified domain to send anywhere.
+     */
+    NOTIFY_EMAIL_FROM: z.string().default('Photos <onboarding@resend.dev>'),
 });
 
 export type Env = z.infer<typeof envSchema>;
