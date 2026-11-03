@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="color-scheme" content="light dark">
+</head>
+<body>
+<title>Gallery Scroll Lab</title>
+<style>
+/* Layout: phone = slim viewer bar on top + full-bleed stage; desktop = sidebar + phone frame.
+   Palette mirrors a native photos app: neutral surfaces, one blue accent, translucent bars. */
+:root{
+  --bg:#f4f4f6; --fg:#1a1a1e; --mut:#6b6b73; --line:#e3e3e8; --card:#ffffff;
+  --acc:#1a73e8; --acc-fg:#ffffff; --bar:rgba(255,255,255,.84); --sheet:#ffffff;
+  --tile:#dcdce1; --ovl:rgba(0,0,0,.55); --frame:#111114; --sel:#1a73e8;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text",Roboto,"Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e0e11; --fg:#f2f2f5; --mut:#9a9aa3; --line:#26262c; --card:#17171b;
+    --acc:#8ab4f8; --acc-fg:#0e0e11; --bar:rgba(14,14,17,.8); --sheet:#1b1b20;
+    --tile:#2a2a30; --ovl:rgba(0,0,0,.62); --frame:#2a2a30; --sel:#8ab4f8; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e0e11; --fg:#f2f2f5; --mut:#9a9aa3; --line:#26262c; --card:#17171b;
+  --acc:#8ab4f8; --acc-fg:#0e0e11; --bar:rgba(14,14,17,.8); --sheet:#1b1b20;
+  --tile:#2a2a30; --ovl:rgba(0,0,0,.62); --frame:#2a2a30; --sel:#8ab4f8; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);overflow:hidden;-webkit-text-size-adjust:100%}
+button{font-family:inherit;cursor:pointer}
+
+/* ---------- viewer chrome ---------- */
+.vbar{position:fixed;top:0;left:0;right:0;z-index:20;height:calc(36px + env(safe-area-inset-top,0px));
+  padding:env(safe-area-inset-top,0px) 4px 0;display:flex;align-items:center;gap:4px;
+  background:var(--frame);color:#fff}
+.vbar button{border:0;background:transparent;color:#fff;height:36px;display:flex;align-items:center;justify-content:center}
+.vbar .arrow{width:44px;font-size:24px;line-height:1}
+.vbar .name{flex:1;gap:8px;font-size:13px;font-weight:600;letter-spacing:.01em}
+.vbar .num{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:rgba(255,255,255,.18);font-size:12px;font-variant-numeric:tabular-nums}
+.vbar .hint{font-weight:400;opacity:.6;font-size:11px}
+.stage{position:fixed;top:calc(36px + env(safe-area-inset-top,0px));left:0;right:0;bottom:0;overflow:hidden;background:var(--bg)}
+.screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  background:var(--bg);color:var(--fg);-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:pan-y}
+.ovl{position:absolute;inset:0;pointer-events:none;z-index:6}
+.ovl>*{pointer-events:auto}
+.side{display:none}
+
+.scrim{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.45)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;max-height:82%;overflow-y:auto;background:var(--sheet);color:var(--fg);
+  border-radius:18px 18px 0 0;padding:8px 0 calc(12px + env(safe-area-inset-bottom,0px));box-shadow:0 -8px 40px rgba(0,0,0,.25)}
+.sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:4px auto 10px}
+.list{list-style:none;margin:0;padding:0}
+.list li{display:grid;grid-template-columns:28px 1fr;gap:10px;padding:10px 16px;align-items:start;border-radius:10px;margin:0 8px;cursor:pointer}
+.list li.on{background:color-mix(in srgb,var(--acc) 14%,transparent)}
+.list .n{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--line);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.list li.on .n{background:var(--acc);color:var(--acc-fg)}
+.list .ttl{font-weight:600;font-size:15px}
+.list .mim{font-size:12px;color:var(--mut);margin-top:1px}
+.notes{padding:12px 16px 4px;border-top:1px solid var(--line);margin-top:8px}
+.notes h3{margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
+.notes p{margin:0 0 8px;font-size:14px;line-height:1.45}
+.notes ul{margin:0 0 8px;padding-left:18px;font-size:14px;line-height:1.45}
+
+@media (min-width:760px){
+  body{display:grid;grid-template-columns:320px 1fr;height:100%}
+  .vbar{display:none}
+  .side{display:block;overflow-y:auto;border-right:1px solid var(--line);background:var(--card);padding:16px 0 24px}
+  .side h1{font-size:17px;margin:0 16px 2px;letter-spacing:-.01em}
+  .side .lead{margin:0 16px 12px;font-size:13px;color:var(--mut);line-height:1.4}
+  .stage{position:relative;top:auto;left:auto;right:auto;bottom:auto;width:390px;height:min(844px,calc(100vh - 48px));margin:24px auto;
+    border:10px solid var(--frame);border-radius:46px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+  .screen{border-radius:36px}
+  .ovl{border-radius:36px;overflow:hidden}
+  .sheet,.scrim{display:none}
+}
+
+/* ---------- shared photo-app pieces ---------- */
+.appbar{position:sticky;top:0;z-index:5;height:52px;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px;
+  background:var(--bar);backdrop-filter:saturate(180%) blur(14px);-webkit-backdrop-filter:saturate(180%) blur(14px);
+  transition:transform .22s ease,opacity .22s ease;font-weight:700;font-size:20px;letter-spacing:-.02em}
+.appbar.hide{transform:translateY(-100%)}
+.appbar .sp{flex:1}
+.ic{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:var(--fg);background:transparent;border:0;font-size:17px;font-weight:600}
+.ic:active{background:color-mix(in srgb,var(--fg) 10%,transparent)}
+.av{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#f5a623,#e0457b)}
+.sec{padding-bottom:10px}
+.sec.cv{content-visibility:auto}
+.hd{height:44px;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:15px;font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+.hd.sticky{position:sticky;top:0;z-index:4;background:var(--bar);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.hd .sub{font-weight:400;color:var(--mut);font-size:13px;overflow:hidden;text-overflow:ellipsis}
+.hd.big{height:58px;font-size:22px;font-weight:700;letter-spacing:-.02em}
+.hd.small{height:32px;font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+.grid{display:grid;grid-template-columns:repeat(var(--c,3),1fr);gap:2px;padding:0 4px}
+.t{position:relative;aspect-ratio:1;overflow:hidden;background:var(--tile);contain:layout paint;border-radius:var(--tr,0)}
+.t.v::after{content:"\25B6\00a0" attr(data-d);position:absolute;right:5px;bottom:4px;font:600 10px/1 var(--font);color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7);letter-spacing:.02em}
+/* procedural "photos": six scene types driven by a hue token, so 1,400 tiles cost no network */
+.t.s0{background:linear-gradient(180deg,hsl(var(--h) 65% 74%),hsl(var(--h) 60% 54%) 57%,hsl(calc(var(--h) - 170) 22% 30%) 57.6%,hsl(calc(var(--h) - 170) 18% 20%))}
+.t.s1{background:radial-gradient(circle at 72% 24%,hsl(46 95% 86%) 0 6%,transparent 7%),linear-gradient(168deg,hsl(var(--h) 42% 58%),hsl(var(--h) 40% 28%))}
+.t.s2{background:radial-gradient(ellipse 36% 44% at 50% 60%,hsl(var(--h) 48% 74%) 0 60%,transparent 62%),linear-gradient(180deg,hsl(calc(var(--h) + 190) 18% 78%),hsl(calc(var(--h) + 190) 16% 46%))}
+.t.s3{background:radial-gradient(circle at 76% 22%,hsl(52 80% 94%) 0 4.5%,transparent 5.5%),linear-gradient(180deg,hsl(var(--h) 48% 14%),hsl(var(--h) 40% 30%))}
+.t.s4{background:radial-gradient(circle at 50% 56%,hsl(var(--h) 78% 54%) 0 29%,hsl(0 0% 97%) 30% 43%,transparent 44%),linear-gradient(160deg,hsl(32 24% 72%),hsl(26 24% 44%))}
+.t.s5{background:repeating-linear-gradient(90deg,transparent 0 11px,rgba(255,255,255,.14) 11px 16px),linear-gradient(180deg,hsl(var(--h) 36% 76%) 0 44%,hsl(var(--h) 12% 46%) 44% 100%)}
+.bnav{position:sticky;bottom:0;z-index:5;display:flex;height:calc(58px + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);
+  background:var(--bar);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line)}
+.bnav button{flex:1;border:0;background:none;color:var(--mut);font:500 11px var(--font);display:flex;flex-direction:column;align-items:center;gap:3px;padding-top:9px}
+.bnav button .g{font-size:18px;line-height:1}
+.bnav button.on{color:var(--acc)}
+.pill{position:absolute;padding:7px 12px;border-radius:999px;background:var(--ovl);color:#fff;font-size:13px;font-weight:600;letter-spacing:-.01em;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);opacity:0;transition:opacity .25s;white-space:nowrap;pointer-events:none}
+.pill.show{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="vbar">
+  <button class="arrow" id="prevBtn" aria-label="Previous design">&#8249;</button>
+  <button class="name" id="nameBtn"><span class="num" id="numLbl">1</span><span id="nameLbl">Sticky Days</span><span class="hint">tap for list</span></button>
+  <button class="arrow" id="nextBtn" aria-label="Next design">&#8250;</button>
+</div>
+<aside class="side">
+  <h1>Gallery Scroll Lab</h1>
+  <p class="lead">Ten ways to scroll a mobile photo library, after Google Photos and Apple Photos. Open this page on a phone for real touch; here the frame scrolls with the wheel.</p>
+  <ul class="list" id="sideList"></ul>
+  <div class="notes" id="sideNotes"></div>
+</aside>
+<div class="stage" id="stage"><div class="screen" id="screen"></div><div class="ovl" id="ovl"></div></div>
+<div class="scrim" id="scrim" hidden></div>
+<div class="sheet" id="sheet" hidden>
+  <div class="grab"></div>
+  <ul class="list" id="sheetList"></ul>
+  <div class="notes" id="sheetNotes"></div>
+</div>
+<script>
+/* ================= sample library (seeded, deterministic) ================= */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rnd=mulberry32(20261031);
+const TODAY=new Date(2026,9,31,0,0,0,0);
+const DAY=86400000;
+const ARS=[1,1,4/3,4/3,3/4,3/4,16/9,9/16,3/2,2/3];
+const SCENE_H=[[195,225],[85,150],[15,40],[215,250],[0,40],[200,230]];
+const LOCS=['Lisbon','Big Sur','Kyoto','Oslo','Mexico City','Joshua Tree','Vancouver'];
+const DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const MS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function pick(a){return a[Math.floor(rnd()*a.length)]}
+function mkPhoto(id,t,bias){
+  const s=(bias!=null&&rnd()<0.6)?bias:Math.floor(rnd()*6);
+  const [h0,h1]=SCENE_H[s]; const h=Math.round(h0+rnd()*(h1-h0));
+  const v=rnd()<0.1; return {id,t,s,h,ar:pick(ARS),v,d:v?Math.round(3+rnd()*85):0};
+}
+const days=[]; let pid=0;
+const trips=new Map();
+for(let k=0;k<7;k++){const start=5+Math.floor(rnd()*560),len=3+Math.floor(rnd()*5),bias=Math.floor(rnd()*6),loc=LOCS[k];for(let j=0;j<len;j++)trips.set(start+j,{bias,loc});}
+for(let back=0;back<600;back++){
+  const trip=trips.get(back);
+  if(!trip&&rnd()>0.42)continue;
+  const n=trip?10+Math.floor(rnd()*22):(rnd()<0.8?1+Math.floor(rnd()*5):6+Math.floor(rnd()*10));
+  const date=new Date(TODAY.getTime()-back*DAY);
+  const photos=[];for(let i=0;i<n;i++)photos.push(mkPhoto(pid++,date.getTime()+8*3600000+Math.floor(rnd()*14*3600000),trip?trip.bias:null));
+  photos.sort((a,b)=>b.t-a.t);
+  days.push({key:date.toISOString().slice(0,10),date,photos,loc:trip?trip.loc:null});
+}
+const months=[];const byM=new Map();
+for(const d of days){const k=d.date.getFullYear()+'-'+d.date.getMonth();let m=byM.get(k);if(!m){m={key:k,date:new Date(d.date.getFullYear(),d.date.getMonth(),1),days:[],count:0};byM.set(k,m);months.push(m);}m.days.push(d);m.count+=d.photos.length;}
+const years=[];const byY=new Map();
+for(const m of months){const y=m.date.getFullYear();let yr=byY.get(y);if(!yr){yr={year:y,months:[],count:0};byY.set(y,yr);years.push(yr);}yr.months.push(m);yr.count+=m.count;}
+const allPhotos=days.flatMap(d=>d.photos);
+const photoById=new Map(allPhotos.map(p=>[p.id,p]));
+const TOTAL=allPhotos.length;
+
+/* ================= labels ================= */
+function dayLabel(d){const diff=Math.round((TODAY-d)/DAY);if(diff===0)return'Today';if(diff===1)return'Yesterday';const s=DN[d.getDay()]+', '+MS[d.getMonth()]+' '+d.getDate();return d.getFullYear()===TODAY.getFullYear()?s:s+', '+d.getFullYear();}
+function monthLabel(d){return MN[d.getMonth()]+' '+d.getFullYear()}
+function monthShort(d){return MS[d.getMonth()]+' '+d.getFullYear()}
+function fmtDur(s){return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+
+/* ================= tile + grid builders ================= */
+function tile(p,o){o=o||{};return'<div class="t s'+p.s+(p.v?' v':'')+(o.cls?' '+o.cls:'')+'" style="--h:'+p.h+';--ar:'+p.ar.toFixed(4)+(o.style?';'+o.style:'')+'" data-id="'+p.id+'"'+(p.v?' data-d="'+fmtDur(p.d)+'"':'')+(o.attrs?' '+o.attrs:'')+'>'+(o.inner||'')+'</div>'}
+function bnav(active){return'<nav class="bnav">'+[['photos','&#9638;','Photos'],['search','&#9906;','Search'],['library','&#9641;','Library']].map(a=>'<button class="'+(a[0]===active?'on':'')+'"><span class="g">'+a[1]+'</span>'+a[2]+'</button>').join('')+'</nav>'}
+function gridHtml(photos,cols,extraClass){return'<div class="grid'+(extraClass?' '+extraClass:'')+'" style="--c:'+cols+'">'+photos.map(p=>tile(p)).join('')+'</div>'}
+function cellSize(W,cols,pad,gap){pad=pad==null?4:pad;gap=gap==null?2:gap;return(W-pad*2-(cols-1)*gap)/cols}
+function gridHeight(n,W,cols,pad,gap){const c=cellSize(W,cols,pad,gap);const r=Math.ceil(n/cols);return r*c+(r-1)*(gap==null?2:gap)}
+/* exact intrinsic height lets content-visibility:auto skip offscreen sections without the scroll height drifting */
+function daySection(day,o){
+  o=o||{};const cols=o.cols||3,hh=o.headerH!=null?o.headerH:44,pb=o.pb!=null?o.pb:10;
+  const h=hh+gridHeight(day.photos.length,o.W,cols,o.pad,o.gap)+pb;
+  const cls='hd'+(o.sticky?' sticky':'')+(o.big?' big':'')+(o.small?' small':'');
+  return'<section class="sec cv" data-key="'+day.key+'" data-m="'+day.date.getFullYear()+'-'+day.date.getMonth()+'" style="contain-intrinsic-size:auto '+Math.round(h)+'px'+(pb!==10?';padding-bottom:'+pb+'px':'')+'">'+
+    (hh?'<div class="'+cls+'">'+(o.label||dayLabel(day.date))+(day.loc&&o.loc?'<span class="sub">'+day.loc+'</span>':'')+'</div>':'')+
+    gridHtml(day.photos,cols)+'</section>';
+}
+
+/* ================= scroll helpers ================= */
+function onScroll(el,fn){let tick=false;const h=()=>{if(tick)return;tick=true;requestAnimationFrame(()=>{tick=false;fn(el.scrollTop)})};el.addEventListener('scroll',h,{passive:true});return()=>el.removeEventListener('scroll',h)}
+function sectionOffsets(root,sel){const out=[];root.querySelectorAll(sel||'.sec').forEach(el=>out.push({top:el.offsetTop,el,key:el.dataset.key,m:el.dataset.m}));return out}
+function findAt(offs,y){let lo=0,hi=offs.length-1,ans=0;while(lo<=hi){const mid=(lo+hi)>>1;if(offs[mid].top<=y){ans=mid;lo=mid+1}else hi=mid-1}return offs[ans]}
+function haptic(ms){try{if(navigator.vibrate)navigator.vibrate(ms||8)}catch(e){}}
+function appbar(title,right){return'<div class="appbar"><span>'+title+'</span><span class="sp"></span>'+(right||'<button class="ic" aria-label="Search">&#9906;</button><span class="av"></span>')+'</div>'}
+function hideOnScroll(screen,bar){let last=screen.scrollTop;return onScroll(screen,y=>{const dy=y-last;if(y<8||dy<-6)bar.classList.remove('hide');else if(dy>6)bar.classList.add('hide');last=y;})}
+const monthOf=m=>months.find(x=>x.key===m);
+
+/* ================= viewer ================= */
+const DESIGNS=[];
+const $=id=>document.getElementById(id);
+let screen=$('screen'),ovl=$('ovl');
+let cur=1,cleanup=null,lastW=0,rt=null;
+const ro=new ResizeObserver(()=>{const w=screen.clientWidth;if(!lastW){lastW=w;return}if(w===lastW)return;lastW=w;clearTimeout(rt);rt=setTimeout(()=>mount(cur),150)});
+ro.observe(screen);
+/* a fresh screen element per design, so listeners a design attached never leak into the next one */
+function mount(i){
+  if(cleanup){try{cleanup()}catch(e){}cleanup=null}
+  cur=i;const d=DESIGNS[i-1];
+  ro.unobserve(screen);
+  $('stage').className='stage d'+i; /* on the stage, so design CSS reaches both the screen and its overlay */
+  const ns=document.createElement('div');ns.id='screen';ns.className='screen';screen.replaceWith(ns);screen=ns;
+  const no=document.createElement('div');no.id='ovl';no.className='ovl';ovl.replaceWith(no);ovl=no;
+  ro.observe(screen);
+  const ctx={screen,ovl,W:screen.clientWidth,H:screen.clientHeight};
+  cleanup=d.render(ctx)||null;
+  $('numLbl').textContent=i;$('nameLbl').textContent=d.name;
+  renderLists();
+  try{history.replaceState(null,'','#d'+i)}catch(e){}
+  try{localStorage.setItem('gsl-design',String(i))}catch(e){}
+}
+function notesHtml(d){return'<h3>Mimics</h3><p>'+d.mimics+'</p><h3>Try</h3><ul>'+d.tips.map(t=>'<li>'+t+'</li>').join('')+'</ul><h3>Trade-offs</h3><p>'+d.tradeoffs+'</p><p style="color:var(--mut);font-size:12px">'+TOTAL+' sample photos across '+days.length+' days and '+months.length+' months. Tiles are procedural so the scroll is judged on layout, not network.</p>'}
+function renderLists(){
+  const html=DESIGNS.map((d,k)=>'<li class="'+(k+1===cur?'on':'')+'" data-i="'+(k+1)+'"><span class="n">'+(k+1)+'</span><div><div class="ttl">'+d.name+'</div><div class="mim">'+d.blurb+'</div></div></li>').join('');
+  $('sideList').innerHTML=html;$('sheetList').innerHTML=html;
+  $('sideNotes').innerHTML=notesHtml(DESIGNS[cur-1]);$('sheetNotes').innerHTML=notesHtml(DESIGNS[cur-1]);
+}
+function openSheet(o){$('sheet').hidden=!o;$('scrim').hidden=!o;if(o){const on=$('sheetList').querySelector('.on');if(on)on.scrollIntoView({block:'center'})}}
+document.addEventListener('click',e=>{
+  const li=e.target.closest('.list li');if(li){mount(+li.dataset.i);openSheet(false);return}
+  if(e.target.closest('#scrim'))openSheet(false);
+});
+$('prevBtn').onclick=()=>mount((cur+DESIGNS.length-2)%DESIGNS.length+1);
+$('nextBtn').onclick=()=>mount(cur%DESIGNS.length+1);
+$('nameBtn').onclick=()=>openSheet(true);
+function boot(){
+  let i=1;const m=/^#d(\d+)$/.exec(location.hash);
+  if(m)i=+m[1];else{try{i=+(localStorage.getItem('gsl-design')||1)}catch(e){}}
+  if(!(i>=1&&i<=DESIGNS.length))i=1;
+  mount(i);
+}
+/* ================= 1. Sticky Days ================= */
+DESIGNS.push({
+  name:'Sticky Days',
+  blurb:'Google Photos default: day headers pin under the bar, 3-column squares',
+  mimics:'Google Photos on Android and iOS. Each day header sticks to the top and is pushed out by the next one. The app bar slides away on scroll-down and comes back on scroll-up. The bottom tabs never move.',
+  tips:['Fling through a busy month and watch headers hand off to each other.','Scroll up a few pixels: the app bar returns without the grid jumping.','Headers are pure CSS sticky, so they cost nothing per frame.'],
+  tradeoffs:'A pinned header takes 44px of the viewport at all times. It needs real position:sticky, which the current virtualized grid cannot use because its rows are absolutely positioned.',
+  css:'.d1 .sec{padding-bottom:6px}',
+  render:function(c){
+    c.screen.innerHTML=appbar('Photos')+days.map(d=>daySection(d,{W:c.W,sticky:true})).join('')+bnav('photos');
+    return hideOnScroll(c.screen,c.screen.querySelector('.appbar'));
+  }
+});
+
+/* ================= 2. Date Pill + Scrubber ================= */
+DESIGNS.push({
+  name:'Date Pill + Scrubber',
+  blurb:'Google Photos fast-scroll handle with a month bubble; headers flow inline',
+  mimics:'Google Photos. Headers scroll with the content. While you scroll, a handle appears on the right edge and a date chip floats at the top-left. Drag the handle to jump anywhere; a bubble names the month under your thumb and ticks as it changes.',
+  tips:['Scroll, then grab the handle on the right edge and drag.','Feel the tick (vibration on Android) as the bubble changes month.','Let go: the handle fades after a second and a half.'],
+  tradeoffs:'The handle sits over the last column, so the grid needs a right gutter (the app already reserves 32px for this). Drag precision is coarse on a long library: one pixel of thumb can be several days.',
+  css:'.d2 .grid{padding-right:8px}'+
+    '.d2 .scrub{position:absolute;top:0;right:0;bottom:0;width:64px;opacity:0;transition:opacity .2s;pointer-events:none}'+
+    '.d2 .scrub.show{opacity:1}'+
+    '.d2 .scrub:not(.show) .handle{pointer-events:none}'+
+    '.d2 .handle{position:absolute;right:4px;top:0;width:44px;height:44px;display:grid;place-items:center;pointer-events:auto;touch-action:none;cursor:grab}'+
+    '.d2 .handle span{width:28px;height:28px;border-radius:14px 4px 14px 14px;transform:rotate(45deg);background:var(--acc);box-shadow:0 2px 8px rgba(0,0,0,.3)}'+
+    '.d2 .bubble{position:absolute;right:56px;top:0;height:44px;display:flex;align-items:center;padding:0 14px;border-radius:22px;background:var(--acc);color:var(--acc-fg);font-weight:700;font-size:15px;white-space:nowrap;opacity:0;transform:scale(.9);transform-origin:right center;transition:opacity .15s,transform .15s;pointer-events:none}'+
+    '.d2 .scrub.drag .bubble{opacity:1;transform:scale(1)}'+
+    '.d2 .datepill{top:62px;left:12px}',
+  render:function(c){
+    const screen=c.screen,ovl=c.ovl;
+    screen.innerHTML=appbar('Photos')+days.map(d=>daySection(d,{W:c.W})).join('')+'<div style="height:40px"></div>';
+    ovl.innerHTML='<div class="scrub"><div class="bubble"></div><div class="handle"><span></span></div></div><div class="pill datepill"></div>';
+    const scrub=ovl.querySelector('.scrub'),handle=ovl.querySelector('.handle'),bubble=ovl.querySelector('.bubble'),pill=ovl.querySelector('.datepill');
+    const offs=sectionOffsets(screen);
+    const TOP=60,BOT=24,HH=44;
+    let hideT=null,pillT=null,dragging=false,lastM=null;
+    const trackH=()=>screen.clientHeight-TOP-BOT-HH;
+    const maxScroll=()=>screen.scrollHeight-screen.clientHeight;
+    function layout(y){
+      const f=maxScroll()>0?y/maxScroll():0;const ty=TOP+f*trackH();
+      handle.style.transform='translateY('+ty+'px)';bubble.style.transform='translateY('+ty+'px)';
+      const s=findAt(offs,y+screen.clientHeight*0.35);
+      if(s.m!==lastM){lastM=s.m;bubble.textContent=monthShort(monthOf(s.m).date);if(dragging)haptic(6)}
+      pill.textContent=s.el.querySelector('.hd').textContent;
+    }
+    function show(){scrub.classList.add('show');clearTimeout(hideT);hideT=setTimeout(()=>{if(!dragging)scrub.classList.remove('show')},1500)}
+    const off=onScroll(screen,y=>{layout(y);show();if(y>80){pill.classList.add('show');clearTimeout(pillT);pillT=setTimeout(()=>pill.classList.remove('show'),1200)}else pill.classList.remove('show')});
+    handle.addEventListener('pointerdown',e=>{dragging=true;scrub.classList.add('drag');handle.setPointerCapture(e.pointerId);haptic(10);e.preventDefault()});
+    handle.addEventListener('pointermove',e=>{if(!dragging)return;const r=screen.getBoundingClientRect();const f=Math.min(1,Math.max(0,(e.clientY-r.top-TOP-HH/2)/trackH()));screen.scrollTop=f*maxScroll()});
+    const end=()=>{dragging=false;scrub.classList.remove('drag');show()};
+    handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
+    layout(0);
+    return()=>{off();clearTimeout(hideT);clearTimeout(pillT)};
+  }
+});
+
+/* ================= 3. Pinch Zoom Grid ================= */
+DESIGNS.push({
+  name:'Pinch Zoom Grid',
+  blurb:'Apple Photos column steps 1 / 3 / 5 / 9, anchored on the photo under your fingers',
+  mimics:'Apple Photos. Pinch out for bigger tiles, pinch in for more columns. The grid scales live under your fingers, then snaps to the next step. The photo under the pinch midpoint stays where it was on screen, so you never lose your place. One column shows true aspect ratios like a feed.',
+  tips:['Pinch anywhere on the grid; release past about 25% to change step.','Pinch over a specific photo and check it stays under your fingers after the snap.','Mouse or trackpad: use the minus and plus buttons in the bar.'],
+  tradeoffs:'Transforming the whole scroll body during the gesture can stutter on very long libraries; the current app does this already with a 2 to 6 column range. Re-layout must re-anchor scroll or the view jumps by thousands of pixels.',
+  css:'.d3 .zw{will-change:auto}'+
+    '.d3 .zw.pinch{will-change:transform}'+
+    '.d3 .zw.fade{animation:d3fade .22s ease-out}'+
+    '@keyframes d3fade{from{opacity:.35}to{opacity:1}}'+
+    '.d3 .feed{display:grid;gap:3px;padding:0 0 4px}'+
+    '.d3 .feed .t{aspect-ratio:var(--ar);max-height:560px;width:100%}'+
+    '.d3 .feed .t.v::after{font-size:13px;right:10px;bottom:8px}'+
+    '.d3 .colchip{top:62px;left:50%;transform:translateX(-50%)}',
+  render:function(c){
+    const screen=c.screen,ovl=c.ovl,W=c.W;const STEPS=[1,3,5,9];let ci=1;
+    ovl.innerHTML='<div class="pill colchip"></div>';const chip=ovl.querySelector('.colchip');let chipT=null;
+    function feedSection(d){const h=44+d.photos.reduce((a,p)=>a+Math.min(W/p.ar,560),0)+3*(d.photos.length-1)+10;return'<section class="sec cv" data-key="'+d.key+'" style="contain-intrinsic-size:auto '+Math.round(h)+'px"><div class="hd sticky">'+dayLabel(d.date)+(d.loc?'<span class="sub">'+d.loc+'</span>':'')+'</div><div class="feed">'+d.photos.map(p=>tile(p)).join('')+'</div></section>'}
+    function build(){const cols=STEPS[ci];screen.innerHTML=appbar('Library','<button class="ic" data-z="-1" aria-label="Smaller">&minus;</button><button class="ic" data-z="1" aria-label="Bigger">+</button>')+'<div class="zw">'+days.map(d=>cols===1?feedSection(d):daySection(d,{W,cols,sticky:true})).join('')+'</div>'}
+    function showChip(){chip.textContent=STEPS[ci]===1?'Full width':STEPS[ci]+' columns';chip.classList.add('show');clearTimeout(chipT);chipT=setTimeout(()=>chip.classList.remove('show'),900)}
+    /* re-layout around an anchor photo so the view does not jump */
+    function relayout(dir,ax,ay){
+      const ni=Math.min(STEPS.length-1,Math.max(0,ci+dir));if(ni===ci)return false;
+      const sr=screen.getBoundingClientRect();
+      const hit=document.elementFromPoint(ax,ay);const t=hit&&hit.closest('.t');
+      const anchorId=t?t.dataset.id:null;const anchorY=t?t.getBoundingClientRect().top-sr.top:0;
+      ci=ni;build();
+      const el=anchorId!=null&&screen.querySelector('.t[data-id="'+anchorId+'"]');
+      if(el)screen.scrollTop=el.offsetTop-anchorY;
+      const zw=screen.querySelector('.zw');zw.classList.add('fade');
+      showChip();return true;
+    }
+    build();
+    screen.addEventListener('click',e=>{const b=e.target.closest('[data-z]');if(!b)return;const sr=screen.getBoundingClientRect();relayout(-(+b.dataset.z),sr.left+sr.width/2,sr.top+sr.height/2)});
+    /* two-finger pinch via pointer events */
+    const pts=new Map();let d0=0,mid=null,scale=1,pinching=false;
+    const dist=(a,b)=>Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    const zw=()=>screen.querySelector('.zw');
+    function onDown(e){if(e.pointerType!=='touch')return;pts.set(e.pointerId,e);if(pts.size===2){const v=[...pts.values()];d0=dist(v[0],v[1]);mid={x:(v[0].clientX+v[1].clientX)/2,y:(v[0].clientY+v[1].clientY)/2};pinching=true;scale=1;const w=zw();const r=w.getBoundingClientRect();w.style.transformOrigin=(mid.x-r.left)+'px '+(mid.y-r.top)+'px';w.classList.add('pinch')}}
+    function onMove(e){if(!pts.has(e.pointerId))return;pts.set(e.pointerId,e);if(pinching&&pts.size===2){const v=[...pts.values()];scale=dist(v[0],v[1])/d0;zw().style.transform='scale('+Math.max(.5,Math.min(2.2,scale))+')'}}
+    function onUp(e){pts.delete(e.pointerId);if(pinching&&pts.size<2){pinching=false;const w=zw();const changed=(scale>1.25&&relayout(-1,mid.x,mid.y))||(scale<0.8&&relayout(1,mid.x,mid.y));if(!changed){w.style.transition='transform .18s';w.style.transform='scale(1)';setTimeout(()=>{w.style.transition='';w.style.transform='';w.classList.remove('pinch')},200)}else{haptic(8)}}}
+    const tm=e=>{if(e.touches.length>=2)e.preventDefault()};const gs=e=>e.preventDefault();
+    screen.addEventListener('pointerdown',onDown);screen.addEventListener('pointermove',onMove);screen.addEventListener('pointerup',onUp);screen.addEventListener('pointercancel',onUp);
+    screen.addEventListener('touchmove',tm,{passive:false});screen.addEventListener('gesturestart',gs);
+    return()=>{screen.removeEventListener('pointerdown',onDown);screen.removeEventListener('pointermove',onMove);screen.removeEventListener('pointerup',onUp);screen.removeEventListener('pointercancel',onUp);screen.removeEventListener('touchmove',tm);screen.removeEventListener('gesturestart',gs);clearTimeout(chipT)};
+  }
+});
+/* ================= 4. Justified Rows ================= */
+DESIGNS.push({
+  name:'Justified Rows',
+  blurb:'Aspect-preserving rows that fill the width, like Google Photos on the web',
+  mimics:'Google Photos web and the Flickr layout. Each row packs photos at their real aspect ratio and scales them to fill the width exactly. Portraits stay tall, panoramas stay wide. Day headers are small and sticky.',
+  tips:['Compare how a portrait and a 16:9 video read next to each other.','Notice the last row of a day is never stretched to fill.','Rows are a fixed height per row, so the scroll height is exact for virtualization.'],
+  tradeoffs:'Fewer photos per screen than squares, and tile sizes vary, which makes selection targets uneven. Needs aspect ratios up front (the app has them from EXIF and processing).',
+  css:'.d4 .jr{display:flex;gap:2px;padding:0 4px;margin-bottom:2px}'+
+    '.d4 .jr .t{aspect-ratio:auto;height:100%;flex:0 0 auto}'+
+    '.d4 .hd.small{height:30px}',
+  render:function(c){
+    const screen=c.screen,W=c.W,innerW=W-8,TARGET=118,GAP=2;
+    function rows(photos){const out=[];let row=[],sum=0;for(const p of photos){row.push(p);sum+=p.ar;if(sum*TARGET>=innerW-(row.length-1)*GAP){const h=(innerW-(row.length-1)*GAP)/sum;out.push({h,items:row});row=[];sum=0}}if(row.length)out.push({h:Math.min(TARGET,(innerW-(row.length-1)*GAP)/sum),items:row,last:true});return out}
+    function sec(d){const rs=rows(d.photos);const h=30+rs.reduce((a,r)=>a+r.h+GAP,0)+8;
+      return'<section class="sec cv" data-key="'+d.key+'" data-m="'+d.date.getFullYear()+'-'+d.date.getMonth()+'" style="contain-intrinsic-size:auto '+Math.round(h)+'px"><div class="hd small sticky">'+dayLabel(d.date)+(d.loc?'<span class="sub">&middot; '+d.loc+'</span>':'')+'</div>'+
+        rs.map(r=>'<div class="jr" style="height:'+r.h.toFixed(2)+'px">'+r.items.map(p=>tile(p,{style:'width:'+(r.h*p.ar).toFixed(2)+'px'})).join('')+'</div>').join('')+'</section>'}
+    screen.innerHTML=appbar('Photos')+days.map(sec).join('')+bnav('photos');
+    return hideOnScroll(screen,screen.querySelector('.appbar'));
+  }
+});
+
+/* ================= 5. Years / Months / Days / All ================= */
+DESIGNS.push({
+  name:'Years · Months · Days · All',
+  blurb:'Apple Photos zoom levels with a bottom segment and drill-down taps',
+  mimics:'Apple Photos (iOS 13 to 17). A segmented control switches between four zoom levels. Years and Months are big cover cards, Days is a curated mosaic per day, All is the dense grid with a floating month label instead of headers. Tapping a card zooms into the next level at that date.',
+  tips:['Start in Years, tap a year, tap a month, then tap a day mosaic to land in All at that day.','In All, scroll and watch the month chip at the top-left update.','Switch levels with the bottom segment and check the view keeps your place in time.'],
+  tradeoffs:'Four views to maintain, and curated Days needs a notion of "best" photos. All view without headers loses the day boundaries unless the chip is prominent.',
+  css:'.d5 .seg{position:sticky;bottom:0;z-index:5;display:flex;justify-content:center;padding:10px 16px calc(14px + env(safe-area-inset-bottom,0px));background:linear-gradient(to top,var(--bg) 60%,transparent)}'+
+    '.d5 .seg div{display:flex;background:var(--ovl);border-radius:999px;padding:3px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}'+
+    '.d5 .seg button{border:0;background:transparent;color:#fff;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px;opacity:.75}'+
+    '.d5 .seg button.on{background:#fff;color:#111;opacity:1}'+
+    '.d5 .lvl{animation:d5in .18s ease-out}'+
+    '@keyframes d5in{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}'+
+    '.d5 .card{position:relative;margin:0 12px 14px;border-radius:18px;overflow:hidden;aspect-ratio:4/3;background:var(--tile);cursor:pointer}'+
+    '.d5 .card.yr{aspect-ratio:4/3.2}'+
+    '.d5 .card .t{position:absolute;inset:0;aspect-ratio:auto;height:100%;width:100%}'+
+    '.d5 .card .cap{position:absolute;left:0;right:0;bottom:0;padding:48px 18px 16px;background:linear-gradient(to top,rgba(0,0,0,.65),transparent);color:#fff}'+
+    '.d5 .card .cap b{display:block;font-size:26px;letter-spacing:-.02em}'+
+    '.d5 .card .cap span{font-size:13px;opacity:.85}'+
+    '.d5 .card.yr .cap b{font-size:40px}'+
+    '.d5 .mos{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;padding:0 4px;grid-auto-flow:dense}'+
+    '.d5 .mos .t.big{grid-column:span 2;grid-row:span 2}'+
+    '.d5 .mos .t.more{display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}'+
+    '.d5 .mos .t.more::before{content:"";position:absolute;inset:0;background:rgba(0,0,0,.5)}'+
+    '.d5 .mos .t.more i{position:relative;font-style:normal}'+
+    '.d5 .mchip{top:12px;left:12px;opacity:1;font-size:14px;padding:8px 14px}'+
+    '.d5 .all .grid{padding-top:0}',
+  render:function(c){
+    const screen=c.screen,ovl=c.ovl,W=c.W;let level='years',pending=null,off=null;
+    const LV=['years','months','days','all'];
+    function seg(){return'<div class="seg"><div>'+LV.map(l=>'<button data-l="'+l+'" class="'+(l===level?'on':'')+'">'+l[0].toUpperCase()+l.slice(1)+'</button>').join('')+'</div></div>'}
+    function cover(m){const d=m.days[0];return d.photos[0]}
+    function yearsV(){return years.map(y=>'<div class="card yr" data-go="months" data-y="'+y.year+'">'+tile(cover(y.months[0]))+'<div class="cap"><b>'+y.year+'</b><span>'+y.count+' items</span></div></div>').join('')}
+    function monthsV(){return months.map(m=>'<div class="card" data-go="days" data-m="'+m.key+'" data-y="'+m.date.getFullYear()+'">'+tile(cover(m))+'<div class="cap"><b>'+MN[m.date.getMonth()]+'</b><span>'+m.date.getFullYear()+' &middot; '+m.count+' items</span></div></div>').join('')}
+    function daysV(){return days.map(d=>{const ps=d.photos.slice(0,9);const extra=d.photos.length-9;
+      return'<section class="sec" data-key="'+d.key+'" data-m="'+d.date.getFullYear()+'-'+d.date.getMonth()+'"><div class="hd big">'+dayLabel(d.date)+(d.loc?'<span class="sub">'+d.loc+'</span>':'')+'</div><div class="mos">'+
+        ps.map((p,i)=>{const isMore=extra>0&&i===8;return tile(p,{cls:(i===0&&ps.length>=3?'big':'')+(isMore?' more':''),attrs:isMore?'data-more="'+d.key+'"':'',inner:isMore?'<i>+'+(extra+1)+'</i>':''})}).join('')+'</div></section>'}).join('')}
+    function allV(){return'<div class="all">'+days.map(d=>daySection(d,{W,headerH:0,pb:2})).join('')+'</div>'}
+    function show(l,scrollKey){
+      if(off){off();off=null}
+      level=l;ovl.innerHTML='';
+      screen.innerHTML='<div class="lvl">'+(l==='years'?yearsV():l==='months'?monthsV():l==='days'?daysV():allV())+'</div>'+seg();
+      screen.scrollTop=0;
+      if(scrollKey){const el=screen.querySelector(scrollKey);if(el)screen.scrollTop=el.offsetTop}
+      if(l==='all'){ovl.innerHTML='<div class="pill mchip show"></div>';const chip=ovl.querySelector('.mchip');const offs=sectionOffsets(screen);let lm=null;
+        const upd=y=>{const s=findAt(offs,y+8);if(s.m!==lm){lm=s.m;chip.textContent=monthLabel(monthOf(s.m).date)}};upd(screen.scrollTop);off=onScroll(screen,upd)}
+    }
+    screen.addEventListener('click',e=>{
+      const b=e.target.closest('.seg button');if(b){show(b.dataset.l);return}
+      const more=e.target.closest('[data-more]');if(more){show('all','[data-key="'+more.dataset.more+'"]');return}
+      const card=e.target.closest('.card');if(card){const go=card.dataset.go;if(go==='months')show('months','[data-y="'+card.dataset.y+'"]');else show('days','[data-m="'+card.dataset.m+'"]');return}
+    });
+    show('years');
+    return()=>{if(off)off()};
+  }
+});
+
+/* ================= 6. Hero Days ================= */
+DESIGNS.push({
+  name:'Hero Days',
+  blurb:'One hero per day, five supporting tiles, the rest folded behind a +N',
+  mimics:'Apple Photos Days view and the Google Photos Memories mosaic. Each day leads with a hero at double size, mirrored left and right on alternating days. Big days fold their overflow behind a +N tile that expands in place. Skimming a year is fast because every day is at most two rows tall.',
+  tips:['Scroll fast: every day is the same visual rhythm, so the eye tracks dates easily.','Tap a +N tile to unfold the full day, then tap the chevron in its header to fold it again.','Single-photo days render as a wide crop instead of a lonely square.'],
+  tradeoffs:'Hides most photos of a busy day until tapped. Choosing the hero needs a quality or face signal; here it is simply the first photo.',
+  css:'.d6 .mos{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;padding:0 4px}'+
+    '.d6 .mos .t.big{grid-column:span 2;grid-row:span 2}'+
+    '.d6 .mos .t.wide{grid-column:span 3;aspect-ratio:16/9}'+
+    '.d6 .mos .t.half{grid-column:span 1}'+
+    '.d6 .mos.r .t.big{grid-column:2/span 2;grid-row:1/span 2}'+
+    '.d6 .mos.r .t:nth-child(2){grid-column:1;grid-row:1}'+
+    '.d6 .mos.r .t:nth-child(3){grid-column:1;grid-row:2}'+
+    '.d6 .t.more{display:grid;place-items:center;color:#fff;font-weight:700;font-size:18px;cursor:pointer}'+
+    '.d6 .t.more::before{content:"";position:absolute;inset:0;background:rgba(0,0,0,.5)}'+
+    '.d6 .t.more i{position:relative;font-style:normal}'+
+    '.d6 .hd .chev{margin-left:auto;width:32px;height:32px;border-radius:50%;border:0;background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg);font-size:14px;display:none}'+
+    '.d6 .sec.open .hd .chev{display:grid;place-items:center}'+
+    '.d6 .sec.open .grid{animation:d6in .2s ease-out}'+
+    '@keyframes d6in{from{opacity:0}to{opacity:1}}',
+  render:function(c){
+    const screen=c.screen,W=c.W;
+    function folded(d,i){const n=d.photos.length;
+      if(n===1)return'<div class="mos">'+tile(d.photos[0],{cls:'wide'})+'</div>';
+      if(n===2)return'<div class="grid" style="--c:2">'+d.photos.map(p=>tile(p)).join('')+'</div>';
+      const shown=d.photos.slice(0,6);const extra=n-6;
+      return'<div class="mos'+(i%2?' r':'')+'">'+shown.map((p,k)=>{const isMore=extra>0&&k===5;return tile(p,{cls:k===0?'big':isMore?'more':'',attrs:isMore?'data-more="1"':'',inner:isMore?'<i>+'+(extra+1)+'</i>':''})}).join('')+'</div>'}
+    function sec(d,i){return'<section class="sec" data-key="'+d.key+'" data-i="'+i+'"><div class="hd">'+dayLabel(d.date)+(d.loc?'<span class="sub">'+d.loc+'</span>':'')+'<button class="chev" aria-label="Fold">&#8963;</button></div>'+folded(d,i)+'</section>'}
+    screen.innerHTML=appbar('Photos')+days.map(sec).join('')+bnav('photos');
+    screen.addEventListener('click',e=>{
+      const more=e.target.closest('[data-more]');const chev=e.target.closest('.chev');
+      if(!more&&!chev)return;
+      const s=e.target.closest('.sec');const i=+s.dataset.i,d=days[i];
+      if(more){s.classList.add('open');s.querySelector('.mos').outerHTML=gridHtml(d.photos,3);haptic(6)}
+      else{s.classList.remove('open');s.querySelector('.grid').outerHTML=folded(d,i);s.scrollIntoView({block:'nearest'})}
+    });
+    return hideOnScroll(screen,screen.querySelector('.appbar'));
+  }
+});
+/* ================= 7. Month Cards ================= */
+DESIGNS.push({
+  name:'Month Cards',
+  blurb:'Skim one row per month, tap to unfold the days in place',
+  mimics:'Apple Photos Months view crossed with an accordion. Closed, each month is a sticky header plus a four-photo strip, so the whole library fits in a few screens. Tap a month to unfold its days under the header; the header stays pinned while you read them, and tapping it again folds them back.',
+  tips:['Skim the closed list and count how few flicks reach last year.','Open two months at once and scroll between them: each pinned header hands off cleanly.','Fold a month from far down inside it; the view snaps back to its header.'],
+  tradeoffs:'Two taps to reach any photo from cold, and unfolding changes the page height under the user. Good for browsing by time, worse for "find the photo I took last Tuesday".',
+  css:'.d7 .mc{margin:0 0 4px}'+
+    '.d7 .mh{position:sticky;top:0;z-index:4;display:flex;align-items:baseline;gap:10px;height:56px;padding:0 16px;background:var(--bar);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);cursor:pointer}'+
+    '.d7 .mh b{font-size:21px;letter-spacing:-.02em;align-self:center}'+
+    '.d7 .mh .cnt{color:var(--mut);font-size:13px;align-self:center}'+
+    '.d7 .mh .chev{margin-left:auto;align-self:center;color:var(--mut);transition:transform .22s;font-size:16px}'+
+    '.d7 .mc.open .mh .chev{transform:rotate(180deg)}'+
+    '.d7 .strip{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;padding:0 4px;cursor:pointer}'+
+    '.d7 .mc.open .strip{display:none}'+
+    '.d7 .body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s ease}'+
+    '.d7 .body>div{min-height:0}'+
+    '.d7 .body.anim>div{overflow:hidden}'+ /* clip only while animating: a permanent overflow:hidden would become the sticky root for the day labels */
+    '.d7 .mc.open .body{grid-template-rows:1fr}'+
+    '.d7 .body .sec{padding-bottom:6px}'+
+    '.d7 .body .hd.small{position:sticky;top:56px;z-index:3;background:var(--bg)}',
+  render:function(c){
+    const screen=c.screen,W=c.W;
+    function strip(m){const mp=m.days.flatMap(d=>d.photos);const seen=new Set();const s=[];for(let k=0;k<4;k++){const p=mp[Math.floor(k*mp.length/4)];if(!seen.has(p.id)){seen.add(p.id);s.push(p)}}return'<div class="strip">'+s.map(p=>tile(p)).join('')+'</div>'}
+    screen.innerHTML=appbar('Photos')+months.map((m,i)=>'<div class="mc" data-i="'+i+'"><div class="mh"><b>'+monthLabel(m.date)+'</b><span class="cnt">'+m.count+' items &middot; '+m.days.length+' days</span><span class="chev">&#8964;</span></div>'+strip(m)+'<div class="body"><div></div></div></div>').join('')+'<div style="height:60px"></div>';
+    screen.addEventListener('click',e=>{
+      const mc=e.target.closest('.mc');if(!mc)return;
+      if(!e.target.closest('.mh')&&!e.target.closest('.strip'))return;
+      const m=months[+mc.dataset.i];const body=mc.querySelector('.body'),inner=body.firstElementChild;
+      body.classList.add('anim');
+      body.addEventListener('transitionend',()=>{body.classList.remove('anim');if(!mc.classList.contains('open'))inner.innerHTML=''},{once:true});
+      if(mc.classList.contains('open')){
+        mc.classList.remove('open');
+        const r=mc.getBoundingClientRect(),sr=screen.getBoundingClientRect();if(r.top<sr.top)screen.scrollTop=mc.offsetTop;
+      }else{
+        inner.innerHTML=m.days.map(d=>daySection(d,{W,small:true,headerH:32})).join('');
+        mc.classList.add('open');haptic(6);
+      }
+    });
+    return hideOnScroll(screen,screen.querySelector('.appbar'));
+  }
+});
+
+/* ================= 8. Fast-Scroll Overlay ================= */
+DESIGNS.push({
+  name:'Fast-Scroll Overlay',
+  blurb:'Fling fast and a big month label appears mid-screen, then melts away as you slow',
+  mimics:'Google Photos when you drag the scrubber, and the Android fast-scroll pattern. The grid itself is the plain 3-column layout. The design is in what happens during a fling: above a velocity threshold a large month and day label fades in over the grid and the app bar hides, so the eye reads the date instead of blurred thumbnails. It fades the moment the scroll calms.',
+  tips:['Flick hard: the overlay should appear within one frame and track the month as the fling decays.','Scroll slowly: nothing appears at all.','Flick, then touch to stop the fling: the overlay drops instantly.'],
+  tradeoffs:'Purely additive, costs one overlay element. Thresholds need tuning per device; a cheap phone scrolls fewer pixels per second. Does not help a user who scrolls slowly through a huge library.',
+  css:'.d8 .fastov{position:absolute;left:0;right:0;top:38%;display:flex;justify-content:center;opacity:0;transform:scale(.96);transition:opacity .14s,transform .14s;pointer-events:none}'+
+    '.d8 .fastov.show{opacity:1;transform:none}'+
+    '.d8 .fastov div{padding:14px 28px;border-radius:18px;background:var(--ovl);color:#fff;text-align:center;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}'+
+    '.d8 .fastov b{display:block;font-size:30px;font-weight:700;letter-spacing:-.02em}'+
+    '.d8 .fastov small{display:block;font-size:14px;font-weight:500;opacity:.8;margin-top:2px}'+
+    '.d8 .dim{position:absolute;inset:0;background:rgba(0,0,0,.22);opacity:0;transition:opacity .2s;pointer-events:none}'+
+    '.d8 .dim.show{opacity:1}',
+  render:function(c){
+    const screen=c.screen,ovl=c.ovl,H=c.H;
+    screen.innerHTML=appbar('Photos')+days.map(d=>daySection(d,{W:c.W})).join('')+bnav('photos');
+    ovl.innerHTML='<div class="dim"></div><div class="fastov"><div><b></b><small></small></div></div>';
+    const dim=ovl.querySelector('.dim'),fo=ovl.querySelector('.fastov'),bm=fo.querySelector('b'),sm=fo.querySelector('small');
+    const bar=screen.querySelector('.appbar');const offs=sectionOffsets(screen);
+    let lastY=screen.scrollTop,lastT=performance.now(),fast=false,calmT=null,lm=null,last=lastY;
+    const FAST=2600,CALM=1100;
+    function setFast(on){if(fast===on)return;fast=on;dim.classList.toggle('show',on);fo.classList.toggle('show',on);if(on)bar.classList.add('hide')}
+    const h=()=>{
+      const y=screen.scrollTop,t=performance.now();const dt=Math.max(1,t-lastT);const v=Math.abs(y-lastY)/dt*1000;
+      const dy=y-last;if(y<8||dy<-6)bar.classList.remove('hide');else if(dy>6)bar.classList.add('hide');last=y;
+      lastY=y;lastT=t;
+      if(v>FAST)setFast(true);else if(v<CALM)setFast(false);
+      if(fast){const s=findAt(offs,y+H*0.45);if(s.key!==lm){lm=s.key;bm.textContent=monthLabel(monthOf(s.m).date);sm.textContent=s.el.querySelector('.hd').textContent}}
+      clearTimeout(calmT);calmT=setTimeout(()=>setFast(false),160);
+    };
+    screen.addEventListener('scroll',h,{passive:true});
+    return()=>{screen.removeEventListener('scroll',h);clearTimeout(calmT)};
+  }
+});
+/* ================= 9. Press & Drag Select ================= */
+DESIGNS.push({
+  name:'Press & Drag Select',
+  blurb:'Long-press a photo, sweep to paint a range, edges auto-scroll',
+  mimics:'Google Photos selection. Hold a photo for a third of a second to enter selection; keep your finger down and sweep to select a range in visual order, back and forth. Near the top or bottom edge the grid scrolls on its own. Selected tiles shrink into a tinted frame with a check. Day headers get a circle that selects the whole day. In selection mode the whole tile is the tap target, not a 22px check.',
+  tips:['Hold a tile until it ticks, then sweep down two rows and back up one.','Keep sweeping to the bottom edge and let the grid auto-scroll under your finger.','Tap a day header circle. Tap X in the top bar to clear.'],
+  tradeoffs:'Painting must cancel the native scroll after the long press, which needs a non-passive touchmove listener. Range semantics (visual order) can surprise users who expect toggle-as-you-touch. The app already has a drag-select hook; this prototype shows the full-tile hit target and the day circle it lacks.',
+  css:'.d9 .t{transition:transform .14s,border-radius .14s}'+
+    '.d9 .t.sel{transform:scale(.84);border-radius:8px}'+
+    '.d9 .t.sel::before{content:"";position:absolute;inset:0;background:color-mix(in srgb,var(--sel) 24%,transparent)}'+
+    '.d9 .ck{position:absolute;left:6px;top:6px;width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.95);box-shadow:0 1px 3px rgba(0,0,0,.4);opacity:0;transition:opacity .12s;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700;z-index:1}'+
+    '.d9 .selmode .ck{opacity:1}'+
+    '.d9 .t.sel .ck{background:var(--sel);border-color:var(--sel)}'+
+    '.d9 .t.sel .ck::after{content:"\\2713"}'+
+    '.d9 .hd .dck{width:22px;height:22px;border-radius:50%;border:2px solid var(--mut);display:none;place-items:center;color:#fff;font-size:12px;cursor:pointer;flex:0 0 auto}'+
+    '.d9 .selmode .hd .dck{display:grid}'+
+    '.d9 .hd .dck.on{background:var(--sel);border-color:var(--sel)}'+
+    '.d9 .hd .dck.on::after{content:"\\2713"}'+
+    '.d9 .selbar{position:absolute;left:0;right:0;top:0;height:52px;display:flex;align-items:center;gap:6px;padding:0 8px;background:var(--card);box-shadow:0 1px 0 var(--line);transform:translateY(-100%);transition:transform .2s}'+
+    '.d9 .selbar.show{transform:none}'+
+    '.d9 .selbar b{font-size:17px;margin-left:4px;font-variant-numeric:tabular-nums}'+
+    '.d9 .acts{position:absolute;left:0;right:0;bottom:0;display:flex;padding:8px 8px calc(10px + env(safe-area-inset-bottom,0px));background:var(--card);box-shadow:0 -1px 0 var(--line);transform:translateY(110%);transition:transform .2s}'+
+    '.d9 .acts.show{transform:none}'+
+    '.d9 .acts button{flex:1;border:0;background:none;color:var(--fg);font:500 12px var(--font);display:flex;flex-direction:column;align-items:center;gap:4px}'+
+    '.d9 .acts button .g{font-size:20px}'+
+    '.d9 .toast{left:50%;bottom:120px;transform:translateX(-50%)}',
+  render:function(c){
+    const screen=c.screen,ovl=c.ovl,W=c.W;
+    const idxById=new Map(allPhotos.map((p,i)=>[p.id,i]));
+    const dayOfIdx=[];days.forEach((d,di)=>d.photos.forEach(()=>dayOfIdx.push(di)));
+    function sec(d,i){const h=44+gridHeight(d.photos.length,W,3)+10;return'<section class="sec cv" data-key="'+d.key+'" data-i="'+i+'" style="contain-intrinsic-size:auto '+Math.round(h)+'px"><div class="hd sticky"><span class="dck" data-day="'+i+'"></span>'+dayLabel(d.date)+'</div><div class="grid" style="--c:3">'+d.photos.map(p=>tile(p,{inner:'<b class="ck"></b>'})).join('')+'</div></section>'}
+    screen.innerHTML=appbar('Photos')+days.map(sec).join('')+bnav('photos');
+    ovl.innerHTML='<div class="selbar"><button class="ic" data-act="close" aria-label="Clear selection">&#10005;</button><b>0 selected</b><span class="sp" style="flex:1"></span><button class="ic" aria-label="More">&#8942;</button></div>'+
+      '<div class="acts"><button><span class="g">&#8679;</span>Share</button><button><span class="g">&#10010;</span>Add to</button><button><span class="g">&#9825;</span>Favorite</button><button><span class="g">&#128465;</span>Delete</button></div><div class="pill toast"></div>';
+    const selbar=ovl.querySelector('.selbar'),acts=ovl.querySelector('.acts'),count=selbar.querySelector('b'),toast=ovl.querySelector('.toast');
+    const tileEl=new Map();screen.querySelectorAll('.t').forEach(el=>tileEl.set(+el.dataset.id,el));
+    const dck=[...screen.querySelectorAll('.dck')];
+    const sel=new Set();let selmode=false,toastT=null;
+    function setSel(id,on){if(on===sel.has(id))return;on?sel.add(id):sel.delete(id);const el=tileEl.get(id);if(el)el.classList.toggle('sel',on)}
+    function refreshDay(di){const d=days[di];dck[di].classList.toggle('on',d.photos.every(p=>sel.has(p.id)))}
+    function refreshDaysBetween(lo,hi){const a=dayOfIdx[lo],b=dayOfIdx[hi];for(let k=a;k<=b;k++)refreshDay(k)}
+    function updateUI(){count.textContent=sel.size+' selected';selbar.classList.toggle('show',selmode);acts.classList.toggle('show',selmode);screen.classList.toggle('selmode',selmode)}
+    function say(t){toast.textContent=t;toast.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>toast.classList.remove('show'),1100)}
+    function exitMode(){selmode=false;for(const id of [...sel])setSel(id,false);dck.forEach(x=>x.classList.remove('on'));updateUI()}
+    let press=null,paint=null,af=0,px=0,py=0,prevLo=-1,prevHi=-1;
+    function startPaint(id,pointerId){if(!selmode){selmode=true}const on=!sel.has(id);setSel(id,on);const i=idxById.get(id);refreshDay(dayOfIdx[i]);haptic(14);paint={anchor:i,cur:i,on,base:new Set(sel)};prevLo=prevHi=i;try{screen.setPointerCapture(pointerId)}catch(e){}updateUI()}
+    function applyAt(x,y){const el=document.elementFromPoint(x,y);const t=el&&el.closest('.t');if(!t)return;const i=idxById.get(+t.dataset.id);if(i===paint.cur)return;paint.cur=i;
+      const lo=Math.min(paint.anchor,i),hi=Math.max(paint.anchor,i);const a=Math.min(lo,prevLo),b=Math.max(hi,prevHi);
+      for(let k=a;k<=b;k++){const id=allPhotos[k].id;const want=(k>=lo&&k<=hi)?paint.on:paint.base.has(id);setSel(id,want)}
+      refreshDaysBetween(a,b);prevLo=lo;prevHi=hi;count.textContent=sel.size+' selected'}
+    function edgeV(){const r=screen.getBoundingClientRect();const top=py-r.top,bot=r.bottom-py;if(top<70)return-(70-top)/70*16;if(bot<96)return(96-bot)/96*16;return 0}
+    function loop(){af=requestAnimationFrame(()=>{if(!paint){af=0;return}const v=edgeV();if(v===0){af=0;return}screen.scrollTop+=v;applyAt(px,py);loop()})}
+    const onDown=e=>{if(e.button!==0&&e.pointerType==='mouse')return;if(e.target.closest('.dck'))return;const t=e.target.closest('.t');if(!t)return;const id=+t.dataset.id;press={id,x:e.clientX,y:e.clientY,el:t,fired:false};press.timer=setTimeout(()=>{press.fired=true;startPaint(id,e.pointerId)},320)};
+    const onMove=e=>{if(press&&!press.fired){if(Math.hypot(e.clientX-press.x,e.clientY-press.y)>8){clearTimeout(press.timer);press=null}return}if(!paint)return;px=e.clientX;py=e.clientY;applyAt(px,py);if(!af&&edgeV()!==0)loop()};
+    const onUp=e=>{if(press&&!press.fired){clearTimeout(press.timer);if(e.type==='pointerup'){if(selmode){setSel(press.id,!sel.has(press.id));refreshDay(dayOfIdx[idxById.get(press.id)]);updateUI()}else{press.el.animate([{opacity:.5},{opacity:1}],180);say('Tap opens the photo')}}}press=null;if(paint){paint=null;cancelAnimationFrame(af);af=0}};
+    const tm=e=>{if(paint)e.preventDefault()};
+    screen.addEventListener('pointerdown',onDown);screen.addEventListener('pointermove',onMove);screen.addEventListener('pointerup',onUp);screen.addEventListener('pointercancel',onUp);
+    screen.addEventListener('touchmove',tm,{passive:false});
+    screen.addEventListener('contextmenu',e=>e.preventDefault());
+    screen.addEventListener('click',e=>{const k=e.target.closest('.dck');if(!k)return;const di=+k.dataset.day;const d=days[di];const all=d.photos.every(p=>sel.has(p.id));d.photos.forEach(p=>setSel(p.id,!all));refreshDay(di);haptic(8);updateUI()});
+    ovl.addEventListener('click',e=>{if(e.target.closest('[data-act="close"]')){exitMode();return}const b=e.target.closest('.acts button');if(b){say(b.textContent.trim()+' '+sel.size+' items (prototype)')}});
+    return()=>{clearTimeout(toastT);cancelAnimationFrame(af)};
+  }
+});
+
+/* ================= 10. Timeline Rail ================= */
+DESIGNS.push({
+  name:'Timeline Rail',
+  blurb:'An always-visible year and month index on the right edge, drag it to jump',
+  mimics:'The iOS Contacts index and the current app\'s timeline scrollbar, taken further. The rail shows every month as a tick and every year as a label, spaced by how much content each holds. A marker tracks where you are; drag the rail and the grid jumps instantly with a month bubble. Month boundaries in the grid get a large header so the rail and the content speak the same language.',
+  tips:['Drag the rail slowly across a year label and feel the tick at each month.','Tap a spot on the rail: the grid glides there instead of jumping.','Scroll normally and watch the marker and bubble follow.'],
+  tradeoffs:'Permanently gives up 44px of width (about one column at six-up). Spacing by content means empty months vanish and dense trips dominate the rail; spacing by time has the opposite problem. The app already reserves this gutter.',
+  css:'.d10 .grid{padding:0 44px 0 4px}'+
+    '.d10 .rail{position:absolute;top:52px;right:0;bottom:0;width:44px;touch-action:none;cursor:pointer}'+
+    '.d10 .tick{position:absolute;right:19px;width:7px;height:2px;background:var(--mut);opacity:.4}'+
+    '.d10 .ytick{position:absolute;right:9px;transform:translateY(-50%);font-size:11px;font-weight:700;color:var(--mut);font-variant-numeric:tabular-nums;letter-spacing:.02em}'+
+    '.d10 .cur{position:absolute;right:8px;width:30px;height:3px;border-radius:2px;background:var(--acc);transform:translateY(-50%);box-shadow:0 0 0 2px var(--bg)}'+
+    '.d10 .lbl{position:absolute;right:46px;transform:translateY(-50%);padding:6px 11px;border-radius:999px;background:var(--acc);color:var(--acc-fg);font-size:13px;font-weight:700;white-space:nowrap;opacity:0;transition:opacity .18s;pointer-events:none}'+
+    '.d10 .rail.on .lbl{opacity:1}'+
+    '.d10 .hd.big .sub{font-size:14px}',
+  render:function(c){
+    const screen=c.screen,ovl=c.ovl,W=c.W,H=c.H;
+    screen.innerHTML=appbar('Photos')+days.map((d,i)=>{const first=i===0||days[i-1].date.getMonth()!==d.date.getMonth()||days[i-1].date.getFullYear()!==d.date.getFullYear();
+      return first?daySection(d,{W,pad:24,big:true,headerH:58,label:monthLabel(d.date)+'<span class="sub">'+dayLabel(d.date)+'</span>'}):daySection(d,{W,pad:24,small:true,headerH:32})}).join('')+'<div style="height:40px"></div>';
+    ovl.innerHTML='<div class="rail"><div class="ticks"></div><div class="cur"></div><div class="lbl"></div></div>';
+    const rail=ovl.querySelector('.rail'),ticks=rail.querySelector('.ticks'),cur=rail.querySelector('.cur'),lbl=rail.querySelector('.lbl');
+    const offs=sectionOffsets(screen);const railH=rail.clientHeight,PAD=10;
+    const maxScroll=()=>Math.max(1,screen.scrollHeight-screen.clientHeight);
+    const toRail=top=>PAD+Math.min(1,top/maxScroll())*(railH-PAD*2);
+    let html='',seenM=new Set(),seenY=new Set();
+    for(const s of offs){if(seenM.has(s.m))continue;seenM.add(s.m);const y=+s.m.split('-')[0];const t=toRail(s.top);if(!seenY.has(y)){seenY.add(y);html+='<div class="ytick" style="top:'+t.toFixed(1)+'px">'+y+'</div>'}else html+='<div class="tick" style="top:'+t.toFixed(1)+'px"></div>'}
+    ticks.innerHTML=html;
+    let hideT=null,dragging=false,moved=false,lm=null;
+    function setLbl(y){const s=findAt(offs,y+4);if(s.m!==lm){lm=s.m;lbl.textContent=monthShort(monthOf(s.m).date);if(dragging)haptic(6)}}
+    function place(y){const t=toRail(y);cur.style.top=t+'px';lbl.style.top=t+'px'}
+    function flash(){rail.classList.add('on');clearTimeout(hideT);hideT=setTimeout(()=>{if(!dragging)rail.classList.remove('on')},700)}
+    const off=onScroll(screen,y=>{place(y);setLbl(y);flash()});
+    function target(e){const r=rail.getBoundingClientRect();const f=Math.min(1,Math.max(0,(e.clientY-r.top-PAD)/(railH-PAD*2)));return f*maxScroll()}
+    rail.addEventListener('pointerdown',e=>{dragging=true;moved=false;rail.setPointerCapture(e.pointerId);rail.classList.add('on');const t=target(e);setLbl(t);place(t);e.preventDefault()});
+    rail.addEventListener('pointermove',e=>{if(!dragging)return;moved=true;screen.scrollTop=target(e)});
+    const end=e=>{if(!dragging)return;dragging=false;if(!moved){const t=target(e);screen.scrollTo({top:t,behavior:'smooth'})}flash()};
+    rail.addEventListener('pointerup',end);rail.addEventListener('pointercancel',end);
+    place(0);setLbl(0);
+    return()=>{off();clearTimeout(hideT)};
+  }
+});
+
+/* ================= boot ================= */
+(function(){const st=document.createElement('style');st.textContent=DESIGNS.map(d=>d.css||'').join('\n');document.body.appendChild(st)})();
+document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea'))return;if(e.key==='ArrowRight')$('nextBtn').click();else if(e.key==='ArrowLeft')$('prevBtn').click()});
+boot();
+</script>
+</body>
+</html>
