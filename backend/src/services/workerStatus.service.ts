@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma.js';
+import { AppError } from '../middleware/errorHandler.js';
 
 /**
  * The worker beats every WORKER_HEARTBEAT_INTERVAL_MS; it counts as offline
@@ -30,4 +31,17 @@ export async function getWorkerStatus(): Promise<{ online: boolean; lastHeartbea
         online: Date.now() - latest.lastHeartbeatAt.getTime() < OFFLINE_AFTER_MS,
         lastHeartbeatAt: latest.lastHeartbeatAt.toISOString(),
     };
+}
+
+/**
+ * Refuse to start a guest upload while no worker is beating. The file would sit
+ * unprocessed in the album, with no thumbnail, until one came back; a guest has
+ * no way to know that, so they are asked to come back instead. Only the start of
+ * an upload checks: one already in flight is allowed to finish.
+ */
+export async function assertWorkerOnline(): Promise<void> {
+    const { online } = await getWorkerStatus();
+    if (!online) {
+        throw new AppError(503, 'Uploads are paused right now. Try again later.');
+    }
 }

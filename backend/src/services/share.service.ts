@@ -12,6 +12,7 @@ import { MEDIA_ITEM_PUBLIC_SELECT } from '../utils/select.js';
 import { HIDDEN_EXCLUSION, QUOTA_HOLDING_CONTRIBUTIONS } from '../utils/filters.js';
 import { COLLECTION_ITEM_ORDER_BY, getCollectionArchive } from './collections.service.js';
 import { listPublicEvents, recordEvent } from './collectionEvents.service.js';
+import { getWorkerStatus } from './workerStatus.service.js';
 
 /** 10 nanoid chars ≈ 60 bits of entropy, which is not brute-forcible. */
 const SLUG_LENGTH = 10;
@@ -258,13 +259,14 @@ export async function getSharedCollection(slug: string) {
     }
 
     // What a guest needs to know before picking files: how big each may be and
-    // how much room the link has left.
+    // how much room the link has left, and whether uploads are open at all.
     const { quotaBytes, maxFileBytes } = uploadLimits();
-    const { usedBytes } = (await uploadUsage([linkId])).get(linkId)!;
+    const [usage, { online: workerOnline }] = await Promise.all([uploadUsage([linkId]), getWorkerStatus()]);
+    const { usedBytes } = usage.get(linkId)!;
     return {
         ...collection,
         itemCount,
-        upload: { usedBytes, quotaBytes, maxFileBytes },
+        upload: { usedBytes, quotaBytes, maxFileBytes, workerOnline },
     };
 }
 

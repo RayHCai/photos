@@ -19,6 +19,8 @@ import type { SharedCollection } from '@/lib/types/share';
 /** Fewer than the library's uploader: a guest is often on a phone, on someone else's Wi-Fi. */
 const CONCURRENCY = 3;
 
+const UPLOADS_PAUSED = 'Uploads are paused right now. Try again later.';
+
 /** How often a running batch refreshes the album, so files appear as they finish. */
 const REFRESH_EVERY_MS = 4000;
 
@@ -98,9 +100,10 @@ function useGuestUploadQueue(slug: string) {
                 const message = errorMessage(err);
                 update(id, { status: 'failed', error: message });
 
-                // Out of space or too many waiting: everything still queued would
-                // be refused the same way, so say so once instead of N times.
-                if (err instanceof ApiError && (err.status === 413 || err.status === 429)) {
+                // Out of space, too many waiting, or the worker went away:
+                // everything still queued would be refused the same way, so say
+                // so once instead of N times.
+                if (err instanceof ApiError && (err.status === 413 || err.status === 429 || err.status === 503)) {
                     const refused = waiting.current.splice(0);
                     if (refused.length > 0) {
                         const ids = new Set(refused.map((q) => q.id));
@@ -111,13 +114,17 @@ function useGuestUploadQueue(slug: string) {
                         );
                     }
                     toast.error(message);
+                    // Refetch the link so the button greys out until uploads reopen.
+                    if (err.status === 503) {
+                        queryClient.invalidateQueries({ queryKey: ['share', slug, 'meta'] }).catch(() => undefined);
+                    }
                 }
             }
             finally {
                 controllers.current.delete(id);
             }
         },
-        [refreshAlbum, slug, update]
+        [queryClient, refreshAlbum, slug, update]
     );
 
     const pump = useCallback(() => {
@@ -194,6 +201,10 @@ export function GuestUpload({ slug, limits }: GuestUploadProps) {
 
     const pick = useCallback(
         (directory: boolean) => {
+            if (!limits.workerOnline) {
+                toast.error(UPLOADS_PAUSED);
+                return;
+            }
             if (remaining <= 0) {
                 toast.error('This link is out of upload space');
                 return;
@@ -243,12 +254,17 @@ export function GuestUpload({ slug, limits }: GuestUploadProps) {
             };
             input.click();
         },
-        [enqueue, limits.maxFileBytes, remaining]
+        [enqueue, limits.maxFileBytes, limits.workerOnline, remaining]
     );
 
     return (
         <>
-            <UploadMenu onUploadFiles={() => pick(false)} onUploadFolder={() => pick(true)} />
+            <UploadMenu
+                onUploadFiles={() => pick(false)}
+                onUploadFolder={() => pick(true)}
+                disabled={!limits.workerOnline}
+                disabledReason={UPLOADS_PAUSED}
+            />
             <GuestUploadPanel items={items} onRemove={remove} onDismiss={clearFinished} />
         </>
     );

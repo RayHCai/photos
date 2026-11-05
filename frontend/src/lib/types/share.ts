@@ -32,5 +32,7 @@ export interface SharedCollection {
         usedBytes: number;
         quotaBytes: number;
         maxFileBytes: number;
+        /** False while no worker is running; the server then refuses new uploads. */
+        workerOnline: boolean;
     };
 }

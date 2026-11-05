@@ -9,9 +9,18 @@ interface UploadMenuProps {
     onUploadFiles: () => void;
     onUploadFolder: () => void;
     className?: string;
+    /** Greys the button out; `disabledReason` becomes its tooltip. */
+    disabled?: boolean;
+    disabledReason?: string;
 }
 
-export function UploadMenu({ onUploadFiles, onUploadFolder, className }: UploadMenuProps) {
+export function UploadMenu({
+    onUploadFiles,
+    onUploadFolder,
+    className,
+    disabled = false,
+    disabledReason,
+}: UploadMenuProps) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
     const isMobile = useIsMobile();
@@ -42,10 +51,12 @@ export function UploadMenu({ onUploadFiles, onUploadFolder, className }: UploadM
             <IconButton
                 icon={Plus}
                 onClick={isMobile ? onUploadFiles : () => setOpen((o) => !o)}
-                title="Upload"
-                className="flex-shrink-0"
+                title={disabled ? disabledReason : 'Upload'}
+                aria-label="Upload"
+                disabled={disabled}
+                className="flex-shrink-0 disabled:opacity-40 disabled:pointer-events-none"
             />
-            {open && !isMobile && (
+            {open && !isMobile && !disabled && (
                 <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-stone-200 bg-white py-1 shadow-lg">
                     <button
                         className="flex w-full items-center gap-2 px-3 py-2 text-sm text-stone-700 hover:bg-stone-50 transition-colors"

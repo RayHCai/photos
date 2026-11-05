@@ -6,6 +6,7 @@ import * as s3Service from './s3.service.js';
 import * as queueService from './queue.service.js';
 import * as mediaService from './media.service.js';
 import * as shareService from './share.service.js';
+import * as workerStatusService from './workerStatus.service.js';
 import { invalidateCollectionTimelineCache } from './collections.service.js';
 import { recordEvent } from './collectionEvents.service.js';
 import { sendUploadDigestIfDue } from './uploadDigest.service.js';
@@ -112,6 +113,7 @@ function claimsFor(row: Contribution, uploadId?: string): ContributionClaims {
  */
 export async function presignGuestUpload(slug: string, file: GuestFile) {
     const link = await shareService.resolveUploadLink(slug);
+    await workerStatusService.assertWorkerOnline();
     const row = await reserveContribution(link, file);
 
     const presignedUrl = await s3Service.getPresignedUploadUrl(
@@ -130,6 +132,7 @@ export async function presignGuestUpload(slug: string, file: GuestFile) {
 
 export async function initGuestMultipart(slug: string, file: GuestFile) {
     const link = await shareService.resolveUploadLink(slug);
+    await workerStatusService.assertWorkerOnline();
     const row = await reserveContribution(link, file);
     const uploadId = await s3Service.initMultipartUpload(row.objectKey, file.mimeType);
     return { uploadToken: signContributionToken(claimsFor(row, uploadId)) };
