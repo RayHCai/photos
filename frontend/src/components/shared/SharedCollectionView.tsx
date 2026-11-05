@@ -85,45 +85,51 @@ export function SharedCollectionView({
 
     return (
         <div className="h-[100dvh] bg-stone-50 select-none flex flex-col">
-            <header className="relative z-30 bg-stone-50 px-6 py-4">
-                <h1 className="text-xl font-serif text-stone-900">
-                    {collection.name}
-                </h1>
-                <p className="text-xs text-stone-400 mt-1">
-                    {pluralize(collection.itemCount, 'item')}
-                </p>
-                {!selection.isSelecting && (
-                    <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                        {collection.upload && (
-                            <GuestUpload slug={slug} limits={collection.upload} />
-                        )}
-                        {collection.itemCount > 0 && (
+            {/* Laid out like the library's collection header: icons above the title on a phone. */}
+            <header className="relative z-30 bg-stone-50 flex flex-col md:flex-row md:items-center px-4 md:px-6 py-4">
+                <div className="hidden md:block flex-1" />
+                <div className="order-last md:order-none min-w-0 md:max-w-[60%] mt-2 md:mt-0 text-center">
+                    <h1 className="text-xl font-serif text-stone-900 truncate">
+                        {collection.name}
+                    </h1>
+                    <p className="text-xs text-stone-400 mt-1">
+                        {pluralize(collection.itemCount, 'item')}
+                    </p>
+                </div>
+                <div className="relative md:static md:flex-1 h-9 flex items-center justify-end gap-1">
+                    {!selection.isSelecting && (
+                        <>
+                            {collection.upload && (
+                                <GuestUpload slug={slug} limits={collection.upload} />
+                            )}
+                            {collection.itemCount > 0 && (
+                                <IconButton
+                                    icon={Download}
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={handleDownloadAll}
+                                    title="Download all"
+                                />
+                            )}
                             <IconButton
-                                icon={Download}
+                                icon={History}
                                 size="sm"
                                 variant="ghost"
-                                onClick={handleDownloadAll}
-                                title="Download all"
+                                onClick={() => setActivityOpen(true)}
+                                title="Activity"
                             />
-                        )}
-                        <IconButton
-                            icon={History}
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setActivityOpen(true)}
-                            title="Activity"
-                        />
-                    </div>
-                )}
-                <SelectionToolbar
-                    selection={selection}
-                    showDownload
-                    downloadUrlFn={downloadUrlFn}
-                    // A guest has no session, so the library's archive endpoint would
-                    // answer 401. There is no public equivalent, so a multi-file
-                    // download here stays a file-at-a-time fetch.
-                    archiveUrlFn={null}
-                />
+                        </>
+                    )}
+                    <SelectionToolbar
+                        selection={selection}
+                        showDownload
+                        downloadUrlFn={downloadUrlFn}
+                        // A guest has no session, so the library's archive endpoint would
+                        // answer 401. There is no public equivalent, so a multi-file
+                        // download here stays a file-at-a-time fetch.
+                        archiveUrlFn={null}
+                    />
+                </div>
             </header>
 
             <PhotoGallery
@@ -144,7 +150,7 @@ export function SharedCollectionView({
                 onSeekToIndex={windowed.seekToIndex}
             />
 
-            {/* Outside the header: its translate would contain the drawer's fixed position. */}
+            {/* Outside the header, so nothing in it can become the drawer's containing block. */}
             <SharedActivityPanel slug={slug} open={activityOpen} onClose={() => setActivityOpen(false)} />
         </div>
     );

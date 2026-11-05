@@ -98,10 +98,14 @@ export default function CollectionDetailPage() {
 
     return (
         <FileDropZone className="h-[100dvh] flex flex-col">
-            {/* Toolbar */}
-            <div className="relative flex items-center justify-between px-[30px] pt-3 pb-9">
-                <div className="flex-1" />
-                <div className="max-w-[60%] text-center">
+            {/*
+              * Toolbar. On a phone the icons take the top row beside the menu
+              * button and the title gets a row of its own beneath them: side by
+              * side, four icons ran into the title and pushed it off centre.
+              */}
+            <div className="relative flex flex-col md:flex-row md:items-center md:justify-between px-4 md:px-[30px] pt-4 md:pt-3 pb-5 md:pb-9">
+                <div className="hidden md:block flex-1" />
+                <div className="order-last md:order-none min-w-0 md:max-w-[60%] mt-2 md:mt-0 text-center">
                     <h1 className="text-xl font-serif text-stone-900 truncate">
                         {collection.name}
                     </h1>
@@ -110,7 +114,8 @@ export default function CollectionDetailPage() {
                         {pluralize(collection._count?.items ?? mediaItems.length, 'item')}
                     </p>
                 </div>
-                <div className="flex-1 flex items-center justify-end gap-2">
+                {/* Positioned on a phone so the selection toolbar centres on this row, not both. */}
+                <div className="relative md:static md:flex-1 h-9 flex items-center justify-end gap-2">
                     <SelectionToolbar
                         selection={selection}
                         showAddToCollection
