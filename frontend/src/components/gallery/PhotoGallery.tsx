@@ -172,7 +172,8 @@ export function PhotoGallery({
 
     return (
         <>
-            <div className="flex-1 min-h-0">
+            {/* No text selection: a drag or long press picked up the date headers. */}
+            <div className="flex-1 min-h-0 select-none">
                 <GalleryGrid
                     groups={groups}
                     onItemClick={handleItemClick}
