@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 interface VideoPlayerProps {
@@ -14,6 +14,27 @@ interface VideoPlayerProps {
 
 export function VideoPlayer({ src, poster, preload = 'metadata', rotation }: VideoPlayerProps) {
     const [failed, setFailed] = useState(false);
+    const videoRef = useRef<HTMLVideoElement>(null);
+
+    /**
+     * Start with sound, and fall back to muted only if the browser refuses.
+     *
+     * A static `autoPlay muted` left every video silent: on phones the volume
+     * buttons don't lift `muted`, only the small speaker icon does, so videos
+     * looked like they had no audio. Opening the lightbox is a click, which
+     * usually grants unmuted playback; when it doesn't, muted autoplay is still
+     * better than a frozen first frame.
+     */
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return;
+        video.muted = false;
+        video.play().catch((err: DOMException) => {
+            if (err.name !== 'NotAllowedError') return;
+            video.muted = true;
+            video.play().catch(() => {});
+        });
+    }, [src]);
 
     if (failed) {
         return (
@@ -37,13 +58,7 @@ export function VideoPlayer({ src, poster, preload = 'metadata', rotation }: Vid
              * and its navigation entirely.
              */
             playsInline
-            /**
-             * autoPlay only works when muted. iOS and Chrome both block unmuted
-             * autoplay, so the previous `autoPlay` with sound silently did nothing and
-             * the user pressed play manually every time.
-             */
-            autoPlay
-            muted
+            ref={videoRef}
             /**
              * A container the browser cannot decode (HEVC outside Safari, some
              * QuickTime) previously rendered as a permanently black rectangle with no
