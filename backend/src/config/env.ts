@@ -78,10 +78,6 @@ const envSchema = z.object({
      * first CORS origin, which is the app in every deployment so far.
      */
     APP_URL: optionalSetting(z.string().url()),
-    /** Total bytes one share link may hold across unreviewed and approved uploads. */
-    CONTRIBUTION_LINK_QUOTA_GB: z.coerce.number().positive().default(10),
-    /** Files one share link may have waiting for review at once. */
-    CONTRIBUTION_MAX_PENDING_PER_LINK: z.coerce.number().int().positive().default(2000),
     /**
      * Uploads arriving within this many minutes of the first un-notified one share
      * one email.

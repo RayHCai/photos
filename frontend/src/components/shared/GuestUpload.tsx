@@ -9,7 +9,6 @@ import { guestUploadEndpoints, uploadFile } from '@/lib/api/upload';
 import { ApiError } from '@/lib/api/client';
 import { FILE_INPUT_ACCEPT } from '@/lib/constants/mediaFormats';
 import { filterMediaFiles } from '@/lib/utils/mediaFiles';
-import { formatFileSize } from '@/lib/utils/format';
 import { pluralize } from '@/lib/utils/pluralize';
 import { IconButton } from '@/components/ui/IconButton';
 import { UploadMenu } from '@/components/upload/UploadMenu';
@@ -194,19 +193,10 @@ interface GuestUploadProps {
 export function GuestUpload({ slug, limits }: GuestUploadProps) {
     const { items, enqueue, remove, clearFinished } = useGuestUploadQueue(slug);
 
-    const inFlightBytes = items
-        .filter((i) => i.status === 'queued' || i.status === 'uploading' || i.status === 'retrying')
-        .reduce((sum, i) => sum + i.size, 0);
-    const remaining = Math.max(0, limits.quotaBytes - limits.usedBytes - inFlightBytes);
-
     const pick = useCallback(
         (directory: boolean) => {
             if (!limits.workerOnline) {
                 toast.error(UPLOADS_PAUSED);
-                return;
-            }
-            if (remaining <= 0) {
-                toast.error('This link is out of upload space');
                 return;
             }
 
@@ -220,18 +210,7 @@ export function GuestUpload({ slug, limits }: GuestUploadProps) {
                 if (chosen.length === 0) return;
 
                 const media = filterMediaFiles(chosen);
-                const fitting = media.filter((f) => f.size <= limits.maxFileBytes);
                 const skippedType = chosen.length - media.length;
-                const skippedSize = media.length - fitting.length;
-
-                // Whatever fits in the space left, in the order chosen.
-                let budget = remaining;
-                const accepted = fitting.filter((f) => {
-                    if (f.size > budget) return false;
-                    budget -= f.size;
-                    return true;
-                });
-                const skippedSpace = fitting.length - accepted.length;
 
                 if (media.length === 0) {
                     toast.info(
@@ -242,19 +221,12 @@ export function GuestUpload({ slug, limits }: GuestUploadProps) {
                     return;
                 }
                 if (skippedType > 0) toast.info(`Skipped ${pluralize(skippedType, 'unsupported file')}`);
-                if (skippedSize > 0) {
-                    toast.info(`Skipped ${pluralize(skippedSize, 'file')} over ${formatFileSize(limits.maxFileBytes)}`);
-                }
-                if (skippedSpace > 0) {
-                    toast.warning(`Only ${pluralize(accepted.length, 'file')} fit in the space left on this link`);
-                }
-                if (accepted.length === 0) return;
 
-                enqueue(accepted);
+                enqueue(media);
             };
             input.click();
         },
-        [enqueue, limits.maxFileBytes, limits.workerOnline, remaining]
+        [enqueue, limits.workerOnline]
     );
 
     return (

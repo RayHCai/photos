@@ -12,9 +12,8 @@ export interface ShareLinkBase {
 
 /** A share link as listed, with what its guests have uploaded so far. */
 export interface ShareLink extends ShareLinkBase {
-    /** Bytes held against the quota: unreviewed uploads plus approved ones. */
+    /** Bytes guests have uploaded: unreviewed uploads plus approved ones. */
     usedBytes: number;
-    quotaBytes: number;
     pendingCount: number;
 }
 
@@ -29,9 +28,6 @@ export interface SharedCollection {
     itemCount: number;
     /** Present when the link takes uploads (any of the owner's own albums). */
     upload?: {
-        usedBytes: number;
-        quotaBytes: number;
-        maxFileBytes: number;
         /** False while no worker is running; the server then refuses new uploads. */
         workerOnline: boolean;
     };

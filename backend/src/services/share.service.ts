@@ -1,6 +1,5 @@
 import { nanoid } from 'nanoid';
 import { prisma } from '../config/prisma.js';
-import { env } from '../config/env.js';
 import { redisConnection } from '../config/redis.js';
 import { AppError } from '../middleware/errorHandler.js';
 import * as s3Service from './s3.service.js';
@@ -29,14 +28,6 @@ function validateShareLink(link: { isActive: boolean; expiresAt: Date | null } |
     }
 }
 
-/** What a share link lets a guest upload into its album. */
-export function uploadLimits() {
-    return {
-        quotaBytes: Math.floor(env.CONTRIBUTION_LINK_QUOTA_GB * 1024 ** 3),
-        maxFileBytes: env.MAX_FILE_SIZE_MB * 1024 * 1024,
-        maxPending: env.CONTRIBUTION_MAX_PENDING_PER_LINK,
-    };
-}
 
 /**
  * Every link to one of the owner's own albums takes uploads. Favourites and
@@ -123,8 +114,7 @@ export async function listShareLinks(collectionId: string) {
     });
 
     const usage = await uploadUsage(links.map((l) => l.id));
-    const { quotaBytes } = uploadLimits();
-    return links.map((link) => ({ ...link, ...usage.get(link.id)!, quotaBytes }));
+    return links.map((link) => ({ ...link, ...usage.get(link.id)! }));
 }
 
 export async function revokeShareLink(linkId: string, opts: { undoOfId?: string } = {}) {
@@ -258,15 +248,12 @@ export async function getSharedCollection(slug: string) {
         return { ...collection, itemCount };
     }
 
-    // What a guest needs to know before picking files: how big each may be and
-    // how much room the link has left, and whether uploads are open at all.
-    const { quotaBytes, maxFileBytes } = uploadLimits();
-    const [usage, { online: workerOnline }] = await Promise.all([uploadUsage([linkId]), getWorkerStatus()]);
-    const { usedBytes } = usage.get(linkId)!;
+    // What a guest needs to know before picking files: whether uploads are open.
+    const { online: workerOnline } = await getWorkerStatus();
     return {
         ...collection,
         itemCount,
-        upload: { usedBytes, quotaBytes, maxFileBytes, workerOnline },
+        upload: { workerOnline },
     };
 }
 

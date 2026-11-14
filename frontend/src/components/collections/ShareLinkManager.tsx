@@ -21,7 +21,7 @@ interface ShareLinkManagerProps {
 function describeLink(link: ShareLink): string {
     const parts = [pluralize(link.viewCount, 'view')];
     if (link.usedBytes > 0) {
-        parts.push(`${formatFileSize(link.usedBytes)} of ${formatFileSize(link.quotaBytes)} uploaded`);
+        parts.push(`${formatFileSize(link.usedBytes)} uploaded`);
     }
     if (link.pendingCount > 0) parts.push(`${link.pendingCount} waiting`);
     return parts.join(' · ');

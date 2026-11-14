@@ -13,7 +13,6 @@ import { sendUploadDigestIfDue } from './uploadDigest.service.js';
 import { isEmailConfigured } from './email.service.js';
 import { logger } from '../utils/logger.js';
 import { fireAndForget } from '../utils/async.js';
-import { QUOTA_HOLDING_CONTRIBUTIONS } from '../utils/filters.js';
 import { cleanContributorName } from '../utils/contributorName.js';
 import {
     signContributionToken,
@@ -39,60 +38,24 @@ export interface GuestFile {
 
 type UploadLink = Awaited<ReturnType<typeof shareService.resolveUploadLink>>;
 
-const formatGb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(bytes % 1024 ** 3 ? 1 : 0)} GB`;
-
-/**
- * Reserve room for one guest upload and record it as UPLOADING.
- *
- * The space is taken at presign time, not at confirm, because the bytes land in
- * S3 in between: checking only at confirm would let a guest fire a hundred
- * presigns at once, each seeing the same headroom. The check and the insert run
- * under a per-link advisory lock for the same reason.
- */
+/** Record one guest upload as UPLOADING. Guests have no count or size limit. */
 async function reserveContribution(link: UploadLink, file: GuestFile): Promise<Contribution> {
-    const { quotaBytes, maxFileBytes, maxPending } = shareService.uploadLimits();
-
     mediaService.validateMimeType(file.mimeType);
-    if (file.fileSize > maxFileBytes) {
-        throw new AppError(413, `Files can be at most ${formatGb(maxFileBytes)}`);
-    }
 
     // Straight into originals/, carrying the pending tag like the library's own
     // uploads, so the item confirm creates can own it without a copy.
     const objectKey = s3Service.generateOriginalKey(safeExtension(file.fileName));
 
-    return prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`share-link-uploads:${link.linkId}`}))`;
-
-        const waiting = await tx.contribution.count({
-            where: {
-                shareLinkId: link.linkId,
-                OR: [{ status: 'UPLOADING' }, { status: 'PENDING', mediaItemId: { not: null } }],
-            },
-        });
-        if (waiting >= maxPending) {
-            throw new AppError(429, 'This album has too many uploads waiting for review. Try again later.');
-        }
-
-        const held = await tx.contribution.aggregate({
-            where: { shareLinkId: link.linkId, ...QUOTA_HOLDING_CONTRIBUTIONS },
-            _sum: { fileSize: true },
-        });
-        if (Number(held._sum.fileSize ?? 0) + file.fileSize > quotaBytes) {
-            throw new AppError(413, `This link is out of upload space (${formatGb(quotaBytes)} limit)`);
-        }
-
-        return tx.contribution.create({
-            data: {
-                shareLinkId: link.linkId,
-                collectionId: link.collectionId,
-                objectKey,
-                fileName: file.fileName,
-                mimeType: file.mimeType,
-                fileSize: file.fileSize,
-                contributorName: cleanContributorName(file.contributorName),
-            },
-        });
+    return prisma.contribution.create({
+        data: {
+            shareLinkId: link.linkId,
+            collectionId: link.collectionId,
+            objectKey,
+            fileName: file.fileName,
+            mimeType: file.mimeType,
+            fileSize: file.fileSize,
+            contributorName: cleanContributorName(file.contributorName),
+        },
     });
 }
 
