@@ -56,16 +56,6 @@ export const enqueuePending = bulkJobHandler(
     'enqueue all pending media',
 );
 
-export const backfillBlurHashes = bulkJobHandler(
-    () => mediaService.backfillBlurHashes(),
-    'blurhash backfill',
-);
-
-export const backfillAllMissingBlurHashes = bulkJobHandler(
-    () => mediaService.backfillAllMissingBlurHashes(),
-    'backfill ALL missing blurhashes',
-);
-
 export const fixOrphanedProcessing = bulkJobHandler(
     () => mediaService.fixOrphanedProcessing(),
     'fix orphaned PROCESSING items',
@@ -82,94 +72,6 @@ export const rerunMissingFaces = bulkJobHandler(
     () => mediaService.rerunMissingFaces(),
     'rerun missing faces',
 );
-
-export const backfillTranscoding = bulkJobHandler(
-    () => mediaService.backfillTranscoding(),
-    'transcode backfill',
-);
-
-export const backfillWebOptimized = bulkJobHandler(
-    () => mediaService.backfillWebOptimized(),
-    'web-optimized backfill',
-);
-
-export const backfillThumbnailLadder = bulkJobHandler(
-    () => mediaService.backfillThumbnailLadder(),
-    'thumbnail ladder backfill',
-);
-
-export const backfillThumbnailLadderVideos = bulkJobHandler(
-    () => mediaService.backfillThumbnailLadderVideos(),
-    'thumbnail ladder backfill (videos)',
-);
-
-export const backfillMetadata = bulkJobHandler(
-    () => mediaService.backfillMetadata(),
-    'metadata backfill',
-);
-
-/** Read-only: reports ladder coverage without enqueueing anything. */
-export const auditThumbnailLadders = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('thumbnail ladder audit requested');
-    const audit = await mediaService.auditThumbnailLadders();
-
-    // incompleteIds is the actionable payload for the backfill, not something the
-    // settings page renders — a library mid-repair could return thousands.
-    const { incompleteIds, ...counts } = audit;
-    res.json({ ...counts, incomplete: incompleteIds.length });
-});
-
-/**
- * Deliberately not a bulkJobHandler.
- *
- * The others have nothing to report at accept time, so they answer 202 and page
- * over the library detached. Here the audit *is* the answer — how many items are
- * actually broken — and reporting it is the whole reason to prefer this over the
- * unscoped backfill. So the listing is awaited (seconds: one round trip per
- * thousand objects) and only the enqueue runs detached.
- */
-export const backfillMissingThumbnailLadders = asyncHandler(
-    async (_req: Request, res: Response) => {
-        logger.info('missing thumbnail ladder backfill requested');
-        const audit = await mediaService.auditThumbnailLadders();
-
-        res.status(202).json({
-            status: 'accepted',
-            total: audit.total,
-            complete: audit.complete,
-            missingSome: audit.missingSome,
-            missingAll: audit.missingAll,
-            enqueued: audit.incompleteIds.length,
-        });
-
-        fireAndForget(
-            async () => {
-                const count = await mediaService.enqueueThumbnailLadders(audit.incompleteIds);
-                logger.info({ count }, 'missing thumbnail ladder backfill completed');
-            },
-            (err) => logger.error({ err }, 'missing thumbnail ladder backfill failed')
-        );
-    }
-);
-
-/**
- * Synchronous, unlike its neighbours, because it is a batched UPDATE over an
- * indexed `taken_at IS NULL` predicate rather than a job per row — there is nothing
- * to hand to the worker and nothing to poll for afterwards. Answering with the real
- * count is what makes the Settings button meaningful.
- */
-export const backfillTakenAt = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('taken_at backfill requested');
-    const count = await mediaService.backfillMissingTakenAt();
-    res.json({ count });
-});
-
-export const backfillGeocoding = asyncHandler(async (_req: Request, res: Response) => {
-    logger.info('geocode backfill requested');
-    await queueService.maintenanceQueue.add('geocode-backfill', { triggeredBy: 'manual' as const });
-    logger.info('geocode backfill job enqueued');
-    res.json({ status: 'enqueued' });
-});
 
 export const getStorageStats = asyncHandler(async (_req: Request, res: Response) => {
     const result = await prisma.mediaItem.aggregate({

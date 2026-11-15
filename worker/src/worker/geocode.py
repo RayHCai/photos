@@ -5,7 +5,6 @@ from typing import Any
 
 import httpx
 
-from worker import backend_client as api
 from worker.config import settings
 from worker.log import get_logger
 
@@ -125,38 +124,3 @@ async def _fetch(lat: float, lng: float) -> dict[str, Any]:
             response.raise_for_status()
             result: dict[str, Any] = response.json()
             return result
-
-
-async def run_geocode_backfill() -> dict[str, int]:
-    """Backfill city/country for media items with GPS but no location name."""
-    if not settings.geocoding_enabled:
-        logger.info("geocode_backfill_skipped", reason="geocoding_disabled")
-        return {"geocoded": 0, "total": 0}
-
-    items = await api.query_media_for_geocoding()
-    logger.info("geocode_backfill_start", total=len(items))
-
-    geocoded = 0
-    consecutive_failures = 0
-
-    for item in items:
-        city, country = await reverse_geocode(item["latitude"], item["longitude"])
-
-        if city or country:
-            await api.persist_geocoding(item["id"], city, country)
-            geocoded += 1
-            consecutive_failures = 0
-        else:
-            consecutive_failures += 1
-            # Give up rather than walking the whole library at 1 req/s against a
-            # provider that is clearly refusing us.
-            if consecutive_failures >= 10:
-                logger.warning(
-                    "geocode_backfill_aborted",
-                    reason="consecutive_failures",
-                    geocoded=geocoded,
-                )
-                break
-
-    logger.info("geocode_backfill_done", geocoded=geocoded, total=len(items))
-    return {"geocoded": geocoded, "total": len(items)}

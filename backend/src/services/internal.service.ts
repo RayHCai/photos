@@ -6,7 +6,6 @@ import * as s3Service from './s3.service.js';
 import { findOrThrow } from '../utils/db.js';
 import { toVectorLiteral } from '../utils/embeddings.js';
 import { logger } from '../utils/logger.js';
-import { invalidateSearchFacets } from './search.service.js';
 import { AppError } from '../middleware/errorHandler.js';
 import {
     WORKER_WRITABLE_PREFIXES,
@@ -510,43 +509,6 @@ export async function queryMediaItemsForRetry(filter: RetryFilter) {
         mimeType: r.mime_type,
         type: r.type,
     }));
-}
-
-// ─── Geocoding ──────────────────────────────────────────────
-
-export async function queryMediaForGeocoding() {
-    const items = await prisma.mediaItem.findMany({
-        where: {
-            latitude: { not: null },
-            longitude: { not: null },
-            city: null,
-        },
-        select: { id: true, latitude: true, longitude: true },
-    });
-    return items;
-}
-
-export async function persistGeocoding(
-    mediaItemId: string,
-    city: string | null,
-    country: string | null,
-) {
-    // New place names must become searchable, so the facet cache is stale.
-    await invalidateSearchFacets();
-
-    await prisma.$executeRaw`
-        UPDATE media_items SET
-            city = COALESCE(${city}, city),
-            country = COALESCE(${country}, country),
-            fts_document = CASE
-                WHEN fts_document IS NOT NULL THEN
-                    TRIM(fts_document || ' ' || COALESCE(${city}, '') || ' ' || COALESCE(${country}, ''))
-                ELSE
-                    TRIM(COALESCE(${city}, '') || ' ' || COALESCE(${country}, ''))
-            END,
-            updated_at = NOW()
-        WHERE id = ${mediaItemId}
-    `;
 }
 
 // ─── S3 Operations ───────────────────────────────────────────

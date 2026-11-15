@@ -23,11 +23,7 @@ interface CleanupSessionsJobData {
     maxAge: number;
 }
 
-interface GeocodeBackfillJobData {
-    triggeredBy: 'schedule' | 'manual';
-}
-
-type MaintenanceJobData = ReclusterJobData | CleanupSessionsJobData | GeocodeBackfillJobData;
+type MaintenanceJobData = ReclusterJobData | CleanupSessionsJobData;
 
 export const mediaQueue = new Queue<ProcessMediaJobData>('process-media', {
     connection: redisConnection,
@@ -111,7 +107,7 @@ export async function enqueueMediaProcessingBulk(items: ProcessMediaJobData[]) {
 }
 
 export async function enqueueMaintenance(
-    name: 'recluster' | 'geocode-backfill' | 'cleanup-sessions',
+    name: 'recluster' | 'cleanup-sessions',
     data: MaintenanceJobData
 ) {
     const job = await maintenanceQueue.add(name, data);

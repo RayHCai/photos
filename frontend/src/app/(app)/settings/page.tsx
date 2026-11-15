@@ -1,32 +1,20 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
     getStorageStats,
     getProcessingStats,
     enqueuePending,
     retryFailed,
-    backfillBlurHashes,
-    backfillAllBlurHashes,
     fixOrphanedProcessing,
     triggerRecluster,
     rerunMissingFaces,
-    backfillTranscoding,
-    backfillWebOptimized,
-    backfillThumbnailLadder,
-    backfillThumbnailLadderVideos,
-    backfillMissingThumbnailLadders,
-    auditThumbnailLadders,
-    backfillGeocoding,
-    backfillMetadata,
-    backfillTakenAt,
 } from '@/lib/api/jobs';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
 import { formatFileSize } from '@/lib/utils/format';
 import { pluralize } from '@/lib/utils/pluralize';
-import { invalidationsFor } from '@/lib/queries/keys';
 
 interface ActionButtonProps {
     label: string;
@@ -65,8 +53,6 @@ function ActionButton({ label, description, onClick }: ActionButtonProps) {
 }
 
 export default function SettingsPage() {
-    const queryClient = useQueryClient();
-
     const { data: storageStats, isLoading: storageLoading } = useQuery({
         queryKey: ['storage-stats'],
         queryFn: getStorageStats,
@@ -105,135 +91,11 @@ export default function SettingsPage() {
             },
         },
         {
-            label: 'Backfill Capture Dates',
-            description:
-                'Set the capture date to the upload date for any item that has none. Without one, a photo sorts behind the entire library and never reaches the gallery, even though it still shows up under People.',
-            onClick: async () => {
-                const { count } = await backfillTakenAt();
-                if (count === 0) {
-                    toast.success('No items were missing a capture date');
-                    return;
-                }
-                // Unlike the enqueue-style actions, this one has already changed the
-                // rows by the time it answers — so the cached gallery pages and
-                // timeline are stale right now, not eventually.
-                for (const key of invalidationsFor(['media-content'])) {
-                    queryClient.invalidateQueries({ queryKey: key }).catch(() => undefined);
-                }
-                toast.success(`Dated ${pluralize(count, 'item')}`);
-            },
-        },
-        {
-            label: 'Backfill Blur Hashes',
-            description: 'Generate blur hashes for completed items missing them',
-            onClick: async () => {
-                const { count } = await backfillBlurHashes();
-                toast.success(`Enqueued ${count} items for blur hash`);
-            },
-        },
-        {
-            label: 'Backfill All Blur Hashes',
-            description: 'Regenerate blur hashes for all items missing them',
-            onClick: async () => {
-                const { count } = await backfillAllBlurHashes();
-                toast.success(`Enqueued ${count} items for blur hash`);
-            },
-        },
-        {
             label: 'Re-run Missing Faces',
             description: 'Detect faces on all completed items that have no faces',
             onClick: async () => {
                 const { count } = await rerunMissingFaces();
                 toast.success(`Enqueued ${count} items for face detection`);
-            },
-        },
-        {
-            label: 'Generate Web Images',
-            description: 'Create web-optimized versions of all photos for faster lightbox viewing',
-            onClick: async () => {
-                const { count } = await backfillWebOptimized();
-                toast.success(`Enqueued ${count} photos for web optimization`);
-            },
-        },
-        {
-            label: 'Check Thumbnail Coverage',
-            description:
-                'Report how many items are missing responsive thumbnail sizes, without changing anything. Lists the bucket and compares it against the library, which takes a few seconds.',
-            onClick: async () => {
-                const audit = await auditThumbnailLadders();
-                if (audit.incomplete === 0) {
-                    toast.success(
-                        `All ${pluralize(audit.total, 'item')} have a complete thumbnail ladder`
-                    );
-                    return;
-                }
-                toast.warning(
-                    `${pluralize(audit.incomplete, 'item')} incomplete of ${audit.total}` +
-                        ` — ${audit.missingSome} partial, ${audit.missingAll} with no sizes at all`
-                );
-            },
-        },
-        {
-            label: 'Repair Missing Thumbnail Sizes',
-            description:
-                'Regenerate responsive sizes for only the items that are actually missing them. Prefer this over the two below: it re-encodes a handful of items instead of the whole library.',
-            onClick: async () => {
-                const audit = await backfillMissingThumbnailLadders();
-                if (audit.enqueued === 0) {
-                    toast.success(
-                        `Nothing to repair — all ${pluralize(audit.total, 'item')} are complete`
-                    );
-                    return;
-                }
-                toast.success(
-                    `Repairing ${pluralize(audit.enqueued, 'item')}` +
-                        ` (${audit.missingSome} partial, ${audit.missingAll} with no sizes at all)`
-                );
-            },
-        },
-        {
-            label: 'Backfill Thumbnail Ladder',
-            description:
-                'Regenerate responsive thumbnail sizes (200/400/800px) for all photos and videos. Re-enqueues every completed item — use the targeted repair above unless you want to force a full rebuild.',
-            onClick: async () => {
-                const { count } = await backfillThumbnailLadder();
-                toast.success(`Enqueued ${pluralize(count, 'item')} for thumbnail ladder`);
-            },
-        },
-        {
-            label: 'Backfill Thumbnail Ladder (Videos)',
-            description:
-                'The same job scoped to videos, which are the only items that ever shipped without a ladder. Slower per item than photos — each one is downloaded and a poster frame pulled with ffmpeg.',
-            onClick: async () => {
-                // No count in the toast: the bulk endpoints answer 202 the moment the
-                // job is accepted and page over the library afterwards, so there is no
-                // total to report yet. Watch the pending counter for progress.
-                await backfillThumbnailLadderVideos();
-                toast.success('Video thumbnail ladder backfill started');
-            },
-        },
-        {
-            label: 'Transcode Videos',
-            description: 'Convert all videos to web-optimized MP4 for faster streaming',
-            onClick: async () => {
-                const { count } = await backfillTranscoding();
-                toast.success(`Enqueued ${count} videos for transcoding`);
-            },
-        },
-        {
-            label: 'Re-extract Metadata',
-            description: 'Re-extract EXIF metadata (GPS, camera, dates) from originals for items missing location data',
-            onClick: async () => {
-                const { count } = await backfillMetadata();
-                toast.success(`Enqueued ${count} items for metadata extraction`);
-            },
-        },
-        {
-            label: 'Backfill Location Data',
-            description: 'Reverse geocode all media with GPS coordinates but no city/country',
-            onClick: async () => {
-                await backfillGeocoding();
-                toast.success('Geocoding backfill job enqueued');
             },
         },
         {
