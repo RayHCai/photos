@@ -10,7 +10,7 @@ import {
     type ReactNode,
 } from 'react';
 import { toast } from 'sonner';
-import { blocksAutomaticDownloads } from '@/lib/utils/platform';
+import { blocksAutomaticDownloads, canShareFiles, isIOS } from '@/lib/utils/platform';
 import {
     archiveDetail,
     archivePercent,
@@ -227,6 +227,42 @@ let gestureRequired: boolean | null = null;
 function requiresBrowserHandoff(): boolean {
     if (gestureRequired === null) gestureRequired = blocksAutomaticDownloads();
     return gestureRequired;
+}
+
+/** Cached for the same reason as requiresBrowserHandoff. */
+let shareSheetPreferred: boolean | null = null;
+/**
+ * iOS saves through the share sheet rather than as downloads. See isIOS for why
+ * downloads do not work there, and shareFiles for how the sheet is reached.
+ */
+function prefersShareSheet(): boolean {
+    if (shareSheetPreferred === null) shareSheetPreferred = isIOS() && canShareFiles();
+    return shareSheetPreferred;
+}
+
+/**
+ * Largest selection gathered for the share sheet. Every file is held in memory
+ * until the sheet takes it, and an iOS tab that runs out of memory is reloaded
+ * without warning. Past this a selection goes to the server's zip instead, where
+ * there is one.
+ */
+const SHARE_SHEET_MAX_FILES = 60;
+
+/**
+ * Hand files to the share sheet. Resolves true once shared (or the user closed
+ * the sheet, which is their decision rather than a failure) and false when there
+ * was no user activation to open it with, so the caller can ask for a tap.
+ */
+async function shareFiles(files: File[]): Promise<boolean> {
+    try {
+        await navigator.share({ files });
+        return true;
+    }
+    catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') return true;
+        if (err instanceof DOMException && err.name === 'NotAllowedError') return false;
+        throw err;
+    }
 }
 
 function deriveFileName(
@@ -641,6 +677,100 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     }, []);
 
     /**
+     * iOS: fetch the selection into memory, then give it to the share sheet, where
+     * "Save N Items" puts the whole batch in Photos with one tap.
+     *
+     * The sheet needs a user activation, and the tap that started this has usually
+     * expired by the time the fetches finish (always, for anything but a small
+     * photo). So it is tried at once, and if refused a toast offers a button whose
+     * tap is the activation. Files are fetched one at a time like the regular
+     * queue, which keeps a single in-flight body rather than N.
+     */
+    const shareToDevice = useCallback(async (requests: DownloadRequest[]) => {
+        if (!abortRef.current) abortRef.current = new AbortController();
+        const signal = abortRef.current.signal;
+        const entries = requests.map((request) => ({ key: crypto.randomUUID(), request }));
+        dispatch({
+            type: 'ADD',
+            kind: 'file',
+            items: entries.map((e) => ({
+                key: e.key,
+                fileName: e.request.fileName || 'Preparing…',
+            })),
+        });
+
+        const files: File[] = [];
+        const fetchedKeys: string[] = [];
+        const failedKeys = new Set<string>();
+        for (const { key, request } of entries) {
+            if (signal.aborted) break;
+            dispatch({ type: 'SET_DOWNLOADING', key });
+            try {
+                const { blob, fileName } = await fetchFile(
+                    request,
+                    (progress) => dispatch({ type: 'SET_PROGRESS', key, progress }),
+                    signal
+                );
+                dispatch({ type: 'SET_NAME', key, fileName });
+                files.push(new File([blob], fileName, { type: blob.type || 'application/octet-stream' }));
+                fetchedKeys.push(key);
+            }
+            catch (err: unknown) {
+                failedKeys.add(key);
+                dispatch({
+                    type: 'SET_FAILED',
+                    keys: [key],
+                    error: isAbort(err) ? 'Cancelled' : errorMessage(err, 'Download failed'),
+                });
+            }
+        }
+        if (signal.aborted) {
+            // cancelAll only knows about the shared queue, so this batch reports
+            // its own: what was already fetched and what never started.
+            const unfinished = entries
+                .map((e) => e.key)
+                .filter((k) => fetchedKeys.includes(k) || !failedKeys.has(k));
+            dispatch({ type: 'SET_FAILED', keys: unfinished, error: 'Cancelled' });
+            return;
+        }
+        if (files.length === 0) return;
+
+        const markSaved = () => {
+            for (const key of fetchedKeys) dispatch({ type: 'SET_COMPLETED', key });
+        };
+        const markFailed = (err: unknown) => dispatch({
+            type: 'SET_FAILED',
+            keys: fetchedKeys,
+            error: errorMessage(err, 'Could not open the share sheet'),
+        });
+
+        try {
+            if (await shareFiles(files)) {
+                markSaved();
+                return;
+            }
+        }
+        catch (err: unknown) {
+            markFailed(err);
+            return;
+        }
+
+        const label = files.length === 1 ? '1 item' : `${files.length} items`;
+        toast(`${label} ready to save`, {
+            duration: Infinity,
+            action: {
+                label: 'Save',
+                onClick: () => {
+                    shareFiles(files)
+                        .then((shared) => (shared ? markSaved() : markFailed(null)))
+                        .catch(markFailed);
+                },
+            },
+            cancel: { label: 'Discard', onClick: () => markFailed(new Error('Discarded')) },
+        });
+    }, []);
+
+    /**
      * Cancel every in-flight and queued download.
      *
      * There was no cancellation anywhere in this provider: `DownloadRequest` had no
@@ -757,6 +887,21 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
              * phone refuses outright and a desktop browser interrupts with a
              * permission prompt — and it is also N round trips where this is one.
              */
+            /**
+             * iOS before all of that: its downloads either open the file in a tab
+             * or land in Files after a prompt each, and a zip is no use to anyone
+             * who wanted the photos in Photos. Oversized selections still fall
+             * through to the zip where there is one, since the sheet holds every
+             * file in memory.
+             */
+            if (
+                prefersShareSheet()
+                && (requests.length <= SHARE_SHEET_MAX_FILES || !options.archiveUrl)
+            ) {
+                shareToDevice(requests).catch(() => undefined);
+                return;
+            }
+
             if (requests.length > 1 && options.archiveUrl) {
                 startArchive(requests.map((r) => r.id), options.archiveUrl);
                 return;
@@ -783,7 +928,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
             queueRef.current.push(...entries);
             processQueue();
         },
-        [processQueue, handOffToBrowser, startArchive]
+        [processQueue, handOffToBrowser, startArchive, shareToDevice]
     );
 
     const triggerArchive = useCallback(

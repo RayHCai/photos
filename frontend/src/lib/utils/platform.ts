@@ -55,3 +55,20 @@ export function isIOS(): boolean {
     return /iPhone|iPad|iPod/.test(ua) || isIpadOS;
 }
 
+/**
+ * True where the Web Share API accepts files, which on iOS is the share sheet:
+ * one tap saves a whole selection to Photos ("Save N Items"), or to Files.
+ */
+export function canShareFiles(): boolean {
+    if (typeof navigator === 'undefined' || typeof navigator.canShare !== 'function') {
+        return false;
+    }
+    try {
+        const probe = new File([new Uint8Array(1)], 'probe.jpg', { type: 'image/jpeg' });
+        return navigator.canShare({ files: [probe] });
+    }
+    catch {
+        return false;
+    }
+}
+
