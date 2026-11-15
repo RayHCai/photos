@@ -106,7 +106,12 @@ def generate_web_image(image: Image.Image) -> bytes:
     return result
 
 
-def _extract_frame(video_path: str, tmp_path: str, seek: str) -> None:
+def _extract_frame(video_path: str, tmp_path: str, seek: str) -> bool:
+    """Write one frame at `seek` to `tmp_path`; True if a frame was written.
+
+    ffmpeg exits 0 without writing anything when the seek lands past the last
+    frame (e.g. `-ss 1` on a ~1s clip), so the exit code alone can't be trusted.
+    """
     subprocess.run(
         [
             "ffmpeg",
@@ -121,6 +126,8 @@ def _extract_frame(video_path: str, tmp_path: str, seek: str) -> None:
         timeout=30,
         check=True,
     )
+    path = Path(tmp_path)
+    return path.exists() and path.stat().st_size > 0
 
 
 def extract_thumbnail_frame(video_path: str) -> Image.Image:
@@ -139,12 +146,16 @@ def extract_thumbnail_frame(video_path: str) -> Image.Image:
 
     try:
         try:
-            _extract_frame(video_path, tmp_path, "1")
+            extracted = _extract_frame(video_path, tmp_path, "1")
         except subprocess.CalledProcessError:
-            _extract_frame(video_path, tmp_path, "0")
+            extracted = False
+        if not extracted:
+            # Clips around a second long have no frame past 1s; take the first.
+            if not _extract_frame(video_path, tmp_path, "0"):
+                raise ValueError(f"ffmpeg produced no frame from {video_path}")
         with Image.open(tmp_path) as frame:
             return frame.copy()
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as exc:
         logger.warning("video_thumbnail_failed", error=str(exc))
         raise
     finally:
