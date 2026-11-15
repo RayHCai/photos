@@ -36,7 +36,7 @@ export default function GalleryPage() {
     } = useShellData();
     const [search, setSearch] = useState('');
     const selection = useMediaSelection();
-    const { openFilePicker, openFolderPicker, openFileBrowser } = useFilePicker();
+    const { openFilePicker, openFolderPicker } = useFilePicker();
     const { favoriteIds, toggleFavorite } = useFavorites();
     const { hideItems } = useHidden();
 
@@ -106,7 +106,6 @@ export default function GalleryPage() {
                 <UploadMenu
                     onUploadFiles={() => openFilePicker()}
                     onUploadFolder={() => openFolderPicker()}
-                    onBrowseFiles={() => openFileBrowser()}
                 />
             </div>
 

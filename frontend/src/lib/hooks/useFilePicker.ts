@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { useUpload } from './useUpload';
 import { filterMediaFiles } from '../utils/mediaFiles';
-import { BROWSE_FILES_ACCEPT, fileInputAccept } from '../constants/mediaFormats';
+import { fileInputAccept } from '../constants/mediaFormats';
 import { pluralize } from '../utils/pluralize';
 
 /**
@@ -24,11 +24,11 @@ export function useFilePicker() {
     const { addFiles } = useUpload();
 
     const pick = useCallback(
-        (options: { directory: boolean; browse?: boolean; collectionId?: string }) => {
+        (options: { directory: boolean; collectionId?: string }) => {
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
-            input.accept = options.browse ? BROWSE_FILES_ACCEPT : fileInputAccept();
+            input.accept = fileInputAccept();
             if (options.directory) input.setAttribute('webkitdirectory', '');
 
             input.onchange = () => {
@@ -74,12 +74,5 @@ export function useFilePicker() {
         [pick]
     );
 
-    /** The uncapped document picker; offered on Android only, see BROWSE_FILES_ACCEPT. */
-    const openFileBrowser = useCallback(
-        (collectionId?: string) =>
-            pick({ directory: false, browse: true, ...(collectionId ? { collectionId } : {}) }),
-        [pick]
-    );
-
-    return { openFilePicker, openFolderPicker, openFileBrowser };
+    return { openFilePicker, openFolderPicker };
 }
