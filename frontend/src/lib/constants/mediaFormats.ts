@@ -83,6 +83,18 @@ export function fileInputAccept(): string {
     return isIOS() ? IOS_FILE_INPUT_ACCEPT : FILE_INPUT_ACCEPT;
 }
 
+/**
+ * `accept` for the "Browse files" picker on Android, which exists to get past the
+ * Photo Picker's 100-item cap.
+ *
+ * Chrome on Android opens the Photo Picker only when every accepted type is an image
+ * or video type. Anything else, the any-type wildcard below included, sends it to the system document
+ * picker instead, which has no cap: the user can long-press and select a whole folder
+ * such as DCIM/Camera. What comes back is filtered by `filterMediaFiles` like every
+ * other selection, so non-media files are skipped rather than uploaded.
+ */
+export const BROWSE_FILES_ACCEPT = '*/*';
+
 export function normalizeExtension(value: string): string {
     return value.toLowerCase().replace(/^\./, '');
 }

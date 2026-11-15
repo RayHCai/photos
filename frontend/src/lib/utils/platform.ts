@@ -72,3 +72,15 @@ export function canShareFiles(): boolean {
     }
 }
 
+/**
+ * True on Android, every browser included.
+ *
+ * Android is the one platform whose photo picker caps a selection: Chrome hands an
+ * `accept` made only of image and video types to the system Photo Picker, which
+ * stops at `MediaStore.getPickImagesMaxLimit()` — 100 items — and a page cannot
+ * raise it. See BROWSE_FILES_ACCEPT for the way round.
+ */
+export function isAndroid(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    return /Android/i.test(navigator.userAgent);
+}

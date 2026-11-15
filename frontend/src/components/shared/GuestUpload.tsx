@@ -7,7 +7,7 @@ import { AlertCircle, Check, Loader2, RefreshCw, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { guestUploadEndpoints, uploadFile } from '@/lib/api/upload';
 import { ApiError } from '@/lib/api/client';
-import { fileInputAccept } from '@/lib/constants/mediaFormats';
+import { BROWSE_FILES_ACCEPT, fileInputAccept } from '@/lib/constants/mediaFormats';
 import { filterMediaFiles } from '@/lib/utils/mediaFiles';
 import { pluralize } from '@/lib/utils/pluralize';
 import { IconButton } from '@/components/ui/IconButton';
@@ -194,7 +194,7 @@ export function GuestUpload({ slug, limits }: GuestUploadProps) {
     const { items, enqueue, remove, clearFinished } = useGuestUploadQueue(slug);
 
     const pick = useCallback(
-        (directory: boolean) => {
+        (directory: boolean, browse = false) => {
             if (!limits.workerOnline) {
                 toast.error(UPLOADS_PAUSED);
                 return;
@@ -203,7 +203,7 @@ export function GuestUpload({ slug, limits }: GuestUploadProps) {
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
-            input.accept = fileInputAccept();
+            input.accept = browse ? BROWSE_FILES_ACCEPT : fileInputAccept();
             if (directory) input.setAttribute('webkitdirectory', '');
             input.onchange = () => {
                 const chosen = Array.from(input.files ?? []);
@@ -234,6 +234,7 @@ export function GuestUpload({ slug, limits }: GuestUploadProps) {
             <UploadMenu
                 onUploadFiles={() => pick(false)}
                 onUploadFolder={() => pick(true)}
+                onBrowseFiles={() => pick(false, true)}
                 disabled={!limits.workerOnline}
                 disabledReason={UPLOADS_PAUSED}
             />

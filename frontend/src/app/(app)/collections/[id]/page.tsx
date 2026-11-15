@@ -51,7 +51,7 @@ export default function CollectionDetailPage() {
     const selection = useMediaSelection();
     useEscapeKey(selection.clearSelection, selection.isSelecting);
     const removeItems = useRemoveCollectionItems();
-    const { openFilePicker, openFolderPicker } = useFilePicker();
+    const { openFilePicker, openFolderPicker, openFileBrowser } = useFilePicker();
     const { favoriteIds, addToFavorites, removeFromFavorites } = useFavorites();
     const { triggerArchive } = useDownload();
 
@@ -129,6 +129,7 @@ export default function CollectionDetailPage() {
                             <UploadMenu
                                 onUploadFiles={() => openFilePicker(id)}
                                 onUploadFolder={() => openFolderPicker(id)}
+                                onBrowseFiles={() => openFileBrowser(id)}
                             />
                             {(collection._count?.items ?? mediaItems.length) > 0 && (
                                 <Button
