@@ -7,7 +7,7 @@ import { AlertCircle, Check, Loader2, RefreshCw, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { guestUploadEndpoints, uploadFile } from '@/lib/api/upload';
 import { ApiError } from '@/lib/api/client';
-import { FILE_INPUT_ACCEPT } from '@/lib/constants/mediaFormats';
+import { fileInputAccept } from '@/lib/constants/mediaFormats';
 import { filterMediaFiles } from '@/lib/utils/mediaFiles';
 import { pluralize } from '@/lib/utils/pluralize';
 import { IconButton } from '@/components/ui/IconButton';
@@ -203,7 +203,7 @@ export function GuestUpload({ slug, limits }: GuestUploadProps) {
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
-            input.accept = FILE_INPUT_ACCEPT;
+            input.accept = fileInputAccept();
             if (directory) input.setAttribute('webkitdirectory', '');
             input.onchange = () => {
                 const chosen = Array.from(input.files ?? []);

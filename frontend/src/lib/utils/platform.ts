@@ -36,3 +36,22 @@ export function blocksAutomaticDownloads(): boolean {
     const isIpadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
     return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || isIpadOS;
 }
+
+/**
+ * True on iOS and iPadOS, every browser included: they are all WebKit underneath
+ * and share its download rules.
+ *
+ * Those rules are why iOS needs its own path. A new tab pointed at an attachment
+ * URL either renders the media in that tab (leaving the user to long-press and
+ * save it) or asks for permission per file and sends it to Files rather than
+ * Photos; and a page-initiated save after the first is refused outright, so a
+ * selection fetched file by file never arrives. The share sheet has none of
+ * those limits — see canShareFiles.
+ */
+export function isIOS(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent;
+    const isIpadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+    return /iPhone|iPad|iPod/.test(ua) || isIpadOS;
+}
+

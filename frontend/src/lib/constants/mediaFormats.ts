@@ -12,6 +12,8 @@
  * deriving both lists from it makes that class of drift impossible within this file.
  */
 
+import { isIOS } from '../utils/platform';
+
 interface FormatSpec {
     mime: string;
     /** All extensions that map to this MIME type, lowercase, without a dot. */
@@ -58,6 +60,28 @@ export const FILE_INPUT_ACCEPT = [
     ...SUPPORTED_MIME_TYPES,
     ...SUPPORTED_EXTENSIONS.map((ext) => `.${ext}`),
 ].join(',');
+
+/**
+ * `accept` for iOS and iPadOS, where the explicit list above is what keeps the photo
+ * picker on screen after the user taps Add.
+ *
+ * When `accept` names concrete types, WebKit treats them as the formats the page can
+ * take and converts the selection into one of them before `change` fires — HEIC
+ * photos to JPEG (it is listed first) and HEVC `.mov` videos to H.264 — and the
+ * picker stays open with a progress indicator until every file is converted. For a
+ * few videos that is minutes, where Android hands the originals over at once.
+ * Wildcards give WebKit nothing to convert towards, so it passes the originals
+ * through, which the backend accepts as-is (HEIC and QuickTime are both supported).
+ *
+ * Not used elsewhere: `image/*` alone leaves HEIC unselectable on some Android
+ * builds. The selection still goes through `filterMediaFiles` either way.
+ */
+const IOS_FILE_INPUT_ACCEPT = 'image/*,video/*';
+
+/** The `accept` value for this platform's file picker. */
+export function fileInputAccept(): string {
+    return isIOS() ? IOS_FILE_INPUT_ACCEPT : FILE_INPUT_ACCEPT;
+}
 
 export function normalizeExtension(value: string): string {
     return value.toLowerCase().replace(/^\./, '');

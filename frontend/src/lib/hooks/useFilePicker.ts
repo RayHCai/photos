@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { useUpload } from './useUpload';
 import { filterMediaFiles } from '../utils/mediaFiles';
-import { FILE_INPUT_ACCEPT } from '../constants/mediaFormats';
+import { fileInputAccept } from '../constants/mediaFormats';
 import { pluralize } from '../utils/pluralize';
 
 /**
@@ -28,7 +28,7 @@ export function useFilePicker() {
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
-            input.accept = FILE_INPUT_ACCEPT;
+            input.accept = fileInputAccept();
             if (options.directory) input.setAttribute('webkitdirectory', '');
 
             input.onchange = () => {
